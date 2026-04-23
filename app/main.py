@@ -4,7 +4,7 @@ import os
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -18,7 +18,7 @@ from .claude_analyst import analyze_with_claude, get_live_signal
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import save_live_state, load_live_state, clear_live_state, update_position
-from .sim_store import save_simulation, load_simulations as _load_sims
+from .sim_store import save_simulation, load_simulations as _load_sims, load_simulation_detail
 
 # ── Auth config ───────────────────────────────────────────────────────────────
 _SALT = "cpa_salt_bioval_2026"
@@ -70,6 +70,9 @@ async def _auto_resume():
         symbol=saved["symbol"],
         interval=saved["interval"],
         trade_amount_usdt=saved["trade_amount"],
+        strategy_name=saved.get("strategy_name", ""),
+        strategy_analysis=saved.get("strategy_analysis", ""),
+        strategy_patterns=saved.get("strategy_patterns", []),
     )
     valid = await BinanceTrader(req.api_key, req.api_secret).validate_keys()
     if not valid:
@@ -89,6 +92,9 @@ async def _auto_resume():
         "next_check_ts": None,
         "next_check_str": None,
         "candle_count": 0,
+        "strategy_name": req.strategy_name,
+        "strategy_analysis": req.strategy_analysis,
+        "strategy_patterns": req.strategy_patterns,
     })
     asyncio.create_task(_live_loop(req))
 
@@ -119,9 +125,12 @@ live_state: dict = {
     "log": [],
     "api_key": None,
     "api_secret": None,
-    "next_check_ts": None,    # Unix timestamp of next candle close check
-    "next_check_str": None,   # Human-readable
-    "candle_count": 0,        # How many candles analyzed so far
+    "next_check_ts": None,
+    "next_check_str": None,
+    "candle_count": 0,
+    "strategy_name": "",
+    "strategy_analysis": "",
+    "strategy_patterns": [],
 }
 
 
@@ -142,6 +151,9 @@ class LiveRequest(BaseModel):
     symbol: str = "BTCUSDC"
     interval: str = "4h"
     trade_amount_usdt: float = 50.0
+    strategy_name: str = ""
+    strategy_analysis: str = ""
+    strategy_patterns: List[str] = []
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -229,6 +241,14 @@ async def get_simulations():
     return {"simulations": _load_sims()}
 
 
+@app.get("/api/simulations/{sim_id}")
+async def get_simulation_detail(sim_id: str):
+    detail = load_simulation_detail(sim_id)
+    if detail is None:
+        raise HTTPException(404, "Simulation not found")
+    return detail
+
+
 @app.get("/api/simulate/chart-data")
 async def sim_chart_data():
     return {
@@ -249,6 +269,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
     if not valid:
         raise HTTPException(400, "Invalid Binance API keys")
 
+    strategy_note = f" | Strategie: {req.strategy_name}" if req.strategy_name else ""
     live_state.update({
         "running": True,
         "status": "active",
@@ -257,12 +278,15 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
         "interval": req.interval,
         "trade_amount": req.trade_amount_usdt,
         "signals": [],
-        "log": [f"Live Trading gestartet: {req.symbol} {req.interval}, ${req.trade_amount_usdt} pro Trade"],
+        "log": [f"Live Trading gestartet: {req.symbol} {req.interval}, ${req.trade_amount_usdt} pro Trade{strategy_note}"],
         "api_key": req.api_key,
         "api_secret": req.api_secret,
         "next_check_ts": None,
         "next_check_str": None,
         "candle_count": 0,
+        "strategy_name": req.strategy_name,
+        "strategy_analysis": req.strategy_analysis,
+        "strategy_patterns": req.strategy_patterns,
     })
     save_live_state({
         "was_running": True,
@@ -272,6 +296,9 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
         "interval": req.interval,
         "trade_amount": req.trade_amount_usdt,
         "position": "FLAT",
+        "strategy_name": req.strategy_name,
+        "strategy_analysis": req.strategy_analysis,
+        "strategy_patterns": req.strategy_patterns,
     })
     background_tasks.add_task(_live_loop, req)
     return {"ok": True}
@@ -377,8 +404,9 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
 
         if sim_state.get("best_result"):
             br = sim_state["best_result"]
-            save_simulation({
-                "id": f"sim_{int(time.time())}",
+            sim_id = f"sim_{int(time.time())}"
+            entry = {
+                "id": sim_id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "symbol": req.symbol,
                 "interval": req.interval,
@@ -392,9 +420,23 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
                 "total_fees_usdt": br.get("total_fees_usdt", 0),
                 "fee_drag_pct": br.get("fee_drag_pct", 0),
                 "strategy_name": br.get("strategy_name", "Unknown"),
+                "strategy_analysis": br.get("analysis", ""),
+                "strategy_patterns": br.get("patterns_found", []),
                 "profitable": br.get("profitable", False),
                 "iterations": sim_state.get("iteration", 0),
-            })
+            }
+            full_result = {
+                **br,
+                "id": sim_id,
+                "symbol": req.symbol,
+                "interval": req.interval,
+                "days": req.days,
+                "capital": req.initial_capital,
+                "fee_tier": req.fee_tier,
+                "candle_prices": sim_state.get("candle_prices", []),
+                "candle_timestamps": sim_state.get("candle_timestamps", []),
+            }
+            save_simulation(entry, full_result)
 
     except Exception as e:
         sim_state["status"] = "error"
@@ -470,6 +512,10 @@ async def _live_loop(req: LiveRequest):
                 interval=req.interval,
                 candles=enriched,
                 current_position=live_state["position"],
+                signal_history=live_state["signals"][-10:],
+                strategy_name=req.strategy_name,
+                strategy_analysis=req.strategy_analysis,
+                strategy_patterns=req.strategy_patterns,
             )
 
             action = signal.get("action", "HOLD")

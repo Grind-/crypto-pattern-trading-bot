@@ -118,6 +118,16 @@
 
   <!-- CHARTS TAB -->
   <section id="tab-charts" class="tab-content">
+    <div class="card sim-picker-bar">
+      <div class="sim-picker-row">
+        <label>Simulation:</label>
+        <select id="charts-sim-select" onchange="syncSimPicker('charts')">
+          <option value="">— Aktuelle Simulation —</option>
+        </select>
+        <button class="btn-tiny" onclick="loadSimIntoCharts()">Laden</button>
+        <button class="btn btn-primary btn-sm" onclick="setSimAsLiveStrategy()">★ Für Live wählen</button>
+      </div>
+    </div>
     <div class="card">
       <h2 id="chart-title">Preischart</h2>
       <div class="chart-wrap">
@@ -138,6 +148,16 @@
 
   <!-- TRADES TAB -->
   <section id="tab-trades" class="tab-content">
+    <div class="card sim-picker-bar">
+      <div class="sim-picker-row">
+        <label>Simulation:</label>
+        <select id="trades-sim-select" onchange="syncSimPicker('trades')">
+          <option value="">— Aktuelle Simulation —</option>
+        </select>
+        <button class="btn-tiny" onclick="loadSimIntoTrades()">Laden</button>
+        <button class="btn btn-primary btn-sm" onclick="setSimAsLiveStrategy()">★ Für Live wählen</button>
+      </div>
+    </div>
     <div class="card">
       <h2>Trade-Protokoll</h2>
       <div id="no-trades" class="empty-state">Starte eine Simulation, um Trades zu sehen.</div>
@@ -204,6 +224,15 @@
       <div class="btn-row">
         <button id="btn-live-start" class="btn btn-primary" onclick="startLive()">▶ Live Trading starten</button>
         <button id="btn-live-stop" class="btn btn-danger" onclick="stopLive()" disabled>■ Stopp</button>
+      </div>
+    </div>
+
+    <div class="card strategy-bar" id="live-strategy-bar" style="display:none">
+      <div class="strategy-bar-inner">
+        <span class="badge badge-green">★ Strategie aktiv</span>
+        <span id="live-strategy-name" style="font-weight:600;font-size:13px"></span>
+        <span id="live-strategy-detail" style="color:var(--text-muted);font-size:12px;flex:1"></span>
+        <button class="btn-tiny" onclick="clearLiveStrategy()">✕ Entfernen</button>
       </div>
     </div>
 

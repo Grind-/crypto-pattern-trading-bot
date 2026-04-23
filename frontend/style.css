@@ -242,6 +242,30 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
 .iter-name { flex: 1; font-size: 13px; }
 .iter-ret { font-weight: 700; min-width: 70px; text-align: right; }
 
+.sim-picker-bar { padding: 10px 14px; margin-bottom: 14px; }
+.sim-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sim-picker-row label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.sim-picker-row select { flex: 1; min-width: 180px; }
+.btn-sm { font-size: 12px !important; padding: 6px 14px !important; }
+
+.badge-green {
+  background: rgba(63,185,80,0.15);
+  border-color: var(--green);
+  color: var(--green);
+}
+.strategy-bar { padding: 10px 14px; }
+.strategy-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .sim-hist-entry {
   display: flex;
   align-items: center;

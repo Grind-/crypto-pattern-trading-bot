@@ -303,6 +303,8 @@ function clearLog() {
 // ── Live Trading ──────────────────────────────────────────────────────────────
 let livePolling = null;
 let lastLiveLogLen = 0;
+let selectedSimForLive = null; // strategy context for live trading
+let viewedSim = null;          // currently loaded sim detail
 
 async function startLive() {
   const body = {
@@ -311,6 +313,9 @@ async function startLive() {
     symbol: document.getElementById('live-symbol').value,
     interval: document.getElementById('live-interval').value,
     trade_amount_usdt: parseFloat(document.getElementById('live-amount').value),
+    strategy_name: selectedSimForLive?.strategy_name || '',
+    strategy_analysis: selectedSimForLive?.strategy_analysis || '',
+    strategy_patterns: selectedSimForLive?.strategy_patterns || [],
   };
   if (!body.api_key || !body.api_secret) { alert('Bitte API Key und Secret eingeben.'); return; }
 
@@ -402,13 +407,171 @@ async function logout() {
   window.location.href = '/login';
 }
 
-// ── Simulation history ────────────────────────────────────────────────────────
+// ── Simulation history & picker ───────────────────────────────────────────────
+
+let _simList = [];
 
 async function loadSimHistory() {
   try {
     const data = await fetch('/api/simulations').then(r => r.json());
-    renderSimHistory(data.simulations || []);
+    _simList = data.simulations || [];
+    renderSimHistory(_simList);
+    populateSimPickers(_simList);
   } catch (e) {}
+}
+
+function populateSimPickers(sims) {
+  const opts = ['<option value="">— Aktuelle Simulation —</option>',
+    ...sims.map(s => {
+      const ret = (s.total_return_pct || 0);
+      const sign = ret >= 0 ? '+' : '';
+      return `<option value="${s.id}">${s.symbol} ${s.interval} · ${sign}${ret.toFixed(2)}% · ${s.strategy_name || '?'}</option>`;
+    })
+  ].join('');
+  document.getElementById('charts-sim-select').innerHTML = opts;
+  document.getElementById('trades-sim-select').innerHTML = opts;
+}
+
+function syncSimPicker(source) {
+  const val = document.getElementById(source + '-sim-select').value;
+  const other = source === 'charts' ? 'trades' : 'charts';
+  document.getElementById(other + '-sim-select').value = val;
+}
+
+async function _loadSimDetail(id) {
+  if (!id) { viewedSim = null; return null; }
+  try {
+    const data = await fetch(`/api/simulations/${id}`).then(r => r.json());
+    viewedSim = data;
+    return data;
+  } catch (e) { return null; }
+}
+
+async function loadSimIntoCharts() {
+  const id = document.getElementById('charts-sim-select').value;
+  syncSimPicker('charts');
+  if (!id) return;
+  const sim = await _loadSimDetail(id);
+  if (!sim) return;
+
+  document.getElementById('chart-title').textContent = `${sim.symbol} ${sim.interval} — ${sim.strategy_name || 'Simulation'}`;
+
+  if (sim.candle_prices && sim.candle_prices.length > 0) {
+    chartPrices = sim.candle_prices;
+    chartTimestamps = sim.candle_timestamps || [];
+    const labels = chartTimestamps.map(ts => new Date(ts).toLocaleDateString('de-DE', { month: 'short', day: 'numeric' }));
+    priceChart.data.labels = labels;
+    priceChart.data.datasets[0].data = chartPrices;
+    priceChart.data.datasets[0].label = `Preis (${sim.symbol})`;
+
+    const buys = [], sells = [];
+    (sim.signals || []).forEach(s => {
+      const idx = s.candle_index;
+      if (idx >= 0 && idx < chartPrices.length) {
+        const pt = { x: idx, y: chartPrices[idx] };
+        if (s.action === 'BUY') buys.push(pt);
+        else if (s.action === 'SELL') sells.push(pt);
+      }
+    });
+    priceChart.data.datasets[1].data = buys;
+    priceChart.data.datasets[2].data = sells;
+    priceChart.update();
+  }
+
+  if (sim.portfolio_history && sim.portfolio_history.length > 0) {
+    const hist = sim.portfolio_history;
+    const startCapital = hist[0].value;
+    const startPrice = hist[0].close;
+    portfolioChart.data.labels = hist.map(h => new Date(h.timestamp).toLocaleDateString('de-DE', { month: 'short', day: 'numeric' }));
+    portfolioChart.data.datasets[0].data = hist.map(h => h.value);
+    portfolioChart.data.datasets[1].data = hist.map(h => startCapital * (h.close / startPrice));
+    portfolioChart.update();
+  }
+
+  // Also show iteration cards if available
+  if (sim.iteration) {
+    const iterList = document.getElementById('iterations-list');
+    const iterCards = document.getElementById('iter-cards');
+    iterCards.innerHTML = '';
+    iterList.style.display = 'block';
+    const card = document.createElement('div');
+    card.className = 'iter-card' + (sim.profitable ? ' profitable' : '');
+    const ret = sim.total_return_pct || 0;
+    card.innerHTML = `
+      <span class="iter-num">Iter. ${sim.iteration}</span>
+      <span class="iter-name">${sim.strategy_name || '?'}</span>
+      <span class="iter-ret" style="color:${ret >= 0 ? '#3fb950' : '#f85149'}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
+    `;
+    iterCards.appendChild(card);
+  }
+}
+
+async function loadSimIntoTrades() {
+  const id = document.getElementById('trades-sim-select').value;
+  syncSimPicker('trades');
+  if (!id) return;
+  const sim = await _loadSimDetail(id);
+  if (!sim) return;
+
+  const tbody = document.getElementById('trade-tbody');
+  tbody.innerHTML = '';
+  const trades = sim.trades || [];
+  if (trades.length === 0) {
+    document.getElementById('no-trades').style.display = 'block';
+    document.getElementById('trade-table-wrap').style.display = 'none';
+  } else {
+    document.getElementById('no-trades').style.display = 'none';
+    document.getElementById('trade-table-wrap').style.display = 'block';
+    trades.forEach((t, i) => {
+      const priceMov = t.price_move_pct != null ? t.price_move_pct : t.pnl_pct;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i + 1}</td>
+        <td>${t.buy_index}</td>
+        <td>${t.sell_index}</td>
+        <td>$${t.buy_price.toFixed(2)}</td>
+        <td>$${t.sell_price.toFixed(2)}</td>
+        <td class="${priceMov >= 0 ? 'pnl-pos' : 'pnl-neg'}">${priceMov >= 0 ? '+' : ''}${priceMov.toFixed(2)}%</td>
+        <td class="${t.pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg'}">${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(3)}%</td>
+        <td style="color:#d29922">$${(t.fees_total || 0).toFixed(3)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+}
+
+function setSimAsLiveStrategy() {
+  const id = document.getElementById('charts-sim-select').value || document.getElementById('trades-sim-select').value;
+  const sim = viewedSim || _simList.find(s => s.id === id);
+  if (!id || !sim) { alert('Bitte zuerst eine Simulation auswählen und laden.'); return; }
+  selectedSimForLive = {
+    id: sim.id,
+    symbol: sim.symbol,
+    interval: sim.interval,
+    strategy_name: sim.strategy_name || '',
+    strategy_analysis: sim.strategy_analysis || sim.analysis || '',
+    strategy_patterns: sim.strategy_patterns || sim.patterns_found || [],
+  };
+  switchTab('live');
+  updateLiveStrategyBar();
+  useSim(sim.symbol, sim.interval);
+}
+
+function clearLiveStrategy() {
+  selectedSimForLive = null;
+  document.getElementById('live-strategy-bar').style.display = 'none';
+}
+
+function updateLiveStrategyBar() {
+  if (!selectedSimForLive) {
+    document.getElementById('live-strategy-bar').style.display = 'none';
+    return;
+  }
+  document.getElementById('live-strategy-bar').style.display = 'block';
+  document.getElementById('live-strategy-name').textContent = selectedSimForLive.strategy_name || 'Strategie';
+  const patterns = (selectedSimForLive.strategy_patterns || []).join(', ');
+  document.getElementById('live-strategy-detail').textContent =
+    `${selectedSimForLive.symbol} ${selectedSimForLive.interval}${patterns ? ' · ' + patterns : ''}`;
 }
 
 function renderSimHistory(sims) {
@@ -423,19 +586,49 @@ function renderSimHistory(sims) {
     const date = new Date(s.created_at).toLocaleString('de-DE', {
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
     });
-    const symEsc = s.symbol.replace(/'/g, "\\'");
-    const intEsc = s.interval.replace(/'/g, "\\'");
     return `
-      <div class="sim-hist-entry">
+      <div class="sim-hist-entry" data-id="${s.id}">
         <div class="sim-hist-main">
           <span class="sim-hist-sym">${s.symbol} ${s.interval}</span>
           <span class="sim-hist-ret" style="color:${color}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
           <span class="sim-hist-strat">${s.strategy_name || '—'}</span>
           <span class="sim-hist-meta">${s.num_trades || 0} Trades · ${date}</span>
         </div>
-        <button class="btn-use-sim" onclick="useSim('${symEsc}','${intEsc}')">Verwenden</button>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn-tiny" onclick="viewSimInCharts('${s.id}')">Charts</button>
+          <button class="btn-use-sim" onclick="useSimForLive('${s.id}')">★ Für Live</button>
+        </div>
       </div>`;
   }).join('');
+}
+
+async function viewSimInCharts(id) {
+  document.getElementById('charts-sim-select').value = id;
+  document.getElementById('trades-sim-select').value = id;
+  await loadSimIntoCharts();
+  await loadSimIntoTrades();
+  switchTab('charts');
+}
+
+async function useSimForLive(id) {
+  const sim = _simList.find(s => s.id === id);
+  if (!sim) return;
+  // Load full detail to get analysis
+  const detail = await _loadSimDetail(id);
+  selectedSimForLive = {
+    id: sim.id,
+    symbol: sim.symbol,
+    interval: sim.interval,
+    strategy_name: sim.strategy_name || '',
+    strategy_analysis: (detail || sim).strategy_analysis || (detail || sim).analysis || '',
+    strategy_patterns: sim.strategy_patterns || (detail || sim).patterns_found || [],
+  };
+  useSim(sim.symbol, sim.interval);
+  updateLiveStrategyBar();
+  // Flash the strategy bar
+  const bar = document.getElementById('live-strategy-bar');
+  bar.style.outline = '2px solid #3fb950';
+  setTimeout(() => { bar.style.outline = ''; }, 1500);
 }
 
 function useSim(symbol, interval) {
@@ -445,8 +638,7 @@ function useSim(symbol, interval) {
   }
   sel.value = symbol;
   document.getElementById('live-interval').value = interval;
-  // Flash the form card to signal the selection was applied
-  const card = document.querySelector('#tab-live .card:not(.warning-card):not(#sim-history-card)');
+  const card = document.querySelector('#tab-live .card:not(.warning-card):not(#sim-history-card):not(#live-strategy-bar)');
   if (card) {
     card.style.outline = '2px solid #58a6ff';
     card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -466,7 +658,6 @@ function switchTab(name) {
 }
 
 async function initPage() {
-  // Restore live trading UI if trading was running before page reload
   try {
     const state = await fetch('/api/live/status').then(r => r.json());
     if (state.running) {
@@ -490,6 +681,18 @@ async function initPage() {
       if (state.next_check_ts) {
         startCountdown(state.next_check_ts);
         document.getElementById('live-next-str').textContent = state.next_check_str || '';
+      }
+
+      // Restore strategy bar if a strategy was active
+      if (state.strategy_name) {
+        selectedSimForLive = {
+          strategy_name: state.strategy_name,
+          strategy_analysis: state.strategy_analysis || '',
+          strategy_patterns: state.strategy_patterns || [],
+          symbol: state.symbol,
+          interval: state.interval,
+        };
+        updateLiveStrategyBar();
       }
 
       livePolling = setInterval(pollLive, 5000);

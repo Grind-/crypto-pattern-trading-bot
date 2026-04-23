@@ -135,15 +135,40 @@ async def get_live_signal(
     interval: str,
     candles: List[Dict],
     current_position: str,
+    signal_history: Optional[List[Dict]] = None,
+    strategy_name: str = "",
+    strategy_analysis: str = "",
+    strategy_patterns: Optional[List[str]] = None,
 ) -> Dict:
     data_str = _format_data(candles, max_rows=80)
     current_price = candles[-1]["close"] if candles else 0
 
+    strategy_block = ""
+    if strategy_name:
+        patterns_str = ", ".join(strategy_patterns) if strategy_patterns else "—"
+        strategy_block = f"""
+BACKTESTING-STRATEGIE (als Kontext für diese Session):
+- Strategie: {strategy_name}
+- Analyse: {strategy_analysis}
+- Muster: {patterns_str}
+
+"""
+
+    history_block = ""
+    if signal_history:
+        history_block = "EIGENE SIGNAL-HISTORIE DIESER SESSION (jüngste zuletzt):\n"
+        for i, s in enumerate(signal_history):
+            price_str = f"${s.get('price', 0):,.2f}" if s.get("price") else "?"
+            history_block += (
+                f"  {i+1}. {s.get('action','?')} @ {price_str} | "
+                f"Konfidenz: {s.get('confidence', 0)}% | {s.get('reason', '')[:80]}\n"
+            )
+        history_block += "\n"
+
     prompt = f"""You are a live cryptocurrency trading AI. Respond with valid raw JSON only.
 
 Analyze {symbol} {interval} data and give ONE trading signal.
-
-CURRENT PRICE: ${current_price:.2f}
+{strategy_block}{history_block}CURRENT PRICE: ${current_price:.2f}
 CURRENT POSITION: {current_position} (IN_POSITION = only SELL or HOLD; FLAT = only BUY or HOLD)
 
 RECENT DATA (last {len(candles)} candles):
