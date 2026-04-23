@@ -17,6 +17,7 @@ from .indicators import compute_indicators
 from .claude_analyst import analyze_with_claude, get_live_signal
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
+from .state_store import save_live_state, load_live_state, clear_live_state, update_position
 
 # ── Auth config ───────────────────────────────────────────────────────────────
 _SALT = "cpa_salt_bioval_2026"
@@ -54,6 +55,41 @@ class AuthMiddleware(BaseHTTPMiddleware):
 app = FastAPI(title="Crypto Pattern AI")
 app.add_middleware(AuthMiddleware)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+
+@app.on_event("startup")
+async def _auto_resume():
+    """Resume live trading after container restart if it was active."""
+    saved = load_live_state()
+    if not saved or not saved.get("was_running"):
+        return
+    req = LiveRequest(
+        api_key=saved["api_key"],
+        api_secret=saved["api_secret"],
+        symbol=saved["symbol"],
+        interval=saved["interval"],
+        trade_amount_usdt=saved["trade_amount"],
+    )
+    valid = await BinanceTrader(req.api_key, req.api_secret).validate_keys()
+    if not valid:
+        clear_live_state()
+        return
+    live_state.update({
+        "running": True,
+        "status": "active",
+        "position": saved.get("position", "FLAT"),
+        "symbol": req.symbol,
+        "interval": req.interval,
+        "trade_amount": req.trade_amount_usdt,
+        "signals": [],
+        "log": ["⟳ Live Trading nach Neustart wiederhergestellt"],
+        "api_key": req.api_key,
+        "api_secret": req.api_secret,
+        "next_check_ts": None,
+        "next_check_str": None,
+        "candle_count": 0,
+    })
+    asyncio.create_task(_live_loop(req))
 
 # ── Global state ──────────────────────────────────────────────────────────────
 
@@ -215,9 +251,21 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
         "interval": req.interval,
         "trade_amount": req.trade_amount_usdt,
         "signals": [],
-        "log": [f"Live trading started: {req.symbol} {req.interval}, ${req.trade_amount_usdt} per trade"],
+        "log": [f"Live Trading gestartet: {req.symbol} {req.interval}, ${req.trade_amount_usdt} pro Trade"],
         "api_key": req.api_key,
         "api_secret": req.api_secret,
+        "next_check_ts": None,
+        "next_check_str": None,
+        "candle_count": 0,
+    })
+    save_live_state({
+        "was_running": True,
+        "api_key": req.api_key,
+        "api_secret": req.api_secret,
+        "symbol": req.symbol,
+        "interval": req.interval,
+        "trade_amount": req.trade_amount_usdt,
+        "position": "FLAT",
     })
     background_tasks.add_task(_live_loop, req)
     return {"ok": True}
@@ -227,7 +275,8 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
 async def stop_live():
     live_state["running"] = False
     live_state["status"] = "stopped"
-    live_state["log"].append("Live trading stopped by user")
+    live_state["log"].append("Live Trading gestoppt")
+    clear_live_state()
     return {"ok": True}
 
 
@@ -418,6 +467,7 @@ async def _live_loop(req: LiveRequest):
                         quote_quantity=req.trade_amount_usdt,
                     )
                     live_state["position"] = "IN_POSITION"
+                    update_position("IN_POSITION")
                     _log(live_state, f"✅ KAUF ausgeführt — Order {order.get('orderId', '?')} @ ${price:,.2f}")
                 except Exception as e:
                     _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
@@ -432,6 +482,7 @@ async def _live_loop(req: LiveRequest):
                             symbol=req.symbol, side="SELL", quantity=qty,
                         )
                         live_state["position"] = "FLAT"
+                        update_position("FLAT")
                         _log(live_state, f"✅ VERKAUF ausgeführt — Order {order.get('orderId', '?')} @ ${price:,.2f}")
                     else:
                         _log(live_state, f"⚠ Kein {base_asset}-Guthaben zum Verkaufen")
@@ -453,9 +504,9 @@ async def _live_loop(req: LiveRequest):
     except Exception as e:
         live_state["status"] = "error"
         _log(live_state, f"FEHLER: {e}")
+        clear_live_state()
     finally:
         live_state["running"] = False
-        live_state["status"] = "stopped"
         live_state["next_check_ts"] = None
         live_state["next_check_str"] = None
         live_state["status"] = "stopped"

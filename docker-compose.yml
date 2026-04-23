@@ -23,6 +23,8 @@ services:
       - CLAUDE_PROXY_URL=http://claude-proxy:8081
       - BINANCE_API_KEY=${BINANCE_API_KEY:-}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
+    volumes:
+      - /opt/claude-platform/apps/claude-platform-sandbox/crypto-pattern-ai/data:/app/data
     depends_on:
       - claude-proxy
     networks:
