@@ -44,7 +44,7 @@ async def analyze(req: PromptRequest):
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Claude CLI timed out")
 

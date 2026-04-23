@@ -37,8 +37,8 @@ def _format_data(candles: List[Dict], max_rows: int = 160) -> str:
     return "\n".join(rows)
 
 
-async def _call_proxy(system: str, prompt: str, timeout: int = 120) -> Dict:
-    async with httpx.AsyncClient(timeout=timeout) as client:
+async def _call_proxy(system: str, prompt: str, timeout: int = 270) -> Dict:
+    async with httpx.AsyncClient(timeout=timeout + 30) as client:
         r = await client.post(
             f"{PROXY_URL}/analyze",
             json={"system": system, "prompt": prompt},
@@ -68,7 +68,7 @@ async def analyze_with_claude(
     end_price = candles[-1]["close"] if candles else 0
     period_pct = ((end_price - start_price) / start_price * 100) if start_price else 0
 
-    data_str = _format_data(candles)
+    data_str = _format_data(candles, max_rows=80)
 
     feedback_block = ""
     if feedback:
@@ -127,7 +127,7 @@ Respond with ONLY raw JSON (no markdown, no code fences):
   "confidence": 70
 }}"""
 
-    return await _call_proxy("", prompt, timeout=120)
+    return await _call_proxy("", prompt, timeout=270)
 
 
 async def get_live_signal(
