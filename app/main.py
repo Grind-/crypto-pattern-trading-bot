@@ -18,6 +18,7 @@ from .claude_analyst import analyze_with_claude, get_live_signal
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import save_live_state, load_live_state, clear_live_state, update_position
+from .sim_store import save_simulation, load_simulations as _load_sims
 
 # ── Auth config ───────────────────────────────────────────────────────────────
 _SALT = "cpa_salt_bioval_2026"
@@ -223,6 +224,11 @@ async def sim_status():
     return {k: v for k, v in sim_state.items() if k not in ("candle_prices", "candle_timestamps")}
 
 
+@app.get("/api/simulations")
+async def get_simulations():
+    return {"simulations": _load_sims()}
+
+
 @app.get("/api/simulate/chart-data")
 async def sim_chart_data():
     return {
@@ -368,6 +374,27 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
         if sim_state["status"] not in ("profitable", "stopped"):
             sim_state["status"] = "completed"
             _log(sim_state, f"\n✓ Simulation complete. Best return: {best_return:+.2f}%")
+
+        if sim_state.get("best_result"):
+            br = sim_state["best_result"]
+            save_simulation({
+                "id": f"sim_{int(time.time())}",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "symbol": req.symbol,
+                "interval": req.interval,
+                "days": req.days,
+                "capital": req.initial_capital,
+                "fee_tier": req.fee_tier,
+                "total_return_pct": br.get("total_return_pct", 0),
+                "win_rate": br.get("win_rate", 0),
+                "num_trades": br.get("num_trades", 0),
+                "max_drawdown": br.get("max_drawdown", 0),
+                "total_fees_usdt": br.get("total_fees_usdt", 0),
+                "fee_drag_pct": br.get("fee_drag_pct", 0),
+                "strategy_name": br.get("strategy_name", "Unknown"),
+                "profitable": br.get("profitable", False),
+                "iterations": sim_state.get("iteration", 0),
+            })
 
     except Exception as e:
         sim_state["status"] = "error"

@@ -242,7 +242,39 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
 .iter-name { flex: 1; font-size: 13px; }
 .iter-ret { font-weight: 700; min-width: 70px; text-align: right; }
 
+.sim-hist-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+}
+.sim-hist-entry:last-child { margin-bottom: 0; }
+.sim-hist-main { flex: 1; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.sim-hist-sym { font-weight: 600; font-size: 13px; min-width: 110px; }
+.sim-hist-ret { font-weight: 700; font-size: 14px; min-width: 70px; }
+.sim-hist-strat { flex: 1; color: var(--text-muted); font-size: 12px; min-width: 120px; }
+.sim-hist-meta { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.btn-use-sim {
+  background: var(--blue);
+  color: #0d1117;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-use-sim:hover { opacity: 0.85; }
+
 @media (max-width: 500px) {
   .metrics-row { grid-template-columns: repeat(3, 1fr); }
   .tab { padding: 10px 14px; font-size: 12px; }
+  .sim-hist-entry { flex-direction: column; align-items: flex-start; }
+  .btn-use-sim { width: 100%; text-align: center; }
 }

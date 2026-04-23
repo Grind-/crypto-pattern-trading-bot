@@ -121,6 +121,7 @@ async function pollStatus() {
     polling = null;
     document.getElementById('btn-start').disabled = false;
     document.getElementById('btn-stop').disabled = true;
+    loadSimHistory();
   }
 }
 
@@ -401,9 +402,108 @@ async function logout() {
   window.location.href = '/login';
 }
 
+// ── Simulation history ────────────────────────────────────────────────────────
+
+async function loadSimHistory() {
+  try {
+    const data = await fetch('/api/simulations').then(r => r.json());
+    renderSimHistory(data.simulations || []);
+  } catch (e) {}
+}
+
+function renderSimHistory(sims) {
+  const list = document.getElementById('sim-history-list');
+  if (!sims || sims.length === 0) {
+    list.innerHTML = '<div class="empty-state">Noch keine Simulationen gespeichert.</div>';
+    return;
+  }
+  list.innerHTML = sims.map(s => {
+    const ret = s.total_return_pct || 0;
+    const color = ret >= 0 ? '#3fb950' : '#f85149';
+    const date = new Date(s.created_at).toLocaleString('de-DE', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+    });
+    const symEsc = s.symbol.replace(/'/g, "\\'");
+    const intEsc = s.interval.replace(/'/g, "\\'");
+    return `
+      <div class="sim-hist-entry">
+        <div class="sim-hist-main">
+          <span class="sim-hist-sym">${s.symbol} ${s.interval}</span>
+          <span class="sim-hist-ret" style="color:${color}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
+          <span class="sim-hist-strat">${s.strategy_name || '—'}</span>
+          <span class="sim-hist-meta">${s.num_trades || 0} Trades · ${date}</span>
+        </div>
+        <button class="btn-use-sim" onclick="useSim('${symEsc}','${intEsc}')">Verwenden</button>
+      </div>`;
+  }).join('');
+}
+
+function useSim(symbol, interval) {
+  const sel = document.getElementById('live-symbol');
+  if (![...sel.options].some(o => o.value === symbol)) {
+    sel.insertAdjacentHTML('beforeend', `<option value="${symbol}">${symbol}</option>`);
+  }
+  sel.value = symbol;
+  document.getElementById('live-interval').value = interval;
+  // Flash the form card to signal the selection was applied
+  const card = document.querySelector('#tab-live .card:not(.warning-card):not(#sim-history-card)');
+  if (card) {
+    card.style.outline = '2px solid #58a6ff';
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setTimeout(() => { card.style.outline = ''; }, 1500);
+  }
+}
+
+// ── Page init ─────────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
+  const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+  if (btn) btn.classList.add('active');
+  const sec = document.getElementById(`tab-${name}`);
+  if (sec) sec.classList.add('active');
+}
+
+async function initPage() {
+  // Restore live trading UI if trading was running before page reload
+  try {
+    const state = await fetch('/api/live/status').then(r => r.json());
+    if (state.running) {
+      switchTab('live');
+      document.getElementById('live-status-card').style.display = 'block';
+      document.getElementById('btn-live-start').disabled = true;
+      document.getElementById('btn-live-stop').disabled = false;
+
+      document.getElementById('live-status-text').textContent = state.status || 'active';
+      const posBadge = document.getElementById('live-position-badge');
+      posBadge.textContent = state.position || 'FLAT';
+      posBadge.style.color = state.position === 'IN_POSITION' ? '#3fb950' : '#8b949e';
+
+      if (state.log && state.log.length > 0) {
+        const box = document.getElementById('live-log-box');
+        state.log.forEach(line => { box.textContent += line + '\n'; });
+        box.scrollTop = box.scrollHeight;
+        lastLiveLogLen = state.log.length;
+      }
+
+      if (state.next_check_ts) {
+        startCountdown(state.next_check_ts);
+        document.getElementById('live-next-str').textContent = state.next_check_str || '';
+      }
+
+      livePolling = setInterval(pollLive, 5000);
+    }
+  } catch (e) {}
+
+  loadSimHistory();
+}
+
 // Load symbols on startup
 fetch('/api/symbols').then(r => r.json()).then(data => {
   const sel = document.getElementById('symbol');
   const current = sel.value;
   sel.innerHTML = data.symbols.map(s => `<option${s === current ? ' selected' : ''}>${s}</option>`).join('');
 }).catch(() => {});
+
+initPage();
