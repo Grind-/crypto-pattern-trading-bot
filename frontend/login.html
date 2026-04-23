@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Pattern AI — Login</title>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --blue: #58a6ff;
+      --red: #f85149; --green: #3fb950;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 40px 36px; width: 100%; max-width: 380px;
+    }
+    .logo { font-size: 22px; font-weight: 700; color: var(--blue); margin-bottom: 6px; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 32px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+    input {
+      width: 100%; background: #0d1117; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 10px 12px;
+      font-size: 14px; margin-bottom: 16px;
+    }
+    input:focus { outline: none; border-color: var(--blue); }
+    button {
+      width: 100%; background: var(--blue); color: #0d1117;
+      border: none; border-radius: 6px; padding: 11px;
+      font-size: 14px; font-weight: 700; cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+    .error {
+      background: rgba(248,81,73,0.1); border: 1px solid var(--red);
+      color: var(--red); border-radius: 6px; padding: 10px 12px;
+      font-size: 13px; margin-bottom: 16px; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">⬡ Crypto Pattern AI</div>
+    <div class="subtitle">Bitte anmelden um fortzufahren</div>
+    <div class="error" id="err">Ungültiger Benutzername oder Passwort.</div>
+    <form id="form">
+      <label>Benutzername</label>
+      <input id="username" type="text" autocomplete="username" placeholder="admin" />
+      <label>Passwort</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+      <button type="submit">Anmelden</button>
+    </form>
+  </div>
+  <script>
+    document.getElementById('form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const res = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('username').value,
+          password: document.getElementById('password').value,
+        }),
+      });
+      if (res.ok) {
+        window.location.href = '/';
+      } else {
+        document.getElementById('err').style.display = 'block';
+      }
+    });
+    // Auto-focus
+    document.getElementById('username').focus();
+  </script>
+</body>
+</html>

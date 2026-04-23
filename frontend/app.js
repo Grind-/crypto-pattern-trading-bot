@@ -1,0 +1,409 @@
+'use strict';
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Chart instances ───────────────────────────────────────────────────────────
+let priceChart = null;
+let portfolioChart = null;
+
+function mkChart(id, type, data, options) {
+  const ctx = document.getElementById(id).getContext('2d');
+  return new Chart(ctx, { type, data, options });
+}
+
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false,
+  plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } },
+  scales: {
+    x: { ticks: { color: '#8b949e', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: '#21262d' } },
+    y: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } },
+  },
+};
+
+function initCharts() {
+  if (priceChart) priceChart.destroy();
+  if (portfolioChart) portfolioChart.destroy();
+
+  priceChart = mkChart('price-chart', 'line', {
+    labels: [],
+    datasets: [
+      { label: 'Preis (USDT)', data: [], borderColor: '#58a6ff', borderWidth: 1.5, pointRadius: 0, tension: 0.1 },
+      { label: 'BUY', data: [], type: 'scatter', pointBackgroundColor: '#3fb950', pointRadius: 6, pointStyle: 'triangle' },
+      { label: 'SELL', data: [], type: 'scatter', pointBackgroundColor: '#f85149', pointRadius: 6, pointStyle: 'triangle' },
+    ],
+  }, { ...chartDefaults });
+
+  portfolioChart = mkChart('portfolio-chart', 'line', {
+    labels: [],
+    datasets: [
+      { label: 'Portfolio (USDT)', data: [], borderColor: '#bc8cff', borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: 'rgba(188,140,255,0.07)', tension: 0.1 },
+      { label: 'Buy & Hold', data: [], borderColor: '#d29922', borderWidth: 1, borderDash: [4, 3], pointRadius: 0, tension: 0.1 },
+    ],
+  }, { ...chartDefaults });
+}
+
+initCharts();
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let polling = null;
+let lastLogLen = 0;
+let lastResultCount = 0;
+let bestResult = null;
+let chartPrices = [];
+let chartTimestamps = [];
+
+// ── Simulation ────────────────────────────────────────────────────────────────
+async function startSim() {
+  const body = {
+    symbol: document.getElementById('symbol').value,
+    interval: document.getElementById('interval').value,
+    days: parseInt(document.getElementById('days').value),
+    initial_capital: parseFloat(document.getElementById('capital').value),
+    max_iterations: parseInt(document.getElementById('iterations').value),
+    fee_tier: document.getElementById('fee-tier').value,
+  };
+
+  lastLogLen = 0;
+  lastResultCount = 0;
+  bestResult = null;
+  chartPrices = [];
+  chartTimestamps = [];
+  initCharts();
+  document.getElementById('log-box').textContent = '';
+  document.getElementById('trade-tbody').innerHTML = '';
+  document.getElementById('trade-table-wrap').style.display = 'none';
+  document.getElementById('no-trades').style.display = 'block';
+  document.getElementById('iter-cards').innerHTML = '';
+  document.getElementById('iterations-list').style.display = 'none';
+  document.getElementById('metrics-row').style.display = 'none';
+  document.getElementById('analysis-box').style.display = 'none';
+  document.getElementById('status-card').style.display = 'block';
+
+  const r = await fetch('/api/simulate/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { alert('Fehler: ' + (await r.text())); return; }
+
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  document.getElementById('chart-title').textContent = body.symbol + ' Preischart';
+
+  polling = setInterval(pollStatus, 2000);
+}
+
+async function stopSim() {
+  await fetch('/api/simulate/stop', { method: 'POST' });
+  clearInterval(polling);
+  polling = null;
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+}
+
+async function pollStatus() {
+  const [statusRes, chartRes] = await Promise.all([
+    fetch('/api/simulate/status').then(r => r.json()),
+    fetch('/api/simulate/chart-data').then(r => r.json()),
+  ]);
+
+  updateStatusUI(statusRes);
+  updateCharts(chartRes);
+
+  if (!statusRes.running && polling) {
+    clearInterval(polling);
+    polling = null;
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-stop').disabled = true;
+  }
+}
+
+function updateStatusUI(state) {
+  const statusEl = document.getElementById('status-text');
+  const pulseEl = document.getElementById('pulse');
+  const badgeEl = document.getElementById('iteration-badge');
+
+  const statusMap = {
+    idle: 'Bereit',
+    starting: 'Starte…',
+    fetching: 'Lade Kursdaten…',
+    computing_indicators: 'Berechne Indikatoren…',
+    profitable: '✅ Profitable Strategie gefunden!',
+    completed: 'Abgeschlossen',
+    stopped: 'Gestoppt',
+    error: '❌ Fehler',
+  };
+
+  let label = statusMap[state.status] || state.status.replace(/_/g, ' ');
+  statusEl.textContent = label;
+  pulseEl.style.background = state.status === 'profitable' ? '#3fb950' : state.running ? '#58a6ff' : '#8b949e';
+
+  if (state.iteration > 0) {
+    badgeEl.textContent = `Iteration ${state.iteration} / ${state.max_iterations}`;
+  }
+
+  // Append new log lines
+  const log = state.log || [];
+  if (log.length > lastLogLen) {
+    const box = document.getElementById('log-box');
+    const newLines = log.slice(lastLogLen);
+    newLines.forEach(line => {
+      const span = document.createElement('span');
+      if (line.startsWith('✅') || line.includes('PROFITABLE')) span.className = 'log-ok';
+      else if (line.startsWith('❌') || line.startsWith('ERROR')) span.className = 'log-err';
+      else if (line.startsWith('\n────') || line.startsWith('──')) span.className = 'log-head';
+      span.textContent = line + '\n';
+      box.appendChild(span);
+    });
+    box.scrollTop = box.scrollHeight;
+    lastLogLen = log.length;
+  }
+}
+
+function updateCharts(data) {
+  if (data.prices && data.prices.length > chartPrices.length) {
+    chartPrices = data.prices;
+    chartTimestamps = data.timestamps;
+    const labels = chartTimestamps.map(ts => {
+      const d = new Date(ts);
+      return d.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' });
+    });
+    priceChart.data.labels = labels;
+    priceChart.data.datasets[0].data = chartPrices;
+    priceChart.update();
+  }
+
+  const results = data.results || [];
+  if (results.length > lastResultCount) {
+    const newResults = results.slice(lastResultCount);
+    newResults.forEach(result => addIterationResult(result));
+    lastResultCount = results.length;
+  }
+
+  if (data.best_result && data.best_result !== bestResult) {
+    bestResult = data.best_result;
+    showBestResult(bestResult);
+  }
+}
+
+function addIterationResult(result) {
+  const profitable = result.total_return_pct > 0;
+  const ret = result.total_return_pct;
+
+  // Iteration card
+  const iterList = document.getElementById('iterations-list');
+  const iterCards = document.getElementById('iter-cards');
+  iterList.style.display = 'block';
+
+  const card = document.createElement('div');
+  card.className = 'iter-card' + (profitable ? ' profitable' : '');
+  card.innerHTML = `
+    <span class="iter-num">Iter. ${result.iteration}</span>
+    <span class="iter-name">${result.strategy_name}</span>
+    <span class="iter-ret" style="color:${profitable ? '#3fb950' : '#f85149'}">${ret > 0 ? '+' : ''}${ret.toFixed(2)}%</span>
+  `;
+  card.addEventListener('click', () => showIterResult(result));
+  iterCards.appendChild(card);
+
+  // Add trades to table
+  if (result.trades && result.trades.length > 0) {
+    const tbody = document.getElementById('trade-tbody');
+    document.getElementById('no-trades').style.display = 'none';
+    document.getElementById('trade-table-wrap').style.display = 'block';
+    result.trades.forEach((t, i) => {
+      const tr = document.createElement('tr');
+      const priceMov = t.price_move_pct != null ? t.price_move_pct : t.pnl_pct;
+      tr.innerHTML = `
+        <td>${tbody.children.length + 1}</td>
+        <td>${t.buy_index}</td>
+        <td>${t.sell_index}</td>
+        <td>$${t.buy_price.toFixed(2)}</td>
+        <td>$${t.sell_price.toFixed(2)}</td>
+        <td class="${priceMov >= 0 ? 'pnl-pos' : 'pnl-neg'}">${priceMov >= 0 ? '+' : ''}${priceMov.toFixed(2)}%</td>
+        <td class="${t.pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg'}">${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(3)}%</td>
+        <td style="color:#d29922">$${(t.fees_total || 0).toFixed(3)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+}
+
+function showBestResult(result) {
+  document.getElementById('metrics-row').style.display = 'grid';
+  const ret = result.total_return_pct;
+  document.getElementById('m-return').textContent = (ret >= 0 ? '+' : '') + ret.toFixed(2) + '%';
+  document.getElementById('m-return').style.color = ret >= 0 ? '#3fb950' : '#f85149';
+  document.getElementById('m-winrate').textContent = result.win_rate.toFixed(1) + '%';
+  document.getElementById('m-trades').textContent = result.num_trades;
+  document.getElementById('m-drawdown').textContent = result.max_drawdown.toFixed(1) + '%';
+  document.getElementById('m-fees').textContent = '$' + (result.total_fees_usdt || 0).toFixed(2);
+  document.getElementById('m-feedrag').textContent = '-' + (result.fee_drag_pct || 0).toFixed(2) + '%';
+
+  if (result.analysis) {
+    const box = document.getElementById('analysis-box');
+    box.style.display = 'block';
+    box.innerHTML = `<strong>${result.strategy_name}</strong><br/>${result.analysis}`;
+  }
+
+  showIterResult(result);
+}
+
+function showIterResult(result) {
+  // Update price chart with buy/sell markers
+  if (chartPrices.length > 0 && result.signals) {
+    const buyPoints = [];
+    const sellPoints = [];
+
+    result.signals.forEach(s => {
+      const idx = s.candle_index;
+      if (idx >= 0 && idx < chartPrices.length) {
+        const point = { x: idx, y: chartPrices[idx] };
+        if (s.action === 'BUY') buyPoints.push(point);
+        else if (s.action === 'SELL') sellPoints.push(point);
+      }
+    });
+
+    priceChart.data.datasets[1].data = buyPoints;
+    priceChart.data.datasets[2].data = sellPoints;
+    priceChart.update();
+  }
+
+  // Update portfolio chart
+  if (result.portfolio_history && result.portfolio_history.length > 0) {
+    const hist = result.portfolio_history;
+    const startCapital = hist[0].value;
+    const startPrice = hist[0].close;
+
+    const labels = hist.map((h, i) => {
+      const d = new Date(h.timestamp);
+      return d.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' });
+    });
+    const portfolioVals = hist.map(h => h.value);
+    const buyHoldVals = hist.map(h => startCapital * (h.close / startPrice));
+
+    portfolioChart.data.labels = labels;
+    portfolioChart.data.datasets[0].data = portfolioVals;
+    portfolioChart.data.datasets[1].data = buyHoldVals;
+    portfolioChart.update();
+  }
+}
+
+function clearLog() {
+  document.getElementById('log-box').textContent = '';
+  lastLogLen = 0;
+}
+
+// ── Live Trading ──────────────────────────────────────────────────────────────
+let livePolling = null;
+let lastLiveLogLen = 0;
+
+async function startLive() {
+  const body = {
+    api_key: document.getElementById('live-api-key').value.trim(),
+    api_secret: document.getElementById('live-api-secret').value.trim(),
+    symbol: document.getElementById('live-symbol').value,
+    interval: document.getElementById('live-interval').value,
+    trade_amount_usdt: parseFloat(document.getElementById('live-amount').value),
+  };
+  if (!body.api_key || !body.api_secret) { alert('Bitte API Key und Secret eingeben.'); return; }
+
+  lastLiveLogLen = 0;
+  document.getElementById('live-log-box').textContent = '';
+
+  const r = await fetch('/api/live/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    alert('Fehler: ' + (err.detail || r.statusText));
+    return;
+  }
+
+  document.getElementById('btn-live-start').disabled = true;
+  document.getElementById('btn-live-stop').disabled = false;
+  document.getElementById('live-status-card').style.display = 'block';
+
+  livePolling = setInterval(pollLive, 5000);
+}
+
+async function stopLive() {
+  await fetch('/api/live/stop', { method: 'POST' });
+  clearInterval(livePolling);
+  livePolling = null;
+  document.getElementById('btn-live-start').disabled = false;
+  document.getElementById('btn-live-stop').disabled = true;
+}
+
+let liveNextCheckTs = null;
+let countdownTick = null;
+
+function startCountdown(ts) {
+  liveNextCheckTs = ts;
+  if (countdownTick) clearInterval(countdownTick);
+  const box = document.getElementById('live-countdown-box');
+  const el = document.getElementById('live-countdown');
+  box.style.display = 'flex';
+
+  countdownTick = setInterval(() => {
+    if (!liveNextCheckTs) { clearInterval(countdownTick); return; }
+    const rem = Math.max(0, liveNextCheckTs - Date.now() / 1000);
+    const h = Math.floor(rem / 3600);
+    const m = Math.floor((rem % 3600) / 60);
+    const s = Math.floor(rem % 60);
+    el.textContent = h > 0
+      ? `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`
+      : `${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+    if (rem === 0) el.textContent = 'Analysiere…';
+  }, 1000);
+}
+
+async function pollLive() {
+  const state = await fetch('/api/live/status').then(r => r.json());
+
+  document.getElementById('live-status-text').textContent = state.status || 'idle';
+  const posBadge = document.getElementById('live-position-badge');
+  posBadge.textContent = state.position || 'FLAT';
+  posBadge.style.color = state.position === 'IN_POSITION' ? '#3fb950' : '#8b949e';
+
+  if (state.next_check_ts) {
+    startCountdown(state.next_check_ts);
+    document.getElementById('live-next-str').textContent = state.next_check_str || '';
+  }
+
+  const log = state.log || [];
+  if (log.length > lastLiveLogLen) {
+    const box = document.getElementById('live-log-box');
+    const newLines = log.slice(lastLiveLogLen);
+    newLines.forEach(line => {
+      box.textContent += line + '\n';
+    });
+    box.scrollTop = box.scrollHeight;
+    lastLiveLogLen = log.length;
+  }
+
+  if (!state.running && livePolling) {
+    clearInterval(livePolling);
+    if (countdownTick) clearInterval(countdownTick);
+    livePolling = null;
+    liveNextCheckTs = null;
+    document.getElementById('live-countdown-box').style.display = 'none';
+    document.getElementById('btn-live-start').disabled = false;
+    document.getElementById('btn-live-stop').disabled = true;
+  }
+}
+
+async function logout() {
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+
+// Load symbols on startup
+fetch('/api/symbols').then(r => r.json()).then(data => {
+  const sel = document.getElementById('symbol');
+  const current = sel.value;
+  sel.innerHTML = data.symbols.map(s => `<option${s === current ? ' selected' : ''}>${s}</option>`).join('');
+}).catch(() => {});

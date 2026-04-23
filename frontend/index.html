@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Pattern AI</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="logo">⬡ Crypto Pattern AI</div>
+    <div class="subtitle">Claude-powered backtesting &amp; live trading</div>
+    <button class="btn-logout" onclick="logout()">Abmelden</button>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="simulation">Simulation</button>
+    <button class="tab" data-tab="charts">Charts</button>
+    <button class="tab" data-tab="trades">Trades</button>
+    <button class="tab" data-tab="live">Live Trading</button>
+  </nav>
+
+  <!-- SIMULATION TAB -->
+  <section id="tab-simulation" class="tab-content active">
+    <div class="card">
+      <h2>Konfiguration</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label>Symbol</label>
+          <select id="symbol">
+            <option>BTCUSDC</option>
+            <option>ETHUSDC</option>
+            <option>BNBUSDC</option>
+            <option>SOLUSDC</option>
+            <option>XRPUSDC</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Intervall</label>
+          <select id="interval">
+            <option value="1h">1 Stunde</option>
+            <option value="4h" selected>4 Stunden</option>
+            <option value="1d">1 Tag</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Zeitraum (Tage)</label>
+          <input id="days" type="number" value="30" min="7" max="90" />
+        </div>
+        <div class="field">
+          <label>Startkapital (USDC)</label>
+          <input id="capital" type="number" value="1000" min="100" />
+        </div>
+        <div class="field">
+          <label>Max. Iterationen</label>
+          <input id="iterations" type="number" value="10" min="1" max="20" />
+        </div>
+        <div class="field">
+          <label>Binance Gebühren</label>
+          <select id="fee-tier">
+            <option value="standard">Standard 0.10%</option>
+            <option value="bnb">BNB Rabatt 0.075%</option>
+            <option value="vip1">VIP 1 — 0.09%</option>
+            <option value="vip2">VIP 2 — 0.08%</option>
+            <option value="vip3">VIP 3 — 0.07%</option>
+            <option value="vip4">VIP 4 — 0.05%</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button id="btn-start" class="btn btn-primary" onclick="startSim()">▶ Simulation starten</button>
+        <button id="btn-stop" class="btn btn-danger" onclick="stopSim()" disabled>■ Stopp</button>
+      </div>
+    </div>
+
+    <div class="card" id="status-card" style="display:none">
+      <div class="status-row">
+        <div class="pulse" id="pulse"></div>
+        <span id="status-text">Idle</span>
+        <span id="iteration-badge" class="badge"></span>
+      </div>
+
+      <div class="metrics-row" id="metrics-row" style="display:none">
+        <div class="metric">
+          <div class="metric-val" id="m-return">—</div>
+          <div class="metric-label">Netto-Return</div>
+        </div>
+        <div class="metric">
+          <div class="metric-val" id="m-winrate">—</div>
+          <div class="metric-label">Win Rate</div>
+        </div>
+        <div class="metric">
+          <div class="metric-val" id="m-trades">—</div>
+          <div class="metric-label">Trades</div>
+        </div>
+        <div class="metric">
+          <div class="metric-val" id="m-drawdown">—</div>
+          <div class="metric-label">Max Drawdown</div>
+        </div>
+        <div class="metric">
+          <div class="metric-val" id="m-fees">—</div>
+          <div class="metric-label">Gebühren gesamt</div>
+        </div>
+        <div class="metric">
+          <div class="metric-val" id="m-feedrag">—</div>
+          <div class="metric-label">Fee-Drag</div>
+        </div>
+      </div>
+
+      <div id="analysis-box" class="analysis-box" style="display:none"></div>
+    </div>
+
+    <div class="card" id="log-card">
+      <h2>Simulation Log <button class="btn-tiny" onclick="clearLog()">Clear</button></h2>
+      <div id="log-box" class="log-box"></div>
+    </div>
+  </section>
+
+  <!-- CHARTS TAB -->
+  <section id="tab-charts" class="tab-content">
+    <div class="card">
+      <h2 id="chart-title">Preischart</h2>
+      <div class="chart-wrap">
+        <canvas id="price-chart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Portfolio-Entwicklung</h2>
+      <div class="chart-wrap">
+        <canvas id="portfolio-chart"></canvas>
+      </div>
+    </div>
+    <div class="card" id="iterations-list" style="display:none">
+      <h2>Iterationen</h2>
+      <div id="iter-cards"></div>
+    </div>
+  </section>
+
+  <!-- TRADES TAB -->
+  <section id="tab-trades" class="tab-content">
+    <div class="card">
+      <h2>Trade-Protokoll</h2>
+      <div id="no-trades" class="empty-state">Starte eine Simulation, um Trades zu sehen.</div>
+      <div class="table-wrap" id="trade-table-wrap" style="display:none">
+        <table id="trade-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Buy Idx</th>
+              <th>Sell Idx</th>
+              <th>Buy Preis</th>
+              <th>Sell Preis</th>
+              <th>Preisbew.</th>
+              <th>P&amp;L netto</th>
+              <th>Gebühren</th>
+            </tr>
+          </thead>
+          <tbody id="trade-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIVE TRADING TAB -->
+  <section id="tab-live" class="tab-content">
+    <div class="card warning-card">
+      <div class="warn-icon">⚠️</div>
+      <strong>Echtes Geld — Risiko vorhanden</strong><br />
+      Live Trading handelt mit echten Mitteln auf Binance. Nur nutzen, wenn du die Risiken kennst und eine profitable Simulation vorliegt.
+    </div>
+
+    <div class="card">
+      <h2>Binance API Zugangsdaten</h2>
+      <div class="form-grid">
+        <div class="field full">
+          <label>API Key</label>
+          <input id="live-api-key" type="password" placeholder="Binance API Key" />
+        </div>
+        <div class="field full">
+          <label>API Secret</label>
+          <input id="live-api-secret" type="password" placeholder="Binance API Secret" />
+        </div>
+        <div class="field">
+          <label>Symbol</label>
+          <select id="live-symbol">
+            <option>BTCUSDC</option>
+            <option>ETHUSDC</option>
+            <option>SOLUSDC</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Intervall</label>
+          <select id="live-interval">
+            <option value="1h">1h</option>
+            <option value="4h" selected>4h</option>
+            <option value="1d">1d</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Trade-Betrag (USDC)</label>
+          <input id="live-amount" type="number" value="50" min="10" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button id="btn-live-start" class="btn btn-primary" onclick="startLive()">▶ Live Trading starten</button>
+        <button id="btn-live-stop" class="btn btn-danger" onclick="stopLive()" disabled>■ Stopp</button>
+      </div>
+    </div>
+
+    <div class="card" id="live-status-card" style="display:none">
+      <div class="status-row">
+        <div class="pulse pulse-live" id="live-pulse"></div>
+        <span id="live-status-text">Idle</span>
+        <span id="live-position-badge" class="badge"></span>
+      </div>
+      <div id="live-countdown-box" class="countdown-box" style="display:none">
+        <div class="countdown-label">Nächste Analyse</div>
+        <div class="countdown-time" id="live-countdown">—</div>
+        <div class="countdown-sub" id="live-next-str">—</div>
+      </div>
+      <div id="live-log-box" class="log-box"></div>
+    </div>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
