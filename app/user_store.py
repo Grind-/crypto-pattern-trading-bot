@@ -1,14 +1,13 @@
 import hashlib
-import json
-import os
 import secrets
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-USERS_FILE = "/app/data/users.json"
-_SALT = "cpa_salt_bioval_2026"
+from sqlalchemy import delete, insert, select, update
 
-# admin password hash: same as before (password set separately in init)
+from .database import engine, users
+
+_SALT = "cpa_salt_bioval_2026"
 _DEFAULT_ADMIN_HASH = "700acb2e5e32e2cbdb1cc63418b0842ba87925541d9fe07a7193646bd563aa3a"
 
 
@@ -20,45 +19,44 @@ def verify_pw(stored_hash: str, password: str) -> bool:
     return secrets.compare_digest(hash_pw(password), stored_hash)
 
 
-def _load() -> Dict:
-    if not os.path.exists(USERS_FILE):
-        return {}
-    try:
-        with open(USERS_FILE) as f:
-            return json.load(f)
-    except Exception:
-        return {}
+def _row_to_dict(row) -> Dict:
+    return dict(row._mapping)
 
 
-def _save(users: Dict) -> None:
-    os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=2)
-
+# ── public API ────────────────────────────────────────────────────────────────
 
 def init_users() -> None:
-    """Create users.json with admin if it doesn't exist yet."""
-    if os.path.exists(USERS_FILE):
-        return
-    _save({
-        "admin": {
-            "password_hash": _DEFAULT_ADMIN_HASH,
-            "role": "admin",
-            "enabled": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "claude_mode": "platform",
-            "claude_api_key": None,
-        }
-    })
-    os.makedirs(f"/app/data/users/admin/sims", exist_ok=True)
+    """Seed admin user on first start."""
+    with engine.connect() as conn:
+        exists = conn.execute(
+            select(users.c.username).where(users.c.username == "admin")
+        ).fetchone()
+        if not exists:
+            conn.execute(insert(users).values(
+                username="admin",
+                password_hash=_DEFAULT_ADMIN_HASH,
+                role="admin",
+                enabled=True,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                claude_mode="platform",
+                claude_api_key=None,
+                claude_oauth_token=None,
+            ))
+            conn.commit()
 
 
 def list_users() -> Dict:
-    return _load()
+    with engine.connect() as conn:
+        rows = conn.execute(select(users)).fetchall()
+    return {r["username"]: _row_to_dict(r) for r in rows}
 
 
 def get_user(username: str) -> Optional[Dict]:
-    return _load().get(username)
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users).where(users.c.username == username)
+        ).fetchone()
+    return _row_to_dict(row) if row else None
 
 
 def authenticate(username: str, password: str) -> Optional[Dict]:
@@ -74,80 +72,82 @@ def create_user(username: str, password: str, role: str = "user",
                 claude_mode: str = "api_key") -> bool:
     if not username or not password:
         return False
-    users = _load()
-    if username in users:
-        return False
-    users[username] = {
-        "password_hash": hash_pw(password),
-        "role": role,
-        "enabled": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "claude_mode": claude_mode,
-        "claude_api_key": None,
-        "claude_oauth_token": None,
-    }
-    _save(users)
-    os.makedirs(f"/app/data/users/{username}/sims", exist_ok=True)
+    with engine.connect() as conn:
+        exists = conn.execute(
+            select(users.c.username).where(users.c.username == username)
+        ).fetchone()
+        if exists:
+            return False
+        conn.execute(insert(users).values(
+            username=username,
+            password_hash=hash_pw(password),
+            role=role,
+            enabled=True,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            claude_mode=claude_mode,
+            claude_api_key=None,
+            claude_oauth_token=None,
+        ))
+        conn.commit()
     return True
 
 
 def delete_user(username: str) -> bool:
     if username == "admin":
         return False
-    users = _load()
-    if username not in users:
-        return False
-    del users[username]
-    _save(users)
-    return True
+    with engine.connect() as conn:
+        result = conn.execute(
+            delete(users).where(users.c.username == username)
+        )
+        conn.commit()
+    return result.rowcount > 0
 
 
 def set_enabled(username: str, enabled: bool) -> bool:
     if username == "admin":
         return False
-    users = _load()
-    if username not in users:
-        return False
-    users[username]["enabled"] = enabled
-    _save(users)
-    return True
+    with engine.connect() as conn:
+        result = conn.execute(
+            update(users).where(users.c.username == username).values(enabled=enabled)
+        )
+        conn.commit()
+    return result.rowcount > 0
 
 
 def reset_password(username: str, new_password: str) -> bool:
-    users = _load()
-    if username not in users:
-        return False
-    users[username]["password_hash"] = hash_pw(new_password)
-    _save(users)
-    return True
+    with engine.connect() as conn:
+        result = conn.execute(
+            update(users).where(users.c.username == username)
+            .values(password_hash=hash_pw(new_password))
+        )
+        conn.commit()
+    return result.rowcount > 0
 
 
 def update_claude_config(username: str, mode: str,
                          api_key: Optional[str] = None,
                          oauth_token: Optional[str] = None) -> bool:
-    users = _load()
-    if username not in users:
-        return False
-    users[username]["claude_mode"] = mode
+    vals: dict = {"claude_mode": mode}
     if api_key is not None:
-        users[username]["claude_api_key"] = api_key or None
+        vals["claude_api_key"] = api_key or None
     if oauth_token is not None:
-        users[username]["claude_oauth_token"] = oauth_token or None
-    _save(users)
-    return True
+        vals["claude_oauth_token"] = oauth_token or None
+    with engine.connect() as conn:
+        result = conn.execute(
+            update(users).where(users.c.username == username).values(**vals)
+        )
+        conn.commit()
+    return result.rowcount > 0
 
 
 def set_platform_access(username: str, allow: bool) -> bool:
-    """Admin can grant/revoke platform (proxy) access for a user."""
-    users = _load()
-    if username not in users:
-        return False
-    if allow:
-        users[username]["claude_mode"] = "platform"
-    else:
-        users[username]["claude_mode"] = "api_key"
-    _save(users)
-    return True
+    mode = "platform" if allow else "api_key"
+    with engine.connect() as conn:
+        result = conn.execute(
+            update(users).where(users.c.username == username).values(claude_mode=mode)
+        )
+        conn.commit()
+    return result.rowcount > 0
 
 
 def get_claude_api_key(username: str) -> Optional[str]:
