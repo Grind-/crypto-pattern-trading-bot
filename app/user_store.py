@@ -48,7 +48,11 @@ def init_users() -> None:
 def list_users() -> Dict:
     with engine.connect() as conn:
         rows = conn.execute(select(users)).fetchall()
-    return {r["username"]: _row_to_dict(r) for r in rows}
+    result = {}
+    for r in rows:
+        d = _row_to_dict(r)
+        result[d["username"]] = d
+    return result
 
 
 def get_user(username: str) -> Optional[Dict]:

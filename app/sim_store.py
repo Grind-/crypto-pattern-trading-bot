@@ -72,7 +72,7 @@ def save_simulation(username: str, entry: dict, full_result: dict = None) -> Non
             .order_by(simulations.c.created_at.desc())
         ).fetchall()
         if len(all_ids) > 50:
-            to_delete = [r["sim_id"] for r in all_ids[50:]]
+            to_delete = [r._mapping["sim_id"] for r in all_ids[50:]]
             conn.execute(delete(simulations).where(simulations.c.sim_id.in_(to_delete)))
             conn.execute(delete(simulation_details).where(simulation_details.c.sim_id.in_(to_delete)))
 
@@ -101,6 +101,6 @@ def load_simulation_detail(username: str, sim_id: str) -> Optional[dict]:
     if not row:
         return None
     try:
-        return json.loads(row["full_data"])
+        return json.loads(row._mapping["full_data"])
     except Exception:
         return None
