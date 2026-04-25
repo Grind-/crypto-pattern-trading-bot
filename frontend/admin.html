@@ -155,6 +155,10 @@
           : '<span class="tag tag-disabled">Gesperrt</span>';
         const claudeTag = u.claude_mode === 'platform'
           ? '<span class="tag tag-platform">Platform</span>'
+          : u.claude_mode === 'subscription'
+          ? (u.has_oauth_token
+              ? '<span class="tag tag-platform">Subscription ✓</span>'
+              : '<span class="tag tag-disabled">Subscription (kein Token)</span>')
           : (u.has_api_key
               ? '<span class="tag tag-apikey">API-Key ✓</span>'
               : '<span class="tag tag-disabled">Kein Key</span>');

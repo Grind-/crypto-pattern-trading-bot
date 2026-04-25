@@ -13,6 +13,7 @@ HOME_DIR = "/home/claude"
 class PromptRequest(BaseModel):
     system: str = ""
     prompt: str
+    oauth_token: str = ""   # per-request override for user subscriptions
 
 
 @app.get("/health")
@@ -30,10 +31,18 @@ async def analyze(req: PromptRequest):
         "NODE_NO_WARNINGS": "1",
         "TERM": "xterm",
     }
-    for key in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY"):
+    for key in ("ANTHROPIC_MODEL", "ANTHROPIC_API_KEY"):
         val = os.environ.get(key)
         if val:
             env[key] = val
+
+    # Per-request OAuth token takes priority over server token
+    if req.oauth_token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = req.oauth_token
+    else:
+        val = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+        if val:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = val
 
     try:
         proc = await asyncio.create_subprocess_exec(

@@ -53,32 +53,56 @@
       <div class="radio-row" id="mode-cards">
         <label class="radio-card" id="card-api_key">
           <input type="radio" name="claude-mode" value="api_key" />
-          <div class="radio-card-title">Eigener API-Key</div>
-          <div class="radio-card-desc">Anthropic API-Key (sk-ant-…). Pay-per-use über dein Anthropic-Konto.</div>
+          <div class="radio-card-title">API-Key</div>
+          <div class="radio-card-desc">Eigener Anthropic API-Key (sk-ant-…). Pay-per-use über console.anthropic.com.</div>
+        </label>
+        <label class="radio-card" id="card-subscription">
+          <input type="radio" name="claude-mode" value="subscription" />
+          <div class="radio-card-title">Subscription</div>
+          <div class="radio-card-desc">Eigene claude.ai Pro/Max-Subscription via OAuth-Token. Kein separater API-Key nötig.</div>
         </label>
         <label class="radio-card" id="card-platform">
           <input type="radio" name="claude-mode" value="platform" />
-          <div class="radio-card-title">Platform-Zugang</div>
-          <div class="radio-card-desc">Server-Subscription des Betreibers. Muss vom Admin aktiviert werden.</div>
+          <div class="radio-card-title">Platform</div>
+          <div class="radio-card-desc">Server-Account des Betreibers. Nur durch Admin aktivierbar.</div>
         </label>
       </div>
 
-      <div id="api-key-section">
+      <div id="api-key-section" style="display:none">
         <div class="field" style="margin-bottom:10px">
           <label>Anthropic API-Key</label>
           <input id="api-key-input" type="password" placeholder="sk-ant-api03-…" autocomplete="off" />
         </div>
-        <div class="test-row">
-          <button class="btn-tiny" id="btn-test" onclick="testConnection()">Verbindung testen</button>
-          <span class="test-result" id="test-result"></span>
+      </div>
+
+      <div id="subscription-section" style="display:none">
+        <div class="field" style="margin-bottom:10px">
+          <label>Claude OAuth-Token</label>
+          <input id="oauth-token-input" type="password" placeholder="sk-ant-oat01-…" autocomplete="off" />
+        </div>
+        <div style="background:var(--surface2);border-radius:6px;padding:10px 14px;font-size:12px;
+             color:var(--text-muted);line-height:1.6;margin-bottom:10px">
+          <strong style="color:var(--text)">So erhältst du deinen Token:</strong><br/>
+          1. Installiere die Claude CLI auf deinem Rechner (claude.ai/code)<br/>
+          2. Führe <code style="background:var(--bg);padding:1px 5px;border-radius:3px">claude login</code> aus und melde dich mit deinem claude.ai-Konto an<br/>
+          3. Kopiere den Token:<br/>
+          <code style="background:var(--bg);padding:3px 6px;border-radius:3px;display:block;margin-top:4px;word-break:break-all">
+            cat ~/.claude/.credentials.json
+          </code>
+          → Der Wert bei <strong>claudeAiOauth → accessToken</strong>
         </div>
       </div>
 
       <div id="platform-section" style="display:none">
         <div style="background:rgba(63,185,80,0.08);border:1px solid var(--green);border-radius:6px;
              padding:10px 14px;font-size:12px;color:var(--green)">
-          Platform-Zugang aktiv. Claude wird über den Server bereitgestellt.
+          Platform-Zugang aktiv. Claude wird über den Server-Account bereitgestellt.
         </div>
+      </div>
+
+      <div class="test-row" id="test-row">
+        <button class="btn-tiny" id="btn-test" onclick="testConnection()">Verbindung testen</button>
+        <span class="test-result" id="test-result"></span>
       </div>
 
       <div class="btn-row" style="margin-top:14px">
@@ -120,9 +144,12 @@
       document.querySelectorAll('.radio-card').forEach(c => c.classList.remove('selected'));
       const card = document.getElementById('card-' + mode);
       if (card) card.classList.add('selected');
-      document.querySelector(`input[value="${mode}"]`).checked = true;
+      const radio = document.querySelector(`input[value="${mode}"]`);
+      if (radio) radio.checked = true;
       document.getElementById('api-key-section').style.display = mode === 'api_key' ? 'block' : 'none';
+      document.getElementById('subscription-section').style.display = mode === 'subscription' ? 'block' : 'none';
       document.getElementById('platform-section').style.display = mode === 'platform' ? 'block' : 'none';
+      document.getElementById('test-row').style.display = mode === 'platform' ? 'none' : 'flex';
     }
 
     document.querySelectorAll('input[name="claude-mode"]').forEach(r => {
@@ -142,10 +169,16 @@
       if (data.has_api_key) {
         document.getElementById('api-key-input').placeholder = '••••••••••••••• (gesetzt)';
       }
-      // Hide platform card if not admin (can't self-activate)
+      if (data.has_oauth_token) {
+        document.getElementById('oauth-token-input').placeholder = '••••••••••••••• (gesetzt)';
+      }
+      // Platform card: dim if not admin
       if (data.role !== 'admin') {
-        document.getElementById('card-platform').style.opacity = '0.5';
-        document.getElementById('card-platform').title = 'Nur durch Admin aktivierbar';
+        const card = document.getElementById('card-platform');
+        card.style.opacity = '0.5';
+        card.style.cursor = 'not-allowed';
+        card.title = 'Nur durch Admin aktivierbar';
+        card.querySelector('input').disabled = true;
       }
     }
 
@@ -181,11 +214,12 @@
 
       const mode = _mode;
       const api_key = document.getElementById('api-key-input').value.trim() || undefined;
+      const oauth_token = document.getElementById('oauth-token-input').value.trim() || undefined;
       try {
         const r = await fetch('/api/user/claude-config', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({mode, api_key}),
+          body: JSON.stringify({mode, api_key, oauth_token}),
         });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
@@ -197,6 +231,10 @@
         if (api_key) {
           document.getElementById('api-key-input').value = '';
           document.getElementById('api-key-input').placeholder = '••••••••••••••• (gesetzt)';
+        }
+        if (oauth_token) {
+          document.getElementById('oauth-token-input').value = '';
+          document.getElementById('oauth-token-input').placeholder = '••••••••••••••• (gesetzt)';
         }
       } catch (e) {
         errEl.textContent = e.message;
