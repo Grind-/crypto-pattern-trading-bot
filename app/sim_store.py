@@ -1,50 +1,106 @@
 import json
-import os
 from typing import List, Optional
 
-_DATA_ROOT = "/app/data/users"
+from sqlalchemy import delete, insert, select
+
+from .database import engine, simulation_details, simulations
+
+# Columns that are stored as JSON strings
+_JSON_COLS = ("strategy_patterns",)
+
+# Metadata columns that map 1:1 to the simulations table
+_META_COLS = (
+    "sim_id", "username", "created_at", "symbol", "interval", "days",
+    "capital", "fee_tier", "total_return_pct", "win_rate", "num_trades",
+    "max_drawdown", "total_fees_usdt", "fee_drag_pct",
+    "strategy_name", "strategy_analysis", "strategy_patterns",
+    "profitable", "iterations",
+)
 
 
-def _sims_dir(username: str) -> str:
-    return f"{_DATA_ROOT}/{username}/sims"
+def _entry_to_row(username: str, entry: dict) -> dict:
+    row = {"username": username}
+    for col in _META_COLS:
+        if col == "username":
+            continue
+        val = entry.get(col) or entry.get("id" if col == "sim_id" else col)
+        if col == "sim_id" and val is None:
+            val = entry.get("id")
+        if col in _JSON_COLS and not isinstance(val, str):
+            val = json.dumps(val) if val is not None else "[]"
+        row[col] = val
+    return row
 
 
-def _sims_index(username: str) -> str:
-    return f"{_DATA_ROOT}/{username}/simulations.json"
+def _row_to_entry(row) -> dict:
+    d = dict(row._mapping)
+    for col in _JSON_COLS:
+        v = d.get(col)
+        if isinstance(v, str):
+            try:
+                d[col] = json.loads(v)
+            except Exception:
+                d[col] = []
+    # expose as "id" for backward compat
+    d["id"] = d.get("sim_id")
+    return d
 
+
+# ── public API ────────────────────────────────────────────────────────────────
 
 def save_simulation(username: str, entry: dict, full_result: dict = None) -> None:
-    sims_dir = _sims_dir(username)
-    os.makedirs(sims_dir, exist_ok=True)
-    if full_result:
-        with open(f"{sims_dir}/{entry['id']}.json", "w") as f:
-            json.dump(full_result, f, indent=2)
-    sims = load_simulations(username)
-    sims.insert(0, entry)
-    sims = sims[:50]
-    index_path = _sims_index(username)
-    os.makedirs(os.path.dirname(index_path), exist_ok=True)
-    with open(index_path, "w") as f:
-        json.dump(sims, f, indent=2)
+    row = _entry_to_row(username, entry)
+    sim_id = row["sim_id"]
+
+    with engine.connect() as conn:
+        # upsert: delete old entry if exists, then insert
+        conn.execute(delete(simulations).where(simulations.c.sim_id == sim_id))
+        conn.execute(insert(simulations).values(**row))
+
+        if full_result is not None:
+            conn.execute(delete(simulation_details).where(simulation_details.c.sim_id == sim_id))
+            conn.execute(insert(simulation_details).values(
+                sim_id=sim_id,
+                username=username,
+                full_data=json.dumps(full_result),
+            ))
+
+        # enforce max 50 sims per user — delete oldest beyond limit
+        all_ids = conn.execute(
+            select(simulations.c.sim_id, simulations.c.created_at)
+            .where(simulations.c.username == username)
+            .order_by(simulations.c.created_at.desc())
+        ).fetchall()
+        if len(all_ids) > 50:
+            to_delete = [r["sim_id"] for r in all_ids[50:]]
+            conn.execute(delete(simulations).where(simulations.c.sim_id.in_(to_delete)))
+            conn.execute(delete(simulation_details).where(simulation_details.c.sim_id.in_(to_delete)))
+
+        conn.commit()
 
 
 def load_simulations(username: str) -> List[dict]:
-    path = _sims_index(username)
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception:
-        return []
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(simulations)
+            .where(simulations.c.username == username)
+            .order_by(simulations.c.created_at.desc())
+        ).fetchall()
+    return [_row_to_entry(r) for r in rows]
 
 
 def load_simulation_detail(username: str, sim_id: str) -> Optional[dict]:
-    path = f"{_sims_dir(username)}/{sim_id}.json"
-    if not os.path.exists(path):
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(simulation_details)
+            .where(
+                simulation_details.c.sim_id == sim_id,
+                simulation_details.c.username == username,
+            )
+        ).fetchone()
+    if not row:
         return None
     try:
-        with open(path) as f:
-            return json.load(f)
+        return json.loads(row["full_data"])
     except Exception:
         return None

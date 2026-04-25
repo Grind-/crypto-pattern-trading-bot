@@ -1,42 +1,84 @@
 import json
-import os
+from datetime import datetime, timezone
 from typing import Optional
 
-_DATA_ROOT = "/app/data/users"
+from sqlalchemy import delete, insert, select, update
+
+from .database import engine, live_states
 
 
-def _state_file(username: str) -> str:
-    return f"{_DATA_ROOT}/{username}/live_state.json"
+def _serialize(config: dict) -> dict:
+    """Convert list fields to JSON strings for storage."""
+    row = dict(config)
+    for key in ("strategy_patterns", "trade_history"):
+        if key in row and not isinstance(row[key], str):
+            row[key] = json.dumps(row[key])
+    return row
 
+
+def _deserialize(row: dict) -> dict:
+    """Convert JSON string fields back to Python objects."""
+    result = dict(row)
+    for key in ("strategy_patterns", "trade_history"):
+        val = result.get(key)
+        if isinstance(val, str):
+            try:
+                result[key] = json.loads(val)
+            except Exception:
+                result[key] = []
+        elif val is None:
+            result[key] = []
+    return result
+
+
+# ── public API ────────────────────────────────────────────────────────────────
 
 def save_live_state(username: str, config: dict) -> None:
-    path = _state_file(username)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
+    row = _serialize(config)
+    row["username"] = username
+    row["updated_at"] = datetime.now(timezone.utc).isoformat()
+    # keep only columns that exist in the table
+    cols = {c.name for c in live_states.c}
+    row = {k: v for k, v in row.items() if k in cols}
+
+    with engine.connect() as conn:
+        exists = conn.execute(
+            select(live_states.c.username).where(live_states.c.username == username)
+        ).fetchone()
+        if exists:
+            conn.execute(
+                update(live_states).where(live_states.c.username == username).values(**row)
+            )
+        else:
+            conn.execute(insert(live_states).values(**row))
+        conn.commit()
 
 
 def load_live_state(username: str) -> Optional[dict]:
-    path = _state_file(username)
-    if not os.path.exists(path):
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(live_states).where(live_states.c.username == username)
+        ).fetchone()
+    if not row:
         return None
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception:
-        return None
+    return _deserialize(dict(row._mapping))
 
 
 def clear_live_state(username: str) -> None:
-    path = _state_file(username)
-    if os.path.exists(path):
-        os.remove(path)
+    with engine.connect() as conn:
+        conn.execute(
+            delete(live_states).where(live_states.c.username == username)
+        )
+        conn.commit()
 
 
 def update_position(username: str, position: str, symbol: str = None) -> None:
-    state = load_live_state(username)
-    if state:
-        state["position"] = position
-        if symbol:
-            state["symbol"] = symbol
-        save_live_state(username, state)
+    vals = {"position": position}
+    if symbol:
+        vals["symbol"] = symbol
+    vals["updated_at"] = datetime.now(timezone.utc).isoformat()
+    with engine.connect() as conn:
+        conn.execute(
+            update(live_states).where(live_states.c.username == username).values(**vals)
+        )
+        conn.commit()

@@ -20,6 +20,7 @@ from .binance_trader import BinanceTrader
 from .state_store import save_live_state, load_live_state, clear_live_state, update_position
 from .sim_store import (save_simulation, load_simulations as _load_sims,
                         load_simulation_detail)
+from .database import init_db
 from .user_store import (init_users, list_users, get_user, authenticate,
                          create_user, delete_user, set_enabled, reset_password,
                          update_claude_config, set_platform_access,
@@ -79,6 +80,7 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.on_event("startup")
 async def _startup():
+    init_db()
     init_users()
     await _auto_resume_all()
 
