@@ -189,6 +189,20 @@
       Live Trading handelt mit echten Mitteln auf Binance. Nur nutzen, wenn du die Risiken kennst und eine profitable Simulation vorliegt.
     </div>
 
+    <div class="card" id="scanner-card">
+      <h2>Marktscanner — Welches Paar jetzt?</h2>
+      <div class="sim-picker-row" style="margin-bottom:12px">
+        <label>Intervall:</label>
+        <select id="scan-interval">
+          <option value="1h">1h</option>
+          <option value="4h" selected>4h</option>
+          <option value="1d">1d</option>
+        </select>
+        <button class="btn btn-primary btn-sm" id="btn-scan" onclick="runScanner()">Markt scannen</button>
+      </div>
+      <div id="scanner-result" class="empty-state">Scannt die Top 10 USDC-Paare und empfiehlt das beste für jetzt.</div>
+    </div>
+
     <div class="card">
       <h2>Binance API Zugangsdaten</h2>
       <div class="form-grid">

@@ -242,6 +242,23 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
 .iter-name { flex: 1; font-size: 13px; }
 .iter-ret { font-weight: 700; min-width: 70px; text-align: right; }
 
+.scanner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.scanner-best { border-color: var(--green); background: rgba(63,185,80,0.06); }
+.scanner-rank { font-size: 11px; color: var(--text-muted); min-width: 18px; }
+.scanner-sym { font-weight: 700; font-size: 13px; min-width: 90px; }
+.scanner-score { font-weight: 700; font-size: 13px; min-width: 55px; }
+.scanner-reason { flex: 1; font-size: 12px; color: var(--text-muted); min-width: 120px; }
+
 .sim-picker-bar { padding: 10px 14px; margin-bottom: 14px; }
 .sim-picker-row {
   display: flex;

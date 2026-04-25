@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .data_fetcher import fetch_klines, fetch_latest_klines, get_available_symbols
 from .indicators import compute_indicators
-from .claude_analyst import analyze_with_claude, get_live_signal
+from .claude_analyst import analyze_with_claude, get_live_signal, scan_market
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import save_live_state, load_live_state, clear_live_state, update_position
@@ -190,6 +190,53 @@ async def do_logout(request: Request, response: Response):
 @app.get("/")
 async def index():
     return FileResponse("frontend/index.html")
+
+
+SCAN_SYMBOLS = [
+    "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
+    "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "DOTUSDC", "LINKUSDC",
+]
+
+
+@app.post("/api/scan/symbols")
+async def scan_symbols(body: dict):
+    interval = body.get("interval", "4h")
+    tasks = [fetch_latest_klines(sym, interval, limit=60) for sym in SCAN_SYMBOLS]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    summaries = []
+    for sym, raw in zip(SCAN_SYMBOLS, results):
+        if isinstance(raw, Exception) or not raw:
+            continue
+        enriched = compute_indicators(raw)
+        cur = enriched[-1]
+        price = cur["close"]
+
+        def _chg(n):
+            idx = max(0, len(enriched) - n)
+            p0 = enriched[idx]["close"]
+            return (price - p0) / p0 * 100 if p0 else 0
+
+        # intervals → approximate candle counts for 24h / 7d
+        interval_mins = {"1h": 60, "4h": 240, "1d": 1440}.get(interval, 240)
+        c24 = max(1, 1440 // interval_mins)
+        c7d = max(1, 10080 // interval_mins)
+
+        summaries.append({
+            "symbol": sym,
+            "price": price,
+            "h24": _chg(c24),
+            "h7d": _chg(c7d),
+            "atr_pct": (cur.get("atr") or 0) / price * 100 if price else 0,
+            "rsi": cur.get("rsi") or 50,
+            "macd": cur.get("macd") or 0,
+            "vol_ratio": cur.get("volume_ratio") or 1.0,
+        })
+
+    if not summaries:
+        raise HTTPException(503, "Keine Marktdaten verfügbar")
+
+    return await scan_market(summaries, interval)
 
 
 @app.get("/api/symbols")

@@ -187,3 +187,41 @@ Respond with ONLY raw JSON:
         return await _call_proxy("", prompt, timeout=60)
     except Exception:
         return {"action": "HOLD", "confidence": 0, "reason": "Proxy error", "stop_loss_pct": 2, "take_profit_pct": 4}
+
+
+async def scan_market(symbol_summaries: List[Dict], interval: str) -> Dict:
+    rows = ["Symbol      | Price       | 24h%   | 7d%    | ATR%  | RSI   | MACD  | Vol",
+            "-" * 75]
+    for s in symbol_summaries:
+        rows.append(
+            f"{s['symbol']:<11} | ${s['price']:>10,.2f} | {s['h24']:>+6.1f}% | {s['h7d']:>+6.1f}% | "
+            f"{s['atr_pct']:>4.1f}% | {s['rsi']:>5.1f} | {'↑' if s['macd'] > 0 else '↓'}      | {s['vol_ratio']:.1f}x"
+        )
+    table = "\n".join(rows)
+
+    prompt = f"""You are a crypto market analyst. Identify the best USDC trading pair for live trading RIGHT NOW.
+
+MARKET SNAPSHOT ({interval} candles, last 60 bars):
+{table}
+
+Pick the top symbol based on:
+- Clear directional momentum (strong trend, not choppy)
+- Sufficient volatility (ATR% > 1.5% for short intervals, >0.5% for daily)
+- Healthy volume (VolRatio > 1.0)
+- RSI not at reversal extremes (avoid >78 or <22)
+
+Respond with ONLY raw JSON:
+{{
+  "best_symbol": "SOLUSDC",
+  "ranking": [
+    {{"symbol": "SOLUSDC", "score": 82, "reason": "Strong uptrend with rising volume and RSI in healthy zone"}},
+    {{"symbol": "ETHUSDC", "score": 71, "reason": "Bullish momentum but RSI approaching overbought"}},
+    {{"symbol": "BTCUSDC", "score": 55, "reason": "Sideways consolidation, low volatility"}}
+  ],
+  "recommendation": "2 sentences: why best_symbol is the top pick right now and what to watch for."
+}}"""
+
+    try:
+        return await _call_proxy("", prompt, timeout=90)
+    except Exception as e:
+        return {"best_symbol": "", "ranking": [], "recommendation": f"Scan fehlgeschlagen: {e}"}

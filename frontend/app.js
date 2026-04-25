@@ -402,6 +402,55 @@ async function pollLive() {
   }
 }
 
+// ── Market scanner ────────────────────────────────────────────────────────────
+
+async function runScanner() {
+  const interval = document.getElementById('scan-interval').value;
+  const btn = document.getElementById('btn-scan');
+  const el = document.getElementById('scanner-result');
+  btn.disabled = true;
+  btn.textContent = '⏳ Scanne…';
+  el.innerHTML = '<div class="empty-state">Claude analysiert 10 USDC-Paare…</div>';
+  try {
+    const r = await fetch('/api/scan/symbols', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({interval}),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    renderScanResult(await r.json(), interval);
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state" style="color:var(--red)">Fehler: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Markt scannen';
+  }
+}
+
+function renderScanResult(data, interval) {
+  const el = document.getElementById('scanner-result');
+  const ranking = data.ranking || [];
+  const best = data.best_symbol || '';
+  let html = '';
+  if (data.recommendation) {
+    html += `<div class="analysis-box" style="margin-bottom:12px">${data.recommendation}</div>`;
+  }
+  html += ranking.map((r, i) => {
+    const isBest = r.symbol === best;
+    const scoreColor = r.score >= 70 ? '#3fb950' : r.score >= 50 ? '#d29922' : '#8b949e';
+    return `<div class="scanner-row${isBest ? ' scanner-best' : ''}">
+      <span class="scanner-rank">${i + 1}.</span>
+      <span class="scanner-sym">${r.symbol}</span>
+      <span class="scanner-score" style="color:${scoreColor}">${r.score}/100</span>
+      <span class="scanner-reason">${r.reason}</span>
+      <button class="${isBest ? 'btn-use-sim' : 'btn-tiny'}" onclick="useSim('${r.symbol}','${interval}')">
+        ${isBest ? '★ Verwenden' : 'Verwenden'}
+      </button>
+    </div>`;
+  }).join('');
+  el.innerHTML = html || '<div class="empty-state">Keine Ergebnisse.</div>';
+}
+
 async function logout() {
   await fetch('/auth/logout', { method: 'POST' });
   window.location.href = '/login';
