@@ -95,6 +95,9 @@ async def _auto_resume():
         "strategy_name": req.strategy_name,
         "strategy_analysis": req.strategy_analysis,
         "strategy_patterns": req.strategy_patterns,
+        "trade_history": saved.get("trade_history", []),
+        "live_candles": [],
+        "buy_price": saved.get("buy_price"),
     })
     asyncio.create_task(_live_loop(req))
 
@@ -131,6 +134,9 @@ live_state: dict = {
     "strategy_name": "",
     "strategy_analysis": "",
     "strategy_patterns": [],
+    "trade_history": [],
+    "live_candles": [],
+    "buy_price": None,
 }
 
 
@@ -334,6 +340,9 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
         "strategy_name": req.strategy_name,
         "strategy_analysis": req.strategy_analysis,
         "strategy_patterns": req.strategy_patterns,
+        "trade_history": [],
+        "live_candles": [],
+        "buy_price": None,
     })
     save_live_state({
         "was_running": True,
@@ -362,7 +371,15 @@ async def stop_live():
 
 @app.get("/api/live/status")
 async def live_status():
-    return {k: v for k, v in live_state.items() if k not in ("api_key", "api_secret")}
+    return {k: v for k, v in live_state.items() if k not in ("api_key", "api_secret", "live_candles")}
+
+
+@app.get("/api/live/chart-data")
+async def live_chart_data():
+    return {
+        "candles": live_state.get("live_candles", []),
+        "trade_history": live_state.get("trade_history", []),
+    }
 
 
 # ── Background tasks ───────────────────────────────────────────────────────────
@@ -593,6 +610,8 @@ async def _live_loop(req: LiveRequest):
             enriched = compute_indicators(candles)
             price = candles[-1]["close"] if candles else 0
             _log(live_state, f"Schlusskurs: ${price:,.2f}")
+            # Store candles for live chart
+            live_state["live_candles"] = [{"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]]
 
             _log(live_state, "Frage Claude nach Signal…")
             signal = await get_live_signal(
@@ -625,10 +644,16 @@ async def _live_loop(req: LiveRequest):
                         symbol=current_symbol, side="BUY",
                         quote_quantity=req.trade_amount_usdt,
                     )
-                    position_symbol = current_symbol  # lock symbol for this trade
+                    position_symbol = current_symbol
                     live_state["position"] = "IN_POSITION"
                     live_state["symbol"] = current_symbol
+                    live_state["buy_price"] = price
                     update_position("IN_POSITION")
+                    live_state["trade_history"].append({
+                        "type": "BUY", "symbol": current_symbol,
+                        "price": price, "timestamp": int(time.time() * 1000),
+                        "order_id": str(order.get("orderId", "")), "pnl_pct": None,
+                    })
                     _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f}")
                 except Exception as e:
                     _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
@@ -642,10 +667,19 @@ async def _live_loop(req: LiveRequest):
                         order = await trader.place_market_order(
                             symbol=position_symbol, side="SELL", quantity=qty,
                         )
+                        buy_p = live_state.get("buy_price") or price
+                        pnl_pct = (price - buy_p) / buy_p * 100 if buy_p else 0.0
                         live_state["position"] = "FLAT"
+                        live_state["buy_price"] = None
                         update_position("FLAT")
-                        _log(live_state, f"✅ VERKAUF {position_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f}")
-                        # Scanner runs at next loop iteration (FLAT branch)
+                        live_state["trade_history"].append({
+                            "type": "SELL", "symbol": position_symbol,
+                            "price": price, "timestamp": int(time.time() * 1000),
+                            "order_id": str(order.get("orderId", "")), "pnl_pct": round(pnl_pct, 3),
+                        })
+                        _log(live_state, f"✅ VERKAUF {position_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f} | P&L: {pnl_pct:+.2f}%")
+                        # Persist updated trade history
+                        _save_live_trade_history()
                     else:
                         _log(live_state, f"⚠ Kein {base_asset}-Guthaben zum Verkaufen")
                 except Exception as e:
@@ -673,6 +707,14 @@ async def _live_loop(req: LiveRequest):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _save_live_trade_history():
+    saved = load_live_state()
+    if saved:
+        saved["trade_history"] = live_state.get("trade_history", [])
+        saved["buy_price"] = live_state.get("buy_price")
+        save_live_state(saved)
+
 
 def _log(state: dict, msg: str):
     state["log"].append(msg)

@@ -13,6 +13,7 @@ document.querySelectorAll('.tab').forEach(btn => {
 // ── Chart instances ───────────────────────────────────────────────────────────
 let priceChart = null;
 let portfolioChart = null;
+let liveChart = null;
 
 function mkChart(id, type, data, options) {
   const ctx = document.getElementById(id).getContext('2d');
@@ -48,6 +49,18 @@ function initCharts() {
     datasets: [
       { label: 'Portfolio (USDT)', data: [], borderColor: '#bc8cff', borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: 'rgba(188,140,255,0.07)', tension: 0.1 },
       { label: 'Buy & Hold', data: [], borderColor: '#d29922', borderWidth: 1, borderDash: [4, 3], pointRadius: 0, tension: 0.1 },
+    ],
+  }, { ...chartDefaults });
+}
+
+function initLiveChart() {
+  if (liveChart) liveChart.destroy();
+  liveChart = mkChart('live-price-chart', 'line', {
+    labels: [],
+    datasets: [
+      { label: 'Live Preis', data: [], borderColor: '#58a6ff', borderWidth: 1.5, pointRadius: 0, tension: 0.1 },
+      { label: 'BUY', data: [], type: 'scatter', pointBackgroundColor: '#3fb950', pointRadius: 7, pointStyle: 'triangle' },
+      { label: 'SELL', data: [], type: 'scatter', pointBackgroundColor: '#f85149', pointRadius: 7, pointStyle: 'triangle' },
     ],
   }, { ...chartDefaults });
 }
@@ -149,7 +162,6 @@ function updateStatusUI(state) {
     badgeEl.textContent = `Iteration ${state.iteration} / ${state.max_iterations}`;
   }
 
-  // Append new log lines
   const log = state.log || [];
   if (log.length > lastLogLen) {
     const box = document.getElementById('log-box');
@@ -197,7 +209,6 @@ function addIterationResult(result) {
   const profitable = result.total_return_pct > 0;
   const ret = result.total_return_pct;
 
-  // Iteration card
   const iterList = document.getElementById('iterations-list');
   const iterCards = document.getElementById('iter-cards');
   iterList.style.display = 'block';
@@ -212,12 +223,11 @@ function addIterationResult(result) {
   card.addEventListener('click', () => showIterResult(result));
   iterCards.appendChild(card);
 
-  // Add trades to table
   if (result.trades && result.trades.length > 0) {
     const tbody = document.getElementById('trade-tbody');
     document.getElementById('no-trades').style.display = 'none';
     document.getElementById('trade-table-wrap').style.display = 'block';
-    result.trades.forEach((t, i) => {
+    result.trades.forEach(t => {
       const tr = document.createElement('tr');
       const priceMov = t.price_move_pct != null ? t.price_move_pct : t.pnl_pct;
       tr.innerHTML = `
@@ -256,11 +266,9 @@ function showBestResult(result) {
 }
 
 function showIterResult(result) {
-  // Update price chart with buy/sell markers
   if (chartPrices.length > 0 && result.signals) {
     const buyPoints = [];
     const sellPoints = [];
-
     result.signals.forEach(s => {
       const idx = s.candle_index;
       if (idx >= 0 && idx < chartPrices.length) {
@@ -269,28 +277,19 @@ function showIterResult(result) {
         else if (s.action === 'SELL') sellPoints.push(point);
       }
     });
-
     priceChart.data.datasets[1].data = buyPoints;
     priceChart.data.datasets[2].data = sellPoints;
     priceChart.update();
   }
 
-  // Update portfolio chart
   if (result.portfolio_history && result.portfolio_history.length > 0) {
     const hist = result.portfolio_history;
     const startCapital = hist[0].value;
     const startPrice = hist[0].close;
-
-    const labels = hist.map((h, i) => {
-      const d = new Date(h.timestamp);
-      return d.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' });
-    });
-    const portfolioVals = hist.map(h => h.value);
-    const buyHoldVals = hist.map(h => startCapital * (h.close / startPrice));
-
+    const labels = hist.map(h => new Date(h.timestamp).toLocaleDateString('de-DE', { month: 'short', day: 'numeric' }));
     portfolioChart.data.labels = labels;
-    portfolioChart.data.datasets[0].data = portfolioVals;
-    portfolioChart.data.datasets[1].data = buyHoldVals;
+    portfolioChart.data.datasets[0].data = hist.map(h => h.value);
+    portfolioChart.data.datasets[1].data = hist.map(h => startCapital * (h.close / startPrice));
     portfolioChart.update();
   }
 }
@@ -303,8 +302,8 @@ function clearLog() {
 // ── Live Trading ──────────────────────────────────────────────────────────────
 let livePolling = null;
 let lastLiveLogLen = 0;
-let selectedSimForLive = null; // strategy context for live trading
-let viewedSim = null;          // currently loaded sim detail
+let selectedSimForLive = null;
+let viewedSim = null;
 
 async function startLive() {
   const body = {
@@ -331,8 +330,10 @@ async function startLive() {
 
   document.getElementById('btn-live-start').disabled = true;
   document.getElementById('btn-live-stop').disabled = false;
-  document.getElementById('live-status-card').style.display = 'block';
+  document.getElementById('live-active-section').style.display = 'block';
+  document.getElementById('live-chart-title').textContent = `Live Preischart — ${body.symbol}`;
 
+  initLiveChart();
   livePolling = setInterval(pollLive, 5000);
 }
 
@@ -342,6 +343,7 @@ async function stopLive() {
   livePolling = null;
   document.getElementById('btn-live-start').disabled = false;
   document.getElementById('btn-live-stop').disabled = true;
+  document.getElementById('live-countdown-box').style.display = 'none';
 }
 
 let liveNextCheckTs = null;
@@ -368,9 +370,16 @@ function startCountdown(ts) {
 }
 
 async function pollLive() {
-  const state = await fetch('/api/live/status').then(r => r.json());
+  const [state, chartData] = await Promise.all([
+    fetch('/api/live/status').then(r => r.json()),
+    fetch('/api/live/chart-data').then(r => r.json()).catch(() => null),
+  ]);
 
   document.getElementById('live-status-text').textContent = state.status || 'idle';
+
+  const symBadge = document.getElementById('live-symbol-badge');
+  symBadge.textContent = state.symbol || '';
+
   const posBadge = document.getElementById('live-position-badge');
   posBadge.textContent = state.position || 'FLAT';
   posBadge.style.color = state.position === 'IN_POSITION' ? '#3fb950' : '#8b949e';
@@ -391,6 +400,14 @@ async function pollLive() {
     lastLiveLogLen = log.length;
   }
 
+  if (chartData) {
+    updateLiveChart(chartData);
+    updateLiveTradeTable(chartData.trade_history || []);
+    if (state.symbol) {
+      document.getElementById('live-chart-title').textContent = `Live Preischart — ${state.symbol}`;
+    }
+  }
+
   if (!state.running && livePolling) {
     clearInterval(livePolling);
     if (countdownTick) clearInterval(countdownTick);
@@ -400,6 +417,65 @@ async function pollLive() {
     document.getElementById('btn-live-start').disabled = false;
     document.getElementById('btn-live-stop').disabled = true;
   }
+}
+
+function updateLiveChart(data) {
+  if (!liveChart) return;
+  const candles = data.candles || [];
+  if (candles.length === 0) return;
+
+  const labels = candles.map(c => new Date(c.timestamp).toLocaleDateString('de-DE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
+  const prices = candles.map(c => c.close);
+
+  // Map trade markers to candle indices by closest timestamp
+  const buys = [];
+  const sells = [];
+  (data.trade_history || []).forEach(t => {
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    candles.forEach((c, i) => {
+      const diff = Math.abs(c.timestamp - t.timestamp);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    const pt = { x: bestIdx, y: t.price };
+    if (t.type === 'BUY') buys.push(pt);
+    else if (t.type === 'SELL') sells.push(pt);
+  });
+
+  liveChart.data.labels = labels;
+  liveChart.data.datasets[0].data = prices;
+  liveChart.data.datasets[1].data = buys;
+  liveChart.data.datasets[2].data = sells;
+  liveChart.update();
+}
+
+function updateLiveTradeTable(trades) {
+  if (!trades || trades.length === 0) {
+    document.getElementById('no-live-trades').style.display = 'block';
+    document.getElementById('live-trade-table-wrap').style.display = 'none';
+    return;
+  }
+  document.getElementById('no-live-trades').style.display = 'none';
+  document.getElementById('live-trade-table-wrap').style.display = 'block';
+  const tbody = document.getElementById('live-trade-tbody');
+  tbody.innerHTML = '';
+  trades.forEach((t, i) => {
+    const tr = document.createElement('tr');
+    const pnl = t.pnl_pct;
+    const pnlCell = pnl != null
+      ? `<td class="${pnl >= 0 ? 'pnl-pos' : 'pnl-neg'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%</td>`
+      : '<td style="color:var(--text-muted)">—</td>';
+    const time = new Date(t.timestamp).toLocaleString('de-DE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${t.symbol || '—'}</td>
+      <td style="color:${t.type === 'BUY' ? '#3fb950' : '#f85149'};font-weight:600">${t.type}</td>
+      <td>$${t.price.toFixed(2)}</td>
+      <td style="color:var(--text-muted);font-size:11px">${time}</td>
+      ${pnlCell}
+    `;
+    tbody.appendChild(tr);
+  });
 }
 
 // ── Market scanner ────────────────────────────────────────────────────────────
@@ -465,7 +541,7 @@ function renderScanResult(data, interval) {
       <span class="scanner-sym">${r.symbol}</span>
       <span class="scanner-score" style="color:${scoreColor}">${r.score}/100</span>
       <span class="scanner-reason">${r.reason}</span>
-      <button class="${isBest ? 'btn-use-sim' : 'btn-tiny'}" onclick="useSim('${r.symbol}','${interval}')">
+      <button class="${isBest ? 'btn-use-sim' : 'btn-tiny'}" onclick="useSym('${r.symbol}','${interval}')">
         ${isBest ? '★ Verwenden' : 'Verwenden'}
       </button>
     </div>`;
@@ -487,11 +563,11 @@ async function loadSimHistory() {
     const data = await fetch('/api/simulations').then(r => r.json());
     _simList = data.simulations || [];
     renderSimHistory(_simList);
-    populateSimPickers(_simList);
+    populateSimPicker(_simList);
   } catch (e) {}
 }
 
-function populateSimPickers(sims) {
+function populateSimPicker(sims) {
   const opts = ['<option value="">— Aktuelle Simulation —</option>',
     ...sims.map(s => {
       const ret = (s.total_return_pct || 0);
@@ -500,13 +576,6 @@ function populateSimPickers(sims) {
     })
   ].join('');
   document.getElementById('charts-sim-select').innerHTML = opts;
-  document.getElementById('trades-sim-select').innerHTML = opts;
-}
-
-function syncSimPicker(source) {
-  const val = document.getElementById(source + '-sim-select').value;
-  const other = source === 'charts' ? 'trades' : 'charts';
-  document.getElementById(other + '-sim-select').value = val;
 }
 
 async function _loadSimDetail(id) {
@@ -518,9 +587,8 @@ async function _loadSimDetail(id) {
   } catch (e) { return null; }
 }
 
-async function loadSimIntoCharts() {
+async function loadSelectedSim() {
   const id = document.getElementById('charts-sim-select').value;
-  syncSimPicker('charts');
   if (!id) return;
   const sim = await _loadSimDetail(id);
   if (!sim) return;
@@ -559,31 +627,7 @@ async function loadSimIntoCharts() {
     portfolioChart.update();
   }
 
-  // Also show iteration cards if available
-  if (sim.iteration) {
-    const iterList = document.getElementById('iterations-list');
-    const iterCards = document.getElementById('iter-cards');
-    iterCards.innerHTML = '';
-    iterList.style.display = 'block';
-    const card = document.createElement('div');
-    card.className = 'iter-card' + (sim.profitable ? ' profitable' : '');
-    const ret = sim.total_return_pct || 0;
-    card.innerHTML = `
-      <span class="iter-num">Iter. ${sim.iteration}</span>
-      <span class="iter-name">${sim.strategy_name || '?'}</span>
-      <span class="iter-ret" style="color:${ret >= 0 ? '#3fb950' : '#f85149'}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
-    `;
-    iterCards.appendChild(card);
-  }
-}
-
-async function loadSimIntoTrades() {
-  const id = document.getElementById('trades-sim-select').value;
-  syncSimPicker('trades');
-  if (!id) return;
-  const sim = await _loadSimDetail(id);
-  if (!sim) return;
-
+  // Show trade table
   const tbody = document.getElementById('trade-tbody');
   tbody.innerHTML = '';
   const trades = sim.trades || [];
@@ -609,10 +653,27 @@ async function loadSimIntoTrades() {
       tbody.appendChild(tr);
     });
   }
+
+  // Iteration card
+  if (sim.iteration) {
+    const iterList = document.getElementById('iterations-list');
+    const iterCards = document.getElementById('iter-cards');
+    iterCards.innerHTML = '';
+    iterList.style.display = 'block';
+    const card = document.createElement('div');
+    card.className = 'iter-card' + (sim.profitable ? ' profitable' : '');
+    const ret = sim.total_return_pct || 0;
+    card.innerHTML = `
+      <span class="iter-num">Iter. ${sim.iteration}</span>
+      <span class="iter-name">${sim.strategy_name || '?'}</span>
+      <span class="iter-ret" style="color:${ret >= 0 ? '#3fb950' : '#f85149'}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
+    `;
+    iterCards.appendChild(card);
+  }
 }
 
 function setSimAsLiveStrategy() {
-  const id = document.getElementById('charts-sim-select').value || document.getElementById('trades-sim-select').value;
+  const id = document.getElementById('charts-sim-select').value;
   const sim = viewedSim || _simList.find(s => s.id === id);
   if (!id || !sim) { alert('Bitte zuerst eine Simulation auswählen und laden.'); return; }
   selectedSimForLive = {
@@ -625,7 +686,7 @@ function setSimAsLiveStrategy() {
   };
   switchTab('live');
   updateLiveStrategyBar();
-  useSim(sim.symbol, sim.interval);
+  useSym(sim.symbol, sim.interval);
 }
 
 function clearLiveStrategy() {
@@ -675,16 +736,13 @@ function renderSimHistory(sims) {
 
 async function viewSimInCharts(id) {
   document.getElementById('charts-sim-select').value = id;
-  document.getElementById('trades-sim-select').value = id;
-  await loadSimIntoCharts();
-  await loadSimIntoTrades();
-  switchTab('charts');
+  await loadSelectedSim();
+  switchTab('ergebnisse');
 }
 
 async function useSimForLive(id) {
   const sim = _simList.find(s => s.id === id);
   if (!sim) return;
-  // Load full detail to get analysis
   const detail = await _loadSimDetail(id);
   selectedSimForLive = {
     id: sim.id,
@@ -694,27 +752,20 @@ async function useSimForLive(id) {
     strategy_analysis: (detail || sim).strategy_analysis || (detail || sim).analysis || '',
     strategy_patterns: sim.strategy_patterns || (detail || sim).patterns_found || [],
   };
-  useSim(sim.symbol, sim.interval);
+  useSym(sim.symbol, sim.interval);
   updateLiveStrategyBar();
-  // Flash the strategy bar
   const bar = document.getElementById('live-strategy-bar');
   bar.style.outline = '2px solid #3fb950';
   setTimeout(() => { bar.style.outline = ''; }, 1500);
 }
 
-function useSim(symbol, interval) {
+function useSym(symbol, interval) {
   const sel = document.getElementById('live-symbol');
   if (![...sel.options].some(o => o.value === symbol)) {
     sel.insertAdjacentHTML('beforeend', `<option value="${symbol}">${symbol}</option>`);
   }
   sel.value = symbol;
-  document.getElementById('live-interval').value = interval;
-  const card = document.querySelector('#tab-live .card:not(.warning-card):not(#sim-history-card):not(#live-strategy-bar)');
-  if (card) {
-    card.style.outline = '2px solid #58a6ff';
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    setTimeout(() => { card.style.outline = ''; }, 1500);
-  }
+  if (interval) document.getElementById('live-interval').value = interval;
 }
 
 // ── Page init ─────────────────────────────────────────────────────────────────
@@ -733,11 +784,15 @@ async function initPage() {
     const state = await fetch('/api/live/status').then(r => r.json());
     if (state.running) {
       switchTab('live');
-      document.getElementById('live-status-card').style.display = 'block';
+      document.getElementById('live-active-section').style.display = 'block';
       document.getElementById('btn-live-start').disabled = true;
       document.getElementById('btn-live-stop').disabled = false;
 
       document.getElementById('live-status-text').textContent = state.status || 'active';
+
+      const symBadge = document.getElementById('live-symbol-badge');
+      symBadge.textContent = state.symbol || '';
+
       const posBadge = document.getElementById('live-position-badge');
       posBadge.textContent = state.position || 'FLAT';
       posBadge.style.color = state.position === 'IN_POSITION' ? '#3fb950' : '#8b949e';
@@ -754,7 +809,6 @@ async function initPage() {
         document.getElementById('live-next-str').textContent = state.next_check_str || '';
       }
 
-      // Restore strategy bar if a strategy was active
       if (state.strategy_name) {
         selectedSimForLive = {
           strategy_name: state.strategy_name,
@@ -764,6 +818,16 @@ async function initPage() {
           interval: state.interval,
         };
         updateLiveStrategyBar();
+      }
+
+      document.getElementById('live-chart-title').textContent = `Live Preischart — ${state.symbol || ''}`;
+      initLiveChart();
+
+      // Load initial chart data
+      const chartData = await fetch('/api/live/chart-data').then(r => r.json()).catch(() => null);
+      if (chartData) {
+        updateLiveChart(chartData);
+        updateLiveTradeTable(chartData.trade_history || []);
       }
 
       livePolling = setInterval(pollLive, 5000);
