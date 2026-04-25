@@ -247,11 +247,11 @@
     <a class="nav-link" href="#flow-live">Live-Trading-Flow</a>
     <a class="nav-link" href="#claude-modes">Claude-Modi</a>
     <a class="nav-link" href="#indicators">Indikatoren</a>
-    <div class="nav-group-label">Datenformate</div>
-    <a class="nav-link" href="#db-users">users.json</a>
-    <a class="nav-link" href="#db-live">live_state.json</a>
-    <a class="nav-link" href="#db-sims">simulations.json</a>
-    <a class="nav-link" href="#db-simdetail">sim detail</a>
+    <div class="nav-group-label">Datenbankschema (SQLite)</div>
+    <a class="nav-link" href="#db-users">users</a>
+    <a class="nav-link" href="#db-live">live_states</a>
+    <a class="nav-link" href="#db-sims">simulations</a>
+    <a class="nav-link" href="#db-simdetail">simulation_details</a>
     <div class="nav-group-label">API-Referenz</div>
     <a class="nav-link" href="#api-auth">Auth</a>
     <a class="nav-link" href="#api-user">User</a>
@@ -358,7 +358,7 @@
         <div class="arch-row">
           <div class="arch-box">
             <div class="arch-box-title">Host-Volume /app/data</div>
-            <div class="arch-box-sub">users.json · live_state · sims</div>
+            <div class="arch-box-sub">SQLite · crypto_pattern_ai.db</div>
           </div>
           <div class="arch-arrow">|</div>
           <div class="arch-box green">
@@ -382,7 +382,7 @@
     <hr class="section-divider" />
     <div class="section" id="modules">
       <h2><span class="section-icon ic-blue">⚙</span>Backend-Module (app/)</h2>
-      <p class="section-desc">Jede Datei hat eine klar abgegrenzte Verantwortung. Kein Framework-Overhead — nur Python-Standardbibliotheken + FastAPI + httpx + pandas.</p>
+      <p class="section-desc">Jede Datei hat eine klar abgegrenzte Verantwortung. Kein Framework-Overhead — Python-Standardbibliotheken + FastAPI + httpx + pandas + SQLAlchemy.</p>
 
       <div class="module-grid">
         <div class="module-card">
@@ -390,8 +390,20 @@
           <div class="module-desc">FastAPI-App, alle Routes, Auth-Middleware, per-User In-Memory-State (<code>sim_states</code>, <code>live_states</code>), Background Task Orchestrierung, Auto-Resume bei Start</div>
         </div>
         <div class="module-card">
+          <div class="module-name">database.py</div>
+          <div class="module-desc">SQLAlchemy-Engine + Tabellendefinitionen (<code>users</code>, <code>live_states</code>, <code>simulations</code>, <code>simulation_details</code>). <code>DATABASE_URL</code>-Env-Var für einfachen Wechsel zu PostgreSQL.</div>
+        </div>
+        <div class="module-card">
           <div class="module-name">user_store.py</div>
-          <div class="module-desc">Vollständiges User-CRUD auf <code>users.json</code>: Anlegen, Löschen, Sperren, Passwortverwaltung, Claude-Konfiguration pro User. PBKDF2-SHA256 Hashing.</div>
+          <div class="module-desc">Vollständiges User-CRUD auf der <code>users</code>-Tabelle: Anlegen, Löschen, Sperren, Passwortverwaltung, Claude-Konfiguration pro User. PBKDF2-SHA256 Hashing.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">state_store.py</div>
+          <div class="module-desc">Live-State-Persistenz in der <code>live_states</code>-Tabelle pro User. Ermöglicht Auto-Resume nach Container-Neustart. Listen (trade_history etc.) als JSON-Strings gespeichert.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">sim_store.py</div>
+          <div class="module-desc">Simulation-Index in <code>simulations</code>-Tabelle (max. 50/User, neueste zuerst). Vollresultate (Candles, Trades, Signale) als JSON-Blob in <code>simulation_details</code>.</div>
         </div>
         <div class="module-card">
           <div class="module-name">claude_analyst.py</div>
@@ -413,10 +425,6 @@
           <div class="module-name">data_fetcher.py</div>
           <div class="module-desc">Binance REST: historische Kerzen (<code>/api/v3/klines</code>), verfügbare USDC-Paare, aktuelle Kursdaten für den Scanner.</div>
         </div>
-        <div class="module-card">
-          <div class="module-name">state_store.py / sim_store.py</div>
-          <div class="module-desc">Disk-Persistenz: <code>live_state.json</code> pro User (Restart-Sicherheit), Simulationsindex + Vollresultate pro User.</div>
-        </div>
       </div>
     </div>
 
@@ -433,7 +441,7 @@
           <tr><td class="td-name">login.html</td><td><code>/login</code></td><td class="td-desc">Anmeldeformular. Einzige öffentliche Route.</td></tr>
           <tr><td class="td-name">settings.html</td><td><code>/settings</code></td><td class="td-desc">Claude-Zugang konfigurieren (3 Modes), Passwort ändern.</td></tr>
           <tr><td class="td-name">admin.html</td><td><code>/admin</code></td><td class="td-desc">User-Verwaltung: Anlegen, Sperren, Löschen, Platform-Zugang, PW-Reset. Nur Admin.</td></tr>
-          <tr><td class="td-name">docs.html</td><td><code>/docs</code></td><td class="td-desc">Diese Dokumentation. Nur Admin.</td></tr>
+          <tr><td class="td-name">docs.html</td><td><code>/documentation</code></td><td class="td-desc">Diese Dokumentation. Nur Admin.</td></tr>
           <tr><td class="td-name">style.css</td><td><code>/static/style.css</code></td><td class="td-desc">Globales Dark-Theme: CSS-Variablen, Karten, Buttons, Inputs, Tabellen.</td></tr>
         </tbody>
       </table>
@@ -451,7 +459,7 @@
         <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Claude-Analyse:</strong> Gesampelte Indikatortabelle (max. 80 Zeilen) → Claude antwortet mit Strategiename, Analyse, erkannten Mustern, BUY/SELL-Signalen mit Confidence.</div></div>
         <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Backtesting:</strong> <code>run_simulation(candles, signals, fee_pct)</code> — berechnet P&L, Win-Rate, Drawdown, Gebühren, Portfolio-Historie für jeden Trade.</div></div>
         <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Feedback-Loop:</strong> Nicht profitabel? Fehlgeschlagene Trades werden als Feedback an Claude übergeben. Nächste Iteration mit angepasster Strategie. Max. N Iterationen (User-konfigurierbar).</div></div>
-        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>Speichern:</strong> Bestes Ergebnis → <code>save_simulation(username, ...)</code> — Metadaten in <code>simulations.json</code>, Vollresultat (Trades, Signale, Candles) in <code>sims/{id}.json</code>.</div></div>
+        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>Speichern:</strong> Bestes Ergebnis → <code>save_simulation(username, ...)</code> — Metadaten in <code>simulations</code>-Tabelle, Vollresultat (Trades, Signale, Candles) als JSON-Blob in <code>simulation_details</code>-Tabelle.</div></div>
       </div>
     </div>
 
@@ -467,7 +475,7 @@
         <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Symbol-Wahl:</strong> Bei FLAT → wechsle zum besten Paar. Bei IN_POSITION → bleibe beim <code>position_symbol</code> (das gelockte Paar beim letzten BUY). Wechsel nur nach SELL.</div></div>
         <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Signal:</strong> <code>get_live_signal()</code> mit 100 Kerzen + aktuelle Position + letzten 10 Signalen + optionaler Strategie-Kontext aus einer gespeicherten Simulation.</div></div>
         <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Ausführung:</strong> BUY wenn Confidence ≥ 60 % und FLAT. SELL wenn Confidence ≥ 55 % und IN_POSITION. Orders werden als Binance Market-Orders platziert (<code>quoteOrderQty</code>).</div></div>
-        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>State-Update:</strong> Position, Trade-History, Buy-Preis → in-memory + <code>live_state.json</code> auf Disk. Ermöglicht Wiederaufnahme nach Container-Neustart (<code>_auto_resume_all()</code>).</div></div>
+        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>State-Update:</strong> Position, Trade-History, Buy-Preis → in-memory + <code>live_states</code>-Tabelle in SQLite. Ermöglicht Wiederaufnahme nach Container-Neustart (<code>_auto_resume_all()</code>).</div></div>
       </div>
 
       <h3>Konfidenz-Schwellwerte</h3>
@@ -548,78 +556,80 @@
       </table>
     </div>
 
-    <!-- DATA FORMATS -->
+    <!-- DATABASE SCHEMA -->
     <hr class="section-divider" />
     <div class="section" id="db-users">
-      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: users.json</h2>
-      <p class="section-desc">Pfad: <code>/app/data/users.json</code> — wird einmalig beim ersten Start angelegt.</p>
-      <pre>{
-  <span class="s">"username"</span>: {
-    <span class="s">"password_hash"</span>:    <span class="s">"hex"</span>,              <span class="c">// PBKDF2-SHA256, 200 000 Iterationen</span>
-    <span class="s">"role"</span>:             <span class="s">"admin | user"</span>,
-    <span class="s">"enabled"</span>:          <span class="k">true</span>,
-    <span class="s">"created_at"</span>:       <span class="s">"2026-04-25T12:00:00+00:00"</span>,
-    <span class="s">"claude_mode"</span>:      <span class="s">"platform | api_key | subscription"</span>,
-    <span class="s">"claude_api_key"</span>:   <span class="s">"sk-ant-api03-... | null"</span>,
-    <span class="s">"claude_oauth_token"</span>: <span class="s">"sk-ant-oat01-... | null"</span>
-  }
-}</pre>
+      <h2><span class="section-icon ic-yellow">🗄</span>Datenbankschema — SQLite</h2>
+      <p class="section-desc">Datei: <code>/app/data/crypto_pattern_ai.db</code> — wird bei <code>init_db()</code> angelegt (Startup). Wechsel zu PostgreSQL: <code>DATABASE_URL</code>-Env-Var ändern, kein Code-Änderungsbedarf.</p>
+
+      <h3>Tabelle: users</h3>
+      <table class="table-doc">
+        <thead><tr><th>Spalte</th><th>Typ</th><th>Beschreibung</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">username</td><td class="td-type">TEXT PK</td><td class="td-desc">Primärschlüssel</td></tr>
+          <tr><td class="td-name">password_hash</td><td class="td-type">TEXT</td><td class="td-desc">PBKDF2-SHA256, 200 000 Iterationen, Salt <code>cpa_salt_bioval_2026</code></td></tr>
+          <tr><td class="td-name">role</td><td class="td-type">TEXT</td><td class="td-desc"><code>admin</code> oder <code>user</code></td></tr>
+          <tr><td class="td-name">enabled</td><td class="td-type">BOOLEAN</td><td class="td-desc">False = gesperrt, kann sich nicht einloggen</td></tr>
+          <tr><td class="td-name">created_at</td><td class="td-type">TEXT</td><td class="td-desc">ISO-8601 Timestamp (UTC)</td></tr>
+          <tr><td class="td-name">claude_mode</td><td class="td-type">TEXT</td><td class="td-desc"><code>platform</code> | <code>api_key</code> | <code>subscription</code></td></tr>
+          <tr><td class="td-name">claude_api_key</td><td class="td-type">TEXT</td><td class="td-desc"><code>sk-ant-api03-…</code> oder NULL</td></tr>
+          <tr><td class="td-name">claude_oauth_token</td><td class="td-type">TEXT</td><td class="td-desc"><code>sk-ant-oat01-…</code> oder NULL</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="section" id="db-live">
-      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: live_state.json</h2>
-      <p class="section-desc">Pfad: <code>/app/data/users/{username}/live_state.json</code> — ermöglicht Auto-Resume nach Neustart.</p>
-      <pre>{
-  <span class="s">"was_running"</span>:       <span class="k">true</span>,
-  <span class="s">"api_key"</span>:           <span class="s">"Binance API Key"</span>,
-  <span class="s">"api_secret"</span>:        <span class="s">"Binance Secret"</span>,
-  <span class="s">"symbol"</span>:            <span class="s">"BTCUSDC"</span>,
-  <span class="s">"interval"</span>:          <span class="s">"4h"</span>,
-  <span class="s">"trade_amount"</span>:      <span class="n">50.0</span>,
-  <span class="s">"position"</span>:          <span class="s">"FLAT | IN_POSITION"</span>,
-  <span class="s">"buy_price"</span>:         <span class="n">45000.0</span>,        <span class="c">// null wenn FLAT</span>
-  <span class="s">"strategy_name"</span>:     <span class="s">"RSI Oversold Recovery"</span>,
-  <span class="s">"trade_history"</span>: [
-    { <span class="s">"type"</span>: <span class="s">"BUY"</span>, <span class="s">"price"</span>: <span class="n">45000.0</span>, <span class="s">"pnl_pct"</span>: <span class="k">null</span>, <span class="s">"order_id"</span>: <span class="s">"123"</span> }
-  ]
-}</pre>
+      <h3>Tabelle: live_states</h3>
+      <p class="section-desc">Ein Eintrag pro aktivem oder zuletzt aktivem User. Wird beim Stopp gelöscht. Listen als JSON-Strings gespeichert.</p>
+      <table class="table-doc">
+        <thead><tr><th>Spalte</th><th>Typ</th><th>Beschreibung</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">username</td><td class="td-type">TEXT PK</td><td class="td-desc">FK zu users.username</td></tr>
+          <tr><td class="td-name">was_running</td><td class="td-type">BOOLEAN</td><td class="td-desc">True → wird bei Neustart auto-resumed</td></tr>
+          <tr><td class="td-name">api_key / api_secret</td><td class="td-type">TEXT</td><td class="td-desc">Binance-Schlüssel für Restart-Persistenz</td></tr>
+          <tr><td class="td-name">symbol / interval</td><td class="td-type">TEXT</td><td class="td-desc">z.B. <code>BTCUSDC</code> / <code>4h</code></td></tr>
+          <tr><td class="td-name">trade_amount</td><td class="td-type">REAL</td><td class="td-desc">USDT pro Trade</td></tr>
+          <tr><td class="td-name">position</td><td class="td-type">TEXT</td><td class="td-desc"><code>FLAT</code> oder <code>IN_POSITION</code></td></tr>
+          <tr><td class="td-name">buy_price</td><td class="td-type">REAL</td><td class="td-desc">NULL wenn FLAT</td></tr>
+          <tr><td class="td-name">strategy_name / strategy_analysis</td><td class="td-type">TEXT</td><td class="td-desc">Optionaler Strategie-Kontext</td></tr>
+          <tr><td class="td-name">strategy_patterns</td><td class="td-type">TEXT</td><td class="td-desc">JSON-Array, z.B. <code>["RSI Divergence"]</code></td></tr>
+          <tr><td class="td-name">trade_history</td><td class="td-type">TEXT</td><td class="td-desc">JSON-Array aller Trade-Objekte</td></tr>
+          <tr><td class="td-name">updated_at</td><td class="td-type">TEXT</td><td class="td-desc">Letzter Schreibzeitpunkt (ISO-8601)</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="section" id="db-sims">
-      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: simulations.json (Index)</h2>
-      <p class="section-desc">Pfad: <code>/app/data/users/{username}/simulations.json</code> — max. 50 Einträge, neueste zuerst.</p>
-      <pre>[{
-  <span class="s">"id"</span>:               <span class="s">"sim_1745000000"</span>,
-  <span class="s">"created_at"</span>:       <span class="s">"2026-04-25T12:00:00+00:00"</span>,
-  <span class="s">"symbol"</span>:           <span class="s">"BTCUSDC"</span>,   <span class="s">"interval"</span>: <span class="s">"4h"</span>,   <span class="s">"days"</span>: <span class="n">30</span>,
-  <span class="s">"capital"</span>:          <span class="n">1000.0</span>,      <span class="s">"fee_tier"</span>: <span class="s">"standard"</span>,
-  <span class="s">"total_return_pct"</span>: <span class="n">5.23</span>,        <span class="s">"win_rate"</span>: <span class="n">66.7</span>,
-  <span class="s">"num_trades"</span>:       <span class="n">6</span>,           <span class="s">"max_drawdown"</span>: <span class="n">3.2</span>,
-  <span class="s">"total_fees_usdt"</span>:  <span class="n">2.15</span>,        <span class="s">"fee_drag_pct"</span>: <span class="n">0.215</span>,
-  <span class="s">"strategy_name"</span>:    <span class="s">"RSI Oversold Recovery"</span>,
-  <span class="s">"profitable"</span>:       <span class="k">true</span>,        <span class="s">"iterations"</span>: <span class="n">3</span>
-}]</pre>
+      <h3>Tabelle: simulations</h3>
+      <p class="section-desc">Metadaten aller Simulationen. Max. 50 pro User (älteste werden automatisch gelöscht). Indiziert nach <code>username</code>, sortiert nach <code>created_at DESC</code>.</p>
+      <table class="table-doc">
+        <thead><tr><th>Spalte</th><th>Typ</th><th>Beschreibung</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">sim_id</td><td class="td-type">TEXT PK</td><td class="td-desc">z.B. <code>sim_1745000000</code></td></tr>
+          <tr><td class="td-name">username</td><td class="td-type">TEXT IDX</td><td class="td-desc">FK zu users.username</td></tr>
+          <tr><td class="td-name">created_at</td><td class="td-type">TEXT</td><td class="td-desc">ISO-8601 UTC</td></tr>
+          <tr><td class="td-name">symbol / interval / days</td><td class="td-type">TEXT / INT</td><td class="td-desc">Parameter der Simulation</td></tr>
+          <tr><td class="td-name">capital / fee_tier</td><td class="td-type">REAL / TEXT</td><td class="td-desc">Startkapital und Gebühren-Tier</td></tr>
+          <tr><td class="td-name">total_return_pct / win_rate / num_trades</td><td class="td-type">REAL / INT</td><td class="td-desc">Ergebnis-Kennzahlen</td></tr>
+          <tr><td class="td-name">max_drawdown / total_fees_usdt / fee_drag_pct</td><td class="td-type">REAL</td><td class="td-desc">Risiko- und Kostenmetriken</td></tr>
+          <tr><td class="td-name">strategy_name / strategy_analysis</td><td class="td-type">TEXT</td><td class="td-desc">Claude-Output</td></tr>
+          <tr><td class="td-name">strategy_patterns</td><td class="td-type">TEXT</td><td class="td-desc">JSON-Array erkannter Muster</td></tr>
+          <tr><td class="td-name">profitable / iterations</td><td class="td-type">BOOL / INT</td><td class="td-desc">War die Simulation profitabel? Wie viele Iterationen?</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="section" id="db-simdetail">
-      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: sims/{id}.json (Vollresultat)</h2>
-      <p class="section-desc">Pfad: <code>/app/data/users/{username}/sims/sim_XXXX.json</code> — alle Index-Felder plus Rohdaten.</p>
-      <pre>{
-  <span class="c">// …alle Felder aus simulations.json, plus:</span>
-  <span class="s">"candle_prices"</span>:     <span class="s">[45000.0, 45200.0, ...]</span>,
-  <span class="s">"candle_timestamps"</span>: <span class="s">[1744000000000, ...]</span>,
-  <span class="s">"signals"</span>:  [{ <span class="s">"candle_index"</span>: <span class="n">42</span>, <span class="s">"action"</span>: <span class="s">"BUY"</span>,  <span class="s">"reason"</span>: <span class="s">"..."</span> }],
-  <span class="s">"trades"</span>: [{
-    <span class="s">"buy_index"</span>: <span class="n">42</span>,  <span class="s">"sell_index"</span>: <span class="n">68</span>,
-    <span class="s">"buy_price"</span>: <span class="n">44500.0</span>,  <span class="s">"sell_price"</span>: <span class="n">46200.0</span>,
-    <span class="s">"pnl_pct"</span>:   <span class="n">3.456</span>,    <span class="c">// netto nach Gebühren</span>
-    <span class="s">"fee_buy"</span>:   <span class="n">0.445</span>,    <span class="s">"fee_sell"</span>: <span class="n">0.462</span>,
-    <span class="s">"reason_buy"</span>: <span class="s">"RSI 26 oversold..."</span>,  <span class="s">"reason_sell"</span>: <span class="s">"RSI 74..."</span>
-  }],
-  <span class="s">"portfolio_history"</span>: [
-    { <span class="s">"candle_index"</span>: <span class="n">0</span>, <span class="s">"value"</span>: <span class="n">1000.0</span>, <span class="s">"close"</span>: <span class="n">44000.0</span> }
-  ]
-}</pre>
+      <h3>Tabelle: simulation_details</h3>
+      <p class="section-desc">Vollresultate als JSON-Blob — enthält alle Daten für Chart-Rendering (Candle-Preise, Trade-Liste, Portfolio-Historie, Signale). Wird nur on-demand geladen.</p>
+      <table class="table-doc">
+        <thead><tr><th>Spalte</th><th>Typ</th><th>Beschreibung</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">sim_id</td><td class="td-type">TEXT PK</td><td class="td-desc">FK zu simulations.sim_id</td></tr>
+          <tr><td class="td-name">username</td><td class="td-type">TEXT</td><td class="td-desc">Zur Absicherung der Datenisolation</td></tr>
+          <tr><td class="td-name">full_data</td><td class="td-type">TEXT</td><td class="td-desc">Vollständiger JSON-Blob: <code>candle_prices</code>, <code>candle_timestamps</code>, <code>signals[]</code>, <code>trades[]</code>, <code>portfolio_history[]</code> + alle Metadaten</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- API REFERENCE -->
@@ -663,7 +673,7 @@
     <div class="section" id="api-live">
       <h3>Live Trading</h3>
       <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/start</span><span class="endpoint-desc"><code>{api_key, api_secret, symbol, interval, trade_amount_usdt, strategy_*}</code></span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/stop</span><span class="endpoint-desc">Stopp + live_state.json löschen</span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/stop</span><span class="endpoint-desc">Stopp + live_states-Eintrag aus DB löschen</span></div>
       <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/status</span><span class="endpoint-desc">running, position, symbol, next_check_ts, log[], trade_history</span></div>
       <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/chart-data</span><span class="endpoint-desc">Letzte 80 Kerzen + vollständige Trade-History</span></div>
     </div>
@@ -684,7 +694,7 @@
         <thead><tr><th>Aspekt</th><th>Detail</th></tr></thead>
         <tbody>
           <tr><td class="td-name">Sessions</td><td class="td-desc">In-Memory Dict <code>token → {username, expiry}</code>. Token: 64-char Hex (<code>secrets.token_hex(32)</code>). TTL: 7 Tage. Verfallen bei Container-Neustart.</td></tr>
-          <tr><td class="td-name">Passwörter</td><td class="td-desc">PBKDF2-SHA256, 200 000 Iterationen. Nur Hash in users.json.</td></tr>
+          <tr><td class="td-name">Passwörter</td><td class="td-desc">PBKDF2-SHA256, 200 000 Iterationen. Nur Hash in DB (<code>users.password_hash</code>).</td></tr>
           <tr><td class="td-name">Middleware</td><td class="td-desc">Alle Pfade außer <code>/login</code>, <code>/auth/*</code>, <code>/static/*</code> prüfen Cookie. APIs → 401 JSON; Seiten → Redirect zu /login.</td></tr>
           <tr><td class="td-name">Rolle admin</td><td class="td-desc">Zugang zu <code>/admin</code>, <code>/docs</code>, allen <code>/api/admin/*</code>. Kann User anlegen, sperren, löschen, Platform-Zugang vergeben.</td></tr>
           <tr><td class="td-name">Rolle user</td><td class="td-desc">Zugang nur zu eigenen Daten. Kann API-Key/OAuth-Token konfigurieren, Passwort ändern. Kein Platform-Zugang ohne Admin-Freigabe.</td></tr>
@@ -697,25 +707,24 @@
     <hr class="section-divider" />
     <div class="section" id="persistence">
       <h2><span class="section-icon ic-green">💾</span>Persistenz &amp; Restart</h2>
-      <p class="section-desc">Das Host-Volume <code>./data → /app/data</code> überlebt Container-Neustarts. Beim Start ruft <code>_auto_resume_all()</code> alle User mit <code>was_running=true</code> wieder auf.</p>
+      <p class="section-desc">Das Host-Volume <code>./data → /app/data</code> überlebt Container-Neustarts. Die SQLite-Datei liegt darin. Beim Start ruft <code>_auto_resume_all()</code> alle User mit <code>was_running=true</code> wieder auf.</p>
 
       <table class="table-doc">
         <thead><tr><th>Daten</th><th>Persistiert</th><th>Restart-Verhalten</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">Simulationsergebnisse</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">Vollständig erhalten; werden beim Start nicht neu geladen.</td></tr>
-          <tr><td class="td-name">Live-State (war aktiv)</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc"><code>_auto_resume_all()</code>: alle User mit <code>was_running=true</code> werden automatisch wiederaufgenommen.</td></tr>
-          <tr><td class="td-name">User-Datenbank</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">users.json bleibt erhalten; Admin wird nur einmalig beim ersten Start angelegt.</td></tr>
+          <tr><td class="td-name">Simulationsergebnisse</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">In SQLite (<code>simulations</code> + <code>simulation_details</code>); vollständig erhalten.</td></tr>
+          <tr><td class="td-name">Live-State (war aktiv)</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc"><code>_auto_resume_all()</code>: alle User mit <code>was_running=true</code> in <code>live_states</code> werden automatisch wiederaufgenommen.</td></tr>
+          <tr><td class="td-name">User-Datenbank</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">SQLite <code>users</code>-Tabelle; Admin wird nur einmalig beim ersten Start angelegt.</td></tr>
           <tr><td class="td-name">In-Memory Sessions</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Alle Sessions verfallen → Re-Login erforderlich.</td></tr>
-          <tr><td class="td-name">Laufende Simulationen</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Werden abgebrochen. Bereits gespeicherte Ergebnisse bleiben.</td></tr>
+          <tr><td class="td-name">Laufende Simulationen</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Werden abgebrochen. Bereits in DB gespeicherte Ergebnisse bleiben erhalten.</td></tr>
         </tbody>
       </table>
 
       <div class="callout callout-green">
-        <strong>Verzeichnisstruktur:</strong><br/>
-        <code>/app/data/users.json</code> — User-Datenbank<br/>
-        <code>/app/data/users/{name}/live_state.json</code> — Live-State<br/>
-        <code>/app/data/users/{name}/simulations.json</code> — Index<br/>
-        <code>/app/data/users/{name}/sims/{id}.json</code> — Vollresultate
+        <strong>Einzige persistente Datei:</strong><br/>
+        <code>/app/data/crypto_pattern_ai.db</code> — SQLite-Datenbank (users, live_states, simulations, simulation_details)<br/><br/>
+        <strong>Migration zu PostgreSQL:</strong><br/>
+        <code>DATABASE_URL=postgresql+psycopg2://user:pass@host/dbname</code> — kein weiterer Code-Änderungsbedarf.
       </div>
     </div>
 
@@ -726,6 +735,7 @@
       <table class="table-doc">
         <thead><tr><th>Variable</th><th>Container</th><th>Beschreibung</th></tr></thead>
         <tbody>
+          <tr><td class="td-name">DATABASE_URL</td><td>crypto-pattern-ai</td><td class="td-desc">SQLAlchemy-Connection-String. Default: <code>sqlite:////app/data/crypto_pattern_ai.db</code>. Für PostgreSQL: <code>postgresql+psycopg2://user:pass@host/db</code></td></tr>
           <tr><td class="td-name">CLAUDE_PROXY_URL</td><td>crypto-pattern-ai</td><td class="td-desc">Interne URL des Proxy. Default: <code>http://claude-proxy:8081</code></td></tr>
           <tr><td class="td-name">CLAUDE_CODE_OAUTH_TOKEN</td><td>crypto-claude-proxy</td><td class="td-desc">Server-weiter OAuth-Token für Platform-Modus. Aus Orchestrator-Umgebung geerbt.</td></tr>
           <tr><td class="td-name">ANTHROPIC_MODEL</td><td>crypto-claude-proxy</td><td class="td-desc">Claude-Modell für CLI. Default: <code>claude-sonnet-4-6</code></td></tr>
@@ -757,10 +767,10 @@
       <h2><span class="section-icon ic-red">⚠</span>Sicherheitshinweise</h2>
 
       <div class="callout callout-yellow">
-        <strong>Claude API-Keys und OAuth-Tokens</strong> werden im Klartext in <code>users.json</code> gespeichert. Für höhere Sicherheit kann eine Verschlüsselung (z.B. Fernet/AES) ergänzt werden.
+        <strong>Claude API-Keys und OAuth-Tokens</strong> werden im Klartext in der SQLite-DB gespeichert (<code>users.claude_api_key</code> / <code>users.claude_oauth_token</code>). Für höhere Sicherheit kann eine Verschlüsselung (z.B. Fernet/AES) vor dem Schreiben ergänzt werden.
       </div>
       <div class="callout callout-yellow">
-        <strong>Binance API-Keys</strong> werden für Restart-Persistenz in <code>live_state.json</code> gespeichert. Die Datei liegt auf dem Host-Volume (nur root-lesbar).
+        <strong>Binance API-Keys</strong> werden für Restart-Persistenz in der <code>live_states</code>-Tabelle gespeichert. Die SQLite-Datei liegt auf dem Host-Volume (nur root-lesbar).
       </div>
       <div class="callout callout-blue">
         <strong>Empfohlene Binance-Berechtigungen:</strong> Nur <em>Spot Trading (Enable Spot &amp; Margin Trading)</em>. Keine Auszahlungs- oder Transferrechte.
