@@ -500,6 +500,39 @@ function loadExtraSyms() {
   } catch (e) {}
 }
 
+async function runLiveScan() {
+  const interval = document.getElementById('live-interval')?.value
+    || document.getElementById('scan-interval').value;
+  const extra_symbols = getExtraSyms();
+  const btn = document.getElementById('btn-live-scan');
+  btn.disabled = true;
+  btn.textContent = '⏳ Scanne…';
+  try {
+    const r = await fetch('/api/scan/symbols', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({interval, extra_symbols}),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    const data = await r.json();
+    // Show result in the scanner card (scroll up to it) and also log to live log
+    const box = document.getElementById('live-log-box');
+    const best = data.best_symbol || '?';
+    const rec = data.recommendation || '';
+    box.textContent += `\n🔍 Scanner: bestes Paar = ${best}\n${rec.slice(0, 200)}\n`;
+    box.scrollTop = box.scrollHeight;
+    // Also update full scanner result card
+    renderScanResult(data, interval);
+  } catch (e) {
+    const box = document.getElementById('live-log-box');
+    box.textContent += `\n⚠ Scanner-Fehler: ${e.message}\n`;
+    box.scrollTop = box.scrollHeight;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Jetzt scannen';
+  }
+}
+
 async function runScanner() {
   const interval = document.getElementById('scan-interval').value;
   const extra_symbols = getExtraSyms();
