@@ -15,12 +15,11 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="simulation">Simulation</button>
-    <button class="tab" data-tab="charts">Charts</button>
-    <button class="tab" data-tab="trades">Trades</button>
+    <button class="tab" data-tab="ergebnisse">Ergebnisse</button>
     <button class="tab" data-tab="live">Live Trading</button>
   </nav>
 
-  <!-- SIMULATION TAB -->
+  <!-- ══ SIMULATION TAB ══════════════════════════════════════════════════════ -->
   <section id="tab-simulation" class="tab-content active">
     <div class="card">
       <h2>Konfiguration</h2>
@@ -79,55 +78,36 @@
         <span id="status-text">Idle</span>
         <span id="iteration-badge" class="badge"></span>
       </div>
-
       <div class="metrics-row" id="metrics-row" style="display:none">
-        <div class="metric">
-          <div class="metric-val" id="m-return">—</div>
-          <div class="metric-label">Netto-Return</div>
-        </div>
-        <div class="metric">
-          <div class="metric-val" id="m-winrate">—</div>
-          <div class="metric-label">Win Rate</div>
-        </div>
-        <div class="metric">
-          <div class="metric-val" id="m-trades">—</div>
-          <div class="metric-label">Trades</div>
-        </div>
-        <div class="metric">
-          <div class="metric-val" id="m-drawdown">—</div>
-          <div class="metric-label">Max Drawdown</div>
-        </div>
-        <div class="metric">
-          <div class="metric-val" id="m-fees">—</div>
-          <div class="metric-label">Gebühren gesamt</div>
-        </div>
-        <div class="metric">
-          <div class="metric-val" id="m-feedrag">—</div>
-          <div class="metric-label">Fee-Drag</div>
-        </div>
+        <div class="metric"><div class="metric-val" id="m-return">—</div><div class="metric-label">Netto-Return</div></div>
+        <div class="metric"><div class="metric-val" id="m-winrate">—</div><div class="metric-label">Win Rate</div></div>
+        <div class="metric"><div class="metric-val" id="m-trades">—</div><div class="metric-label">Trades</div></div>
+        <div class="metric"><div class="metric-val" id="m-drawdown">—</div><div class="metric-label">Max Drawdown</div></div>
+        <div class="metric"><div class="metric-val" id="m-fees">—</div><div class="metric-label">Gebühren</div></div>
+        <div class="metric"><div class="metric-val" id="m-feedrag">—</div><div class="metric-label">Fee-Drag</div></div>
       </div>
-
       <div id="analysis-box" class="analysis-box" style="display:none"></div>
     </div>
 
     <div class="card" id="log-card">
-      <h2>Simulation Log <button class="btn-tiny" onclick="clearLog()">Clear</button></h2>
+      <h2>Log <button class="btn-tiny" onclick="clearLog()">Clear</button></h2>
       <div id="log-box" class="log-box"></div>
     </div>
   </section>
 
-  <!-- CHARTS TAB -->
-  <section id="tab-charts" class="tab-content">
+  <!-- ══ ERGEBNISSE TAB (Simulation Charts + Trades) ══════════════════════ -->
+  <section id="tab-ergebnisse" class="tab-content">
     <div class="card sim-picker-bar">
       <div class="sim-picker-row">
         <label>Simulation:</label>
-        <select id="charts-sim-select" onchange="syncSimPicker('charts')">
+        <select id="charts-sim-select">
           <option value="">— Aktuelle Simulation —</option>
         </select>
-        <button class="btn-tiny" onclick="loadSimIntoCharts()">Laden</button>
+        <button class="btn-tiny" onclick="loadSelectedSim()">Laden</button>
         <button class="btn btn-primary btn-sm" onclick="setSimAsLiveStrategy()">★ Für Live wählen</button>
       </div>
     </div>
+
     <div class="card">
       <h2 id="chart-title">Preischart</h2>
       <div class="chart-wrap">
@@ -144,36 +124,13 @@
       <h2>Iterationen</h2>
       <div id="iter-cards"></div>
     </div>
-  </section>
-
-  <!-- TRADES TAB -->
-  <section id="tab-trades" class="tab-content">
-    <div class="card sim-picker-bar">
-      <div class="sim-picker-row">
-        <label>Simulation:</label>
-        <select id="trades-sim-select" onchange="syncSimPicker('trades')">
-          <option value="">— Aktuelle Simulation —</option>
-        </select>
-        <button class="btn-tiny" onclick="loadSimIntoTrades()">Laden</button>
-        <button class="btn btn-primary btn-sm" onclick="setSimAsLiveStrategy()">★ Für Live wählen</button>
-      </div>
-    </div>
     <div class="card">
       <h2>Trade-Protokoll</h2>
-      <div id="no-trades" class="empty-state">Starte eine Simulation, um Trades zu sehen.</div>
+      <div id="no-trades" class="empty-state">Starte eine Simulation oder wähle eine aus dem Dropdown.</div>
       <div class="table-wrap" id="trade-table-wrap" style="display:none">
-        <table id="trade-table">
+        <table>
           <thead>
-            <tr>
-              <th>#</th>
-              <th>Buy Idx</th>
-              <th>Sell Idx</th>
-              <th>Buy Preis</th>
-              <th>Sell Preis</th>
-              <th>Preisbew.</th>
-              <th>P&amp;L netto</th>
-              <th>Gebühren</th>
-            </tr>
+            <tr><th>#</th><th>Buy Idx</th><th>Sell Idx</th><th>Buy Preis</th><th>Sell Preis</th><th>Preisbew.</th><th>P&amp;L netto</th><th>Gebühren</th></tr>
           </thead>
           <tbody id="trade-tbody"></tbody>
         </table>
@@ -181,16 +138,14 @@
     </div>
   </section>
 
-  <!-- LIVE TRADING TAB -->
+  <!-- ══ LIVE TRADING TAB ══════════════════════════════════════════════════ -->
   <section id="tab-live" class="tab-content">
-    <div class="card warning-card">
-      <div class="warn-icon">⚠️</div>
-      <strong>Echtes Geld — Risiko vorhanden</strong><br />
-      Live Trading handelt mit echten Mitteln auf Binance. Nur nutzen, wenn du die Risiken kennst und eine profitable Simulation vorliegt.
-    </div>
+
+    <!-- Setup: Scanner + Config -->
+    <div class="live-section-label">Setup</div>
 
     <div class="card" id="scanner-card">
-      <h2>Marktscanner — Welches Paar jetzt?</h2>
+      <h2>Marktscanner</h2>
       <div class="sim-picker-row" style="margin-bottom:10px">
         <label>Intervall:</label>
         <select id="scan-interval">
@@ -200,17 +155,17 @@
         </select>
         <button class="btn btn-primary btn-sm" id="btn-scan" onclick="runScanner()">Markt scannen</button>
       </div>
-      <div class="sim-picker-row" style="margin-bottom:0;gap:6px">
+      <div class="sim-picker-row" style="margin-bottom:10px;gap:6px">
         <label style="white-space:nowrap">+ Eigene Paare:</label>
         <input id="extra-sym-1" class="extra-sym-input" type="text" placeholder="z.B. SUIUSDC" maxlength="20" oninput="saveExtraSyms()" />
         <input id="extra-sym-2" class="extra-sym-input" type="text" placeholder="z.B. WIFUSDC" maxlength="20" oninput="saveExtraSyms()" />
         <input id="extra-sym-3" class="extra-sym-input" type="text" placeholder="z.B. PEPEUSDC" maxlength="20" oninput="saveExtraSyms()" />
       </div>
-      <div id="scanner-result" class="empty-state">Scannt die Top 10 USDC-Paare und empfiehlt das beste für jetzt.</div>
+      <div id="scanner-result" class="empty-state">Top 10 USDC-Paare + eigene scannen und bestes empfehlen.</div>
     </div>
 
     <div class="card">
-      <h2>Binance API Zugangsdaten</h2>
+      <h2>Konfiguration</h2>
       <div class="form-grid">
         <div class="field full">
           <label>API Key</label>
@@ -221,7 +176,7 @@
           <input id="live-api-secret" type="password" placeholder="Binance API Secret" />
         </div>
         <div class="field">
-          <label>Symbol</label>
+          <label>Start-Symbol</label>
           <select id="live-symbol">
             <option>BTCUSDC</option>
             <option>ETHUSDC</option>
@@ -256,26 +211,58 @@
       </div>
     </div>
 
+    <!-- Active: Status + Chart + Trades -->
+    <div id="live-active-section" style="display:none">
+      <div class="live-section-label">Aktiv</div>
+
+      <div class="card" id="live-status-card">
+        <div class="status-row">
+          <div class="pulse pulse-live" id="live-pulse"></div>
+          <span id="live-status-text">Idle</span>
+          <span id="live-symbol-badge" class="badge" style="background:rgba(88,166,255,0.15);border-color:var(--blue);color:var(--blue)"></span>
+          <span id="live-position-badge" class="badge"></span>
+        </div>
+        <div id="live-countdown-box" class="countdown-box" style="display:none">
+          <div class="countdown-label">Nächste Analyse</div>
+          <div class="countdown-time" id="live-countdown">—</div>
+          <div class="countdown-sub" id="live-next-str">—</div>
+        </div>
+        <div id="live-log-box" class="log-box"></div>
+      </div>
+
+      <div class="card">
+        <h2 id="live-chart-title">Live Preischart</h2>
+        <div class="chart-wrap">
+          <canvas id="live-price-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Ausgeführte Trades</h2>
+        <div id="no-live-trades" class="empty-state">Noch keine Trades ausgeführt.</div>
+        <div class="table-wrap" id="live-trade-table-wrap" style="display:none">
+          <table>
+            <thead>
+              <tr><th>#</th><th>Symbol</th><th>Seite</th><th>Preis</th><th>Zeit</th><th>P&amp;L</th></tr>
+            </thead>
+            <tbody id="live-trade-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- History: Past simulations -->
+    <div class="live-section-label">Vergangene Simulationen</div>
     <div class="card" id="sim-history-card">
-      <h2>Vergangene Simulationen <button class="btn-tiny" onclick="loadSimHistory()">↻ Aktualisieren</button></h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:600">Simulation auswählen</span>
+        <button class="btn-tiny" onclick="loadSimHistory()">↻ Aktualisieren</button>
+      </div>
       <div id="sim-history-list">
         <div class="empty-state">Noch keine Simulationen gespeichert.</div>
       </div>
     </div>
 
-    <div class="card" id="live-status-card" style="display:none">
-      <div class="status-row">
-        <div class="pulse pulse-live" id="live-pulse"></div>
-        <span id="live-status-text">Idle</span>
-        <span id="live-position-badge" class="badge"></span>
-      </div>
-      <div id="live-countdown-box" class="countdown-box" style="display:none">
-        <div class="countdown-label">Nächste Analyse</div>
-        <div class="countdown-time" id="live-countdown">—</div>
-        <div class="countdown-sub" id="live-next-str">—</div>
-      </div>
-      <div id="live-log-box" class="log-box"></div>
-    </div>
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
