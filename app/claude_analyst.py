@@ -1,13 +1,25 @@
+import asyncio
 import json
 import os
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 import httpx
 
+from .news_fetcher import get_market_context
 from .knowledge_store import (
-    get_knowledge_context, get_symbol_patterns, update_symbol_patterns,
-    append_sim_log, update_global_stats, load_global_insights, save_global_insights,
+    MAX_WINNING,
+    MAX_LOSING,
+    get_knowledge_context,
+    get_user_sym_patterns,
+    update_user_patterns,
+    append_user_sim_log,
+    update_user_stats,
+    load_all_user_sim_logs,
+    aggregate_symbol_performance,
+    promote_rules_to_core,
+    write_merged_symbol_to_core,
+    load_core,
 )
 
 PROXY_URL = os.environ.get("CLAUDE_PROXY_URL", "http://claude-proxy:8081")
@@ -40,11 +52,12 @@ def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
     return "\n".join(rows)
 
 
-def _parse_json(text: str) -> Dict:
-    start = text.find("{")
-    end   = text.rfind("}") + 1
-    if start >= 0 and end > start:
-        return json.loads(text[start:end])
+def _parse_json(text: str) -> Any:
+    for open_ch, close_ch in (("{", "}"), ("[", "]")):
+        start = text.find(open_ch)
+        end   = text.rfind(close_ch) + 1
+        if start >= 0 and end > start:
+            return json.loads(text[start:end])
     raise ValueError(f"No JSON found in response: {text[:300]}")
 
 
@@ -100,6 +113,7 @@ async def analyze_with_claude(
     symbol: str,
     interval: str,
     candles: List[Dict],
+    username: str = "",
     feedback: Optional[Dict] = None,
     api_key: Optional[str] = None,
     oauth_token: str = "",
@@ -109,13 +123,14 @@ async def analyze_with_claude(
     period_pct  = ((end_price - start_price) / start_price * 100) if start_price else 0
     data_str    = _format_data(candles, max_rows=80)
 
-    # ── Knowledge injection ──
-    knowledge_block = ""
-    ctx = get_knowledge_context(symbol, interval)
-    if ctx:
-        knowledge_block = f"\n{ctx}\n"
+    knowledge_ctx, news_ctx = await asyncio.gather(
+        asyncio.to_thread(get_knowledge_context, symbol, interval, username),
+        get_market_context(symbol),
+        return_exceptions=True,
+    )
+    knowledge_block = f"\n{knowledge_ctx}\n" if isinstance(knowledge_ctx, str) and knowledge_ctx else ""
+    news_block      = f"\n{news_ctx}\n"      if isinstance(news_ctx, str)      and news_ctx      else ""
 
-    # ── Feedback block ──
     feedback_block = ""
     if feedback:
         sample_trades = ""
@@ -138,7 +153,7 @@ async def analyze_with_claude(
     prompt = f"""You are an expert quantitative cryptocurrency trader. Always respond with valid raw JSON only — no markdown, no code fences, no extra text.
 
 Analyze this {symbol} {interval} market data and generate precise BUY/SELL trading signals.
-{knowledge_block}
+{knowledge_block}{news_block}
 OVERVIEW:
 - Symbol: {symbol} | Interval: {interval} | Candles: {len(candles)} (indices 0–{len(candles)-1})
 - Start: ${start_price:.2f} → End: ${end_price:.2f} | Period change: {period_pct:+.2f}%
@@ -182,6 +197,7 @@ async def get_live_signal(
     interval: str,
     candles: List[Dict],
     current_position: str,
+    username: str = "",
     signal_history: Optional[List[Dict]] = None,
     strategy_name: str = "",
     strategy_analysis: str = "",
@@ -192,11 +208,13 @@ async def get_live_signal(
     data_str      = _format_data(candles, max_rows=80)
     current_price = candles[-1]["close"] if candles else 0
 
-    # ── Knowledge injection ──
-    knowledge_block = ""
-    ctx = get_knowledge_context(symbol, interval)
-    if ctx:
-        knowledge_block = f"{ctx}\n\n"
+    knowledge_ctx, news_ctx = await asyncio.gather(
+        asyncio.to_thread(get_knowledge_context, symbol, interval, username),
+        get_market_context(symbol),
+        return_exceptions=True,
+    )
+    knowledge_block = f"{knowledge_ctx}\n\n" if isinstance(knowledge_ctx, str) and knowledge_ctx else ""
+    news_block      = f"{news_ctx}\n\n"      if isinstance(news_ctx, str)      and news_ctx      else ""
 
     strategy_block = ""
     if strategy_name:
@@ -223,7 +241,7 @@ BACKTESTING-STRATEGIE (als Kontext für diese Session):
     prompt = f"""You are a live cryptocurrency trading AI. Respond with valid raw JSON only.
 
 Analyze {symbol} {interval} data and give ONE trading signal.
-{knowledge_block}{strategy_block}{history_block}CURRENT PRICE: ${current_price:.2f}
+{knowledge_block}{news_block}{strategy_block}{history_block}CURRENT PRICE: ${current_price:.2f}
 CURRENT POSITION: {current_position} (IN_POSITION = only SELL or HOLD; FLAT = only BUY or HOLD)
 
 RECENT DATA (last {len(candles)} candles):
@@ -246,6 +264,7 @@ Respond with ONLY raw JSON:
 
 
 async def scan_market(symbol_summaries: List[Dict], interval: str,
+                      username: str = "",
                       api_key: Optional[str] = None, oauth_token: str = "") -> Dict:
     rows = ["Symbol      | Price       | 24h%   | 7d%    | ATR%  | RSI   | MACD  | Vol",
             "-" * 75]
@@ -256,13 +275,14 @@ async def scan_market(symbol_summaries: List[Dict], interval: str,
         )
     table = "\n".join(rows)
 
-    # Inject historical symbol performance
-    g = load_global_insights()
-    perf = g.get("symbol_performance", {})
+    news_ctx = await get_market_context("BTC")  # global sentiment for scan
+    news_block = f"{news_ctx}\n\n" if news_ctx else ""
+
+    perf = aggregate_symbol_performance()
     perf_block = ""
     if len(perf) >= 2:
         ranked = sorted(perf.items(), key=lambda x: x[1].get("avg_return", 0), reverse=True)
-        perf_block = "\nHISTORICAL PERFORMANCE (from past simulations):\n"
+        perf_block = "\nHISTORICAL PERFORMANCE (aggregated across all users):\n"
         for sym, d in ranked[:6]:
             n = d.get("sessions", 0)
             r = d.get("avg_return", 0)
@@ -270,7 +290,7 @@ async def scan_market(symbol_summaries: List[Dict], interval: str,
 
     prompt = f"""You are a crypto market analyst. Identify the best USDC trading pair for live trading RIGHT NOW.
 
-MARKET SNAPSHOT ({interval} candles, last 60 bars):
+{news_block}MARKET SNAPSHOT ({interval} candles, last 60 bars):
 {table}
 {perf_block}
 Pick the top symbol based on:
@@ -307,32 +327,29 @@ async def test_connection(api_key: Optional[str] = None, oauth_token: str = "") 
         return False
 
 
-# ── Learning ──────────────────────────────────────────────────────────────────
+# ── Learning (writes to users/{username}/ only) ───────────────────────────────
 
 async def synthesize_learnings(
     symbol: str,
     interval: str,
     sim_entry: dict,
+    username: str,
     api_key: Optional[str] = None,
     oauth_token: str = "",
 ) -> None:
-    """
-    After a simulation, ask Claude to update the knowledge base.
-    Runs fire-and-forget — never raises.
-    """
-    profitable   = sim_entry.get("profitable", False)
-    return_pct   = sim_entry.get("total_return_pct", 0)
-    win_rate     = sim_entry.get("win_rate", 0)
-    num_trades   = sim_entry.get("num_trades", 0)
-    max_dd       = sim_entry.get("max_drawdown", 0)
-    strategy     = sim_entry.get("strategy_name", "")
-    patterns     = sim_entry.get("strategy_patterns", [])
-    analysis     = (sim_entry.get("strategy_analysis", "") or "")[:500]
-    iterations   = sim_entry.get("iterations", 1)
+    """Update user's knowledge base after a simulation. Fire-and-forget — never raises."""
+    profitable = sim_entry.get("profitable", False)
+    return_pct = sim_entry.get("total_return_pct", 0)
+    win_rate   = sim_entry.get("win_rate", 0)
+    num_trades = sim_entry.get("num_trades", 0)
+    max_dd     = sim_entry.get("max_drawdown", 0)
+    strategy   = sim_entry.get("strategy_name", "")
+    patterns   = sim_entry.get("strategy_patterns", [])
+    analysis   = (sim_entry.get("strategy_analysis", "") or "")[:500]
+    iterations = sim_entry.get("iterations", 1)
 
-    # Always log, regardless of Claude synthesis outcome
     try:
-        append_sim_log({
+        append_user_sim_log(username, {
             "timestamp":     datetime.now(timezone.utc).isoformat(),
             "sim_id":        sim_entry.get("id", ""),
             "symbol":        symbol,
@@ -346,16 +363,15 @@ async def synthesize_learnings(
             "profitable":    profitable,
             "iterations":    iterations,
         })
-        update_global_stats(symbol, return_pct, profitable)
+        update_user_stats(username, symbol, return_pct, profitable)
     except Exception:
         pass
 
-    # Ask Claude to update the pattern library
     try:
-        current   = get_symbol_patterns(symbol, interval)
-        cur_json  = json.dumps(current, indent=2) if current else "{}"
-        sc        = current.get("session_count", 0)
-        ps        = current.get("profitable_sessions", 0)
+        current  = get_user_sym_patterns(username, symbol, interval)
+        cur_json = json.dumps(current, indent=2) if current else "{}"
+        sc       = current.get("session_count", 0)
+        ps       = current.get("profitable_sessions", 0)
 
         prompt = f"""You are a quantitative trading knowledge curator. Update the pattern library for {symbol} {interval}.
 
@@ -375,9 +391,9 @@ INSTRUCTIONS:
 2. If NOT PROFITABLE → add/strengthen a losing_pattern entry noting what failed
 3. Update running averages: new_avg = (old_avg * n + new_value) / (n + 1)
 4. Set session_count = {sc + 1}, profitable_sessions = {ps + (1 if profitable else 0)}
-5. Update market_notes if you see a pattern in the data worth noting
-6. Keep descriptions ≤ 100 chars. Max {10} winning and {6} losing patterns — drop weakest if exceeded.
-7. last_updated must be today's date (ISO-8601)
+5. Update market_notes if you see a pattern worth noting
+6. Keep descriptions ≤ 100 chars. Max {MAX_WINNING} winning and {MAX_LOSING} losing patterns — drop weakest if exceeded.
+7. last_updated must be today's ISO-8601 date
 
 Respond with ONLY raw JSON (no markdown):
 {{
@@ -390,43 +406,40 @@ Respond with ONLY raw JSON (no markdown):
 }}"""
 
         result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
-
         if isinstance(result, dict) and "session_count" in result:
             result["last_updated"] = datetime.now(timezone.utc).isoformat()
-            update_symbol_patterns(symbol, interval, result)
-
+            update_user_patterns(username, symbol, interval, result)
     except Exception:
-        pass  # Never block the main flow
+        pass
 
 
-async def update_global_rules(
+async def distill_and_promote_rules(
     api_key: Optional[str] = None,
     oauth_token: str = "",
-) -> None:
+) -> list:
     """
-    Periodically distill cross-symbol rules from the sim_log.
-    Called after every 10th simulation.
+    Admin-triggered: Claude reads all users' sim logs, distills global rules,
+    and writes them to core/patterns.json.
+    Returns the new rule list, or [] on failure.
     """
-    from .knowledge_store import _load, _SIM_LOG
-
     try:
-        log     = _load(_SIM_LOG, {"entries": []})
-        entries = log.get("entries", [])[:50]
+        entries = load_all_user_sim_logs(limit=60)
         if len(entries) < 5:
-            return
+            return []
 
-        g     = load_global_insights()
-        rules = g.get("rules", [])
+        core  = load_core()
+        rules = core.get("global_rules", [])
 
         summary_lines = []
         for e in entries:
             summary_lines.append(
-                f"  {e['symbol']} {e['interval']}: {e['return_pct']:+.1f}% | "
-                f"wr={e['win_rate']:.0f}% | patterns={','.join(e.get('patterns',[]))}"
+                f"  [{e.get('_user','?')}] {e['symbol']} {e['interval']}: "
+                f"{e['return_pct']:+.1f}% | wr={e['win_rate']:.0f}% | "
+                f"patterns={','.join(e.get('patterns', []))}"
             )
         summary = "\n".join(summary_lines)
 
-        prompt = f"""You are a quantitative trading researcher. Distill cross-symbol patterns from recent simulation results.
+        prompt = f"""You are a quantitative trading researcher. Distill cross-symbol, cross-user patterns from recent simulation results.
 
 RECENT SIMULATIONS (last {len(entries)}):
 {summary}
@@ -434,9 +447,9 @@ RECENT SIMULATIONS (last {len(entries)}):
 CURRENT GLOBAL RULES:
 {json.dumps(rules, indent=2)}
 
-Identify 3–6 reliable rules that appear consistently across multiple simulations.
+Identify 3–6 reliable rules that appear consistently across multiple simulations and users.
 Update confidence from "seed" → "low"/"medium"/"high" based on sample counts.
-Remove rules that appear to be contradicted by the data.
+Remove rules that appear contradicted by the data.
 
 Respond ONLY with a JSON array of rule objects:
 [
@@ -446,12 +459,72 @@ Respond ONLY with a JSON array of rule objects:
 
         result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
 
+        new_rules: list = []
         if isinstance(result, list):
-            g["rules"] = result[:8]
-            save_global_insights(g)
+            new_rules = result
         elif isinstance(result, dict) and "rules" in result:
-            g["rules"] = result["rules"][:8]
-            save_global_insights(g)
+            new_rules = result["rules"]
 
+        if new_rules:
+            promote_rules_to_core(new_rules[:8])
+            return new_rules
+        return []
     except Exception:
-        pass
+        return []
+
+
+async def promote_symbol_patterns_via_claude(
+    username: str,
+    symbol: str,
+    interval: str,
+    api_key: Optional[str] = None,
+    oauth_token: str = "",
+) -> bool:
+    """
+    Admin-triggered: Claude merges user's symbol patterns with existing core patterns,
+    then writes the result to core/patterns.json.
+    Returns True on success.
+    """
+    try:
+        user_data = get_user_sym_patterns(username, symbol, interval)
+        if not user_data:
+            return False
+
+        core = load_core()
+        core_data = core.get("symbol_patterns", {}).get(symbol, {}).get(interval, {})
+
+        prompt = f"""You are a quantitative trading knowledge curator. Merge user-contributed patterns into the core knowledge base.
+
+USER PATTERNS (to be promoted — verified through simulations):
+{json.dumps(user_data, indent=2)}
+
+EXISTING CORE PATTERNS (community-verified):
+{json.dumps(core_data, indent=2) if core_data else "{}"}
+
+TASK: Merge these patterns intelligently:
+1. Keep winning patterns from both; drop weakest if >10 total
+2. Keep losing patterns from both; drop weakest if >6 total
+3. Update session_count and profitable_sessions by summing both
+4. Recalculate avg_return_pct as weighted average
+5. Write a concise market_notes combining key insights
+6. Set last_updated to today's date
+
+Respond with ONLY raw JSON — the merged pattern object:
+{{
+  "session_count": 0,
+  "profitable_sessions": 0,
+  "winning_patterns": [],
+  "losing_patterns": [],
+  "market_notes": "",
+  "last_updated": "{datetime.now(timezone.utc).date().isoformat()}"
+}}"""
+
+        result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+        if not isinstance(result, dict) or "session_count" not in result:
+            return False
+
+        result["last_updated"] = datetime.now(timezone.utc).isoformat()
+        write_merged_symbol_to_core(symbol, interval, result)
+        return True
+    except Exception:
+        return False

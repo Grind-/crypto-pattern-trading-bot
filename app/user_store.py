@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 from sqlalchemy import delete, insert, select, update
 
-from .database import engine, users
+from .database import engine, live_states, simulation_details, simulations, users
 
 _SALT = "cpa_salt_bioval_2026"
 _DEFAULT_ADMIN_HASH = "700acb2e5e32e2cbdb1cc63418b0842ba87925541d9fe07a7193646bd563aa3a"
@@ -100,9 +100,17 @@ def delete_user(username: str) -> bool:
     if username == "admin":
         return False
     with engine.connect() as conn:
-        result = conn.execute(
-            delete(users).where(users.c.username == username)
-        )
+        conn.execute(delete(live_states).where(live_states.c.username == username))
+        to_delete = [
+            r._mapping["sim_id"]
+            for r in conn.execute(
+                select(simulations.c.sim_id).where(simulations.c.username == username)
+            ).fetchall()
+        ]
+        if to_delete:
+            conn.execute(delete(simulation_details).where(simulation_details.c.sim_id.in_(to_delete)))
+            conn.execute(delete(simulations).where(simulations.c.sim_id.in_(to_delete)))
+        result = conn.execute(delete(users).where(users.c.username == username))
         conn.commit()
     return result.rowcount > 0
 

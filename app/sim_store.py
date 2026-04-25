@@ -24,8 +24,6 @@ def _entry_to_row(username: str, entry: dict) -> dict:
         if col == "username":
             continue
         val = entry.get(col) or entry.get("id" if col == "sim_id" else col)
-        if col == "sim_id" and val is None:
-            val = entry.get("id")
         if col in _JSON_COLS and not isinstance(val, str):
             val = json.dumps(val) if val is not None else "[]"
         row[col] = val
