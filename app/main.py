@@ -72,7 +72,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app = FastAPI(title="Crypto Pattern AI")
+app = FastAPI(title="Crypto Pattern AI", docs_url=None, redoc_url=None)
 app.add_middleware(AuthMiddleware)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
@@ -254,7 +254,7 @@ async def settings_page():
     return FileResponse("frontend/settings.html")
 
 
-@app.get("/docs")
+@app.get("/documentation")
 async def docs_page(request: Request):
     _require_admin(request)
     return FileResponse("frontend/docs.html")
