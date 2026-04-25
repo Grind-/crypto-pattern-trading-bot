@@ -23,7 +23,8 @@ from .sim_store import (save_simulation, load_simulations as _load_sims,
 from .user_store import (init_users, list_users, get_user, authenticate,
                          create_user, delete_user, set_enabled, reset_password,
                          update_claude_config, set_platform_access,
-                         get_claude_api_key, uses_platform)
+                         get_claude_api_key, get_claude_oauth_token,
+                         uses_platform, uses_subscription)
 
 # ── Session store ─────────────────────────────────────────────────────────────
 _SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
@@ -104,7 +105,7 @@ async def _auto_resume_all():
         if not valid:
             clear_live_state(username)
             continue
-        api_key = get_claude_api_key(username) if not uses_platform(username) else None
+        api_key, oauth_token = _claude_creds(username)
         state = _get_live_state(username)
         state.update({
             "running": True,
@@ -127,7 +128,7 @@ async def _auto_resume_all():
             "live_candles": [],
             "buy_price": saved.get("buy_price"),
         })
-        asyncio.create_task(_live_loop(req, username, api_key))
+        asyncio.create_task(_live_loop(req, username, api_key, oauth_token))
 
 
 # ── Per-user state ────────────────────────────────────────────────────────────
@@ -154,6 +155,20 @@ def _default_live_state() -> dict:
         "strategy_name": "", "strategy_analysis": "", "strategy_patterns": [],
         "trade_history": [], "live_candles": [], "buy_price": None,
     }
+
+
+def _claude_creds(username: str) -> tuple[Optional[str], str]:
+    """Returns (api_key, oauth_token) for the user based on their claude_mode."""
+    return get_claude_api_key(username), get_claude_oauth_token(username)
+
+
+def _claude_configured(username: str) -> bool:
+    """True if the user has usable Claude credentials."""
+    if uses_platform(username):
+        return True
+    if uses_subscription(username):
+        return bool(get_claude_oauth_token(username))
+    return bool(get_claude_api_key(username))
 
 
 def _get_sim_state(username: str) -> dict:
@@ -249,6 +264,7 @@ async def get_profile(request: Request):
         "role": user["role"],
         "claude_mode": user.get("claude_mode", "api_key"),
         "has_api_key": bool(user.get("claude_api_key")),
+        "has_oauth_token": bool(user.get("claude_oauth_token")),
     }
 
 
@@ -257,17 +273,20 @@ async def set_claude_config(body: dict, request: Request):
     user = _get_current_user(request)
     mode = body.get("mode", "api_key")
     api_key = body.get("api_key", "").strip() or None
+    oauth_token = body.get("oauth_token", "").strip() or None
     if mode == "platform" and user["role"] != "admin":
         raise HTTPException(403, "Platform-Zugang nur durch Admin aktivierbar")
-    update_claude_config(user["username"], mode, api_key)
+    if mode not in ("platform", "api_key", "subscription"):
+        raise HTTPException(400, "Ungültiger Modus")
+    update_claude_config(user["username"], mode, api_key=api_key, oauth_token=oauth_token)
     return {"ok": True}
 
 
 @app.post("/api/user/test-claude")
 async def test_claude(request: Request):
     user = _get_current_user(request)
-    api_key = get_claude_api_key(user["username"])
-    ok = await test_connection(api_key=api_key)
+    api_key, oauth_token = _claude_creds(user["username"])
+    ok = await test_connection(api_key=api_key, oauth_token=oauth_token)
     return {"ok": ok}
 
 
@@ -300,6 +319,7 @@ async def admin_list_users(request: Request):
             "created_at": udata.get("created_at", ""),
             "claude_mode": udata.get("claude_mode", "api_key"),
             "has_api_key": bool(udata.get("claude_api_key")),
+            "has_oauth_token": bool(udata.get("claude_oauth_token")),
         })
     return {"users": safe}
 
@@ -399,8 +419,8 @@ async def scan_symbols(body: dict, request: Request):
     summaries = await _fetch_scan_summaries(interval, symbols)
     if not summaries:
         raise HTTPException(503, "Keine Marktdaten verfügbar")
-    api_key = get_claude_api_key(user["username"])
-    return await scan_market(summaries, interval, api_key=api_key)
+    api_key, oauth_token = _claude_creds(user["username"])
+    return await scan_market(summaries, interval, api_key=api_key, oauth_token=oauth_token)
 
 
 @app.get("/api/symbols")
@@ -422,9 +442,9 @@ async def start_sim(req: SimRequest, background_tasks: BackgroundTasks,
     sim_state = _get_sim_state(username)
     if sim_state["running"]:
         raise HTTPException(409, "Simulation already running")
-    api_key = get_claude_api_key(username)
-    if not uses_platform(username) and not api_key:
-        raise HTTPException(400, "Kein Claude API-Key konfiguriert. Bitte in Einstellungen hinterlegen.")
+    if not _claude_configured(username):
+        raise HTTPException(400, "Claude nicht konfiguriert. Bitte in Einstellungen API-Key oder OAuth-Token hinterlegen.")
+    api_key, oauth_token = _claude_creds(username)
 
     sim_state.update({
         "running": True, "iteration": 0, "max_iterations": req.max_iterations,
@@ -433,7 +453,7 @@ async def start_sim(req: SimRequest, background_tasks: BackgroundTasks,
         "candle_prices": [], "candle_timestamps": [],
     })
     fee_pct = FEE_TIERS.get(req.fee_tier, 0.1)
-    background_tasks.add_task(_sim_loop, req, fee_pct, username, api_key)
+    background_tasks.add_task(_sim_loop, req, fee_pct, username, api_key, oauth_token)
     return {"ok": True}
 
 
@@ -492,9 +512,9 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
     if live_state["running"]:
         raise HTTPException(409, "Live trading already running")
 
-    api_key = get_claude_api_key(username)
-    if not uses_platform(username) and not api_key:
-        raise HTTPException(400, "Kein Claude API-Key konfiguriert. Bitte in Einstellungen hinterlegen.")
+    if not _claude_configured(username):
+        raise HTTPException(400, "Claude nicht konfiguriert. Bitte in Einstellungen API-Key oder OAuth-Token hinterlegen.")
+    api_key, oauth_token = _claude_creds(username)
 
     trader = BinanceTrader(req.api_key, req.api_secret)
     valid = await trader.validate_keys()
@@ -525,7 +545,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "strategy_patterns": req.strategy_patterns,
         "trade_history": [], "buy_price": None,
     })
-    background_tasks.add_task(_live_loop, req, username, api_key)
+    background_tasks.add_task(_live_loop, req, username, api_key, oauth_token)
     return {"ok": True}
 
 
@@ -562,7 +582,7 @@ async def live_chart_data(request: Request):
 # ── Background tasks ───────────────────────────────────────────────────────────
 
 async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
-                    api_key: Optional[str]):
+                    api_key: Optional[str], oauth_token: str = ""):
     sim_state = _get_sim_state(username)
     try:
         _log(sim_state, f"Fetching {req.days}d of {req.interval} data for {req.symbol}…")
@@ -591,7 +611,8 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
 
             analysis = await analyze_with_claude(
                 symbol=req.symbol, interval=req.interval,
-                candles=enriched, feedback=feedback, api_key=api_key,
+                candles=enriched, feedback=feedback,
+                api_key=api_key, oauth_token=oauth_token,
             )
 
             strategy = analysis.get("strategy_name", f"Strategy {iteration + 1}")
@@ -678,13 +699,13 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
 
 async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: str,
                                   position_symbol: str, username: str,
-                                  api_key: Optional[str]) -> str:
+                                  api_key: Optional[str], oauth_token: str = "") -> str:
     live_state = _get_live_state(username)
     try:
         summaries = await _fetch_scan_summaries(interval)
         if not summaries:
             return current_symbol
-        result = await scan_market(summaries, interval, api_key=api_key)
+        result = await scan_market(summaries, interval, api_key=api_key, oauth_token=oauth_token)
         best = result.get("best_symbol", "")
         rec = result.get("recommendation", "")
         if not best:
@@ -708,7 +729,8 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
         return current_symbol
 
 
-async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str]):
+async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
+                     oauth_token: str = ""):
     live_state = _get_live_state(username)
     trader = BinanceTrader(req.api_key, req.api_secret)
     interval_seconds = _interval_to_seconds(req.interval)
@@ -763,7 +785,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str]):
             _log(live_state, "🔍 Marktcheck…")
             current_symbol = await _scan_and_maybe_switch(
                 req.interval, current_symbol, live_state["position"],
-                position_symbol, username, api_key,
+                position_symbol, username, api_key, oauth_token,
             )
 
             active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
@@ -785,7 +807,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str]):
                 strategy_name=req.strategy_name,
                 strategy_analysis=req.strategy_analysis,
                 strategy_patterns=req.strategy_patterns,
-                api_key=api_key,
+                api_key=api_key, oauth_token=oauth_token,
             )
 
             action = signal.get("action", "HOLD")

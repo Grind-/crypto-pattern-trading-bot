@@ -84,6 +84,7 @@ def create_user(username: str, password: str, role: str = "user",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "claude_mode": claude_mode,
         "claude_api_key": None,
+        "claude_oauth_token": None,
     }
     _save(users)
     os.makedirs(f"/app/data/users/{username}/sims", exist_ok=True)
@@ -122,12 +123,16 @@ def reset_password(username: str, new_password: str) -> bool:
 
 
 def update_claude_config(username: str, mode: str,
-                         api_key: Optional[str] = None) -> bool:
+                         api_key: Optional[str] = None,
+                         oauth_token: Optional[str] = None) -> bool:
     users = _load()
     if username not in users:
         return False
     users[username]["claude_mode"] = mode
-    users[username]["claude_api_key"] = api_key or None
+    if api_key is not None:
+        users[username]["claude_api_key"] = api_key or None
+    if oauth_token is not None:
+        users[username]["claude_oauth_token"] = oauth_token or None
     _save(users)
     return True
 
@@ -149,11 +154,25 @@ def get_claude_api_key(username: str) -> Optional[str]:
     user = get_user(username)
     if not user:
         return None
-    if user.get("claude_mode") == "platform":
-        return None  # proxy mode, no key needed
+    if user.get("claude_mode") in ("platform", "subscription"):
+        return None
     return user.get("claude_api_key")
+
+
+def get_claude_oauth_token(username: str) -> str:
+    user = get_user(username)
+    if not user:
+        return ""
+    if user.get("claude_mode") == "subscription":
+        return user.get("claude_oauth_token") or ""
+    return ""
 
 
 def uses_platform(username: str) -> bool:
     user = get_user(username)
     return bool(user and user.get("claude_mode") == "platform")
+
+
+def uses_subscription(username: str) -> bool:
+    user = get_user(username)
+    return bool(user and user.get("claude_mode") == "subscription")
