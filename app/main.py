@@ -14,7 +14,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .data_fetcher import fetch_klines, fetch_latest_klines, get_available_symbols
 from .indicators import compute_indicators
 from .claude_analyst import (analyze_with_claude, get_live_signal,
-                              scan_market, test_connection)
+                              scan_market, test_connection,
+                              synthesize_learnings, update_global_rules)
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import save_live_state, load_live_state, clear_live_state, update_position
@@ -697,6 +698,20 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
                 "candle_timestamps": sim_state.get("candle_timestamps", []),
             }
             save_simulation(username, entry, full_result)
+
+            # Fire-and-forget: let Claude update the knowledge base
+            asyncio.create_task(
+                synthesize_learnings(req.symbol, req.interval, entry,
+                                     api_key=api_key, oauth_token=oauth_token)
+            )
+
+            # Every 10th simulation: distill cross-symbol global rules
+            from .knowledge_store import load_global_insights
+            total = load_global_insights().get("total_simulations", 0)
+            if total > 0 and total % 10 == 0:
+                asyncio.create_task(
+                    update_global_rules(api_key=api_key, oauth_token=oauth_token)
+                )
 
     except Exception as e:
         sim_state["status"] = "error"

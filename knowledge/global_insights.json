@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "updated_at": "",
+  "total_simulations": 0,
+  "rules": [
+    {
+      "rule": "Confirm BUY signals with volume_ratio > 1.2 — low-volume breakouts frequently fail",
+      "confidence": "seed",
+      "samples": 0
+    },
+    {
+      "rule": "Avoid BUY when RSI > 72 — mean-reversion risk is high near overbought extremes",
+      "confidence": "seed",
+      "samples": 0
+    },
+    {
+      "rule": "RSI < 28 + MACD bullish cross is one of the strongest entry combinations",
+      "confidence": "seed",
+      "samples": 0
+    },
+    {
+      "rule": "bb_pct < 0.1 (price near lower BB) with rising volume = high-probability reversal",
+      "confidence": "seed",
+      "samples": 0
+    }
+  ],
+  "symbol_performance": {},
+  "interval_notes": {
+    "1h": "Noisy — many false signals; require higher confidence thresholds",
+    "4h": "Best balance of signal quality and trade frequency for most USDC pairs",
+    "1d": "Very reliable patterns but few trades per month"
+  }
+}

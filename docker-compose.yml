@@ -25,6 +25,7 @@ services:
       - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
     volumes:
       - /opt/claude-platform/apps/claude-platform-sandbox/crypto-pattern-ai/data:/app/data
+      - /opt/claude-platform/apps/claude-platform-sandbox/crypto-pattern-ai/knowledge:/app/knowledge
     depends_on:
       - claude-proxy
     networks:
