@@ -2,34 +2,41 @@ import json
 import os
 from typing import Optional
 
-STATE_FILE = "/app/data/live_state.json"
+_DATA_ROOT = "/app/data/users"
 
 
-def save_live_state(config: dict) -> None:
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w") as f:
+def _state_file(username: str) -> str:
+    return f"{_DATA_ROOT}/{username}/live_state.json"
+
+
+def save_live_state(username: str, config: dict) -> None:
+    path = _state_file(username)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         json.dump(config, f, indent=2)
 
 
-def load_live_state() -> Optional[dict]:
-    if not os.path.exists(STATE_FILE):
+def load_live_state(username: str) -> Optional[dict]:
+    path = _state_file(username)
+    if not os.path.exists(path):
         return None
     try:
-        with open(STATE_FILE) as f:
+        with open(path) as f:
             return json.load(f)
     except Exception:
         return None
 
 
-def clear_live_state() -> None:
-    if os.path.exists(STATE_FILE):
-        os.remove(STATE_FILE)
+def clear_live_state(username: str) -> None:
+    path = _state_file(username)
+    if os.path.exists(path):
+        os.remove(path)
 
 
-def update_position(position: str, symbol: str = None) -> None:
-    state = load_live_state()
+def update_position(username: str, position: str, symbol: str = None) -> None:
+    state = load_live_state(username)
     if state:
         state["position"] = position
         if symbol:
             state["symbol"] = symbol
-        save_live_state(state)
+        save_live_state(username, state)

@@ -5,13 +5,11 @@ from typing import List, Dict, Optional
 import httpx
 
 PROXY_URL = os.environ.get("CLAUDE_PROXY_URL", "http://claude-proxy:8081")
-SYSTEM_TRADER = (
-    "You are an expert quantitative cryptocurrency trader. "
-    "Always respond with valid raw JSON only — no markdown, no code fences, no extra text."
-)
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
-def _format_data(candles: List[Dict], max_rows: int = 160) -> str:
+def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
     step = max(1, len(candles) // max_rows)
     sampled = candles[::step][:max_rows]
 
@@ -37,25 +35,55 @@ def _format_data(candles: List[Dict], max_rows: int = 160) -> str:
     return "\n".join(rows)
 
 
-async def _call_proxy(system: str, prompt: str, timeout: int = 270) -> Dict:
+def _parse_json(text: str) -> Dict:
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        return json.loads(text[start:end])
+    raise ValueError(f"No JSON found in response: {text[:300]}")
+
+
+async def _call_proxy(prompt: str, timeout: int = 270) -> Dict:
     async with httpx.AsyncClient(timeout=timeout + 30) as client:
         r = await client.post(
             f"{PROXY_URL}/analyze",
-            json={"system": system, "prompt": prompt},
+            json={"system": "", "prompt": prompt},
         )
         r.raise_for_status()
         data = r.json()
 
-    # If proxy returned raw_text, try to extract JSON from it
     if "raw_text" in data and len(data) == 1:
-        raw = data["raw_text"]
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(raw[start:end])
-        raise ValueError(f"Unexpected proxy response: {raw[:300]}")
-
+        return _parse_json(data["raw_text"])
     return data
+
+
+async def _call_api(prompt: str, api_key: str, timeout: int = 270) -> Dict:
+    async with httpx.AsyncClient(timeout=timeout + 30) as client:
+        r = await client.post(
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": CLAUDE_MODEL,
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        )
+        r.raise_for_status()
+        data = r.json()
+
+    text = data["content"][0]["text"]
+    return _parse_json(text)
+
+
+async def _call_claude(prompt: str, api_key: Optional[str] = None,
+                       timeout: int = 270) -> Dict:
+    if api_key:
+        return await _call_api(prompt, api_key, timeout)
+    return await _call_proxy(prompt, timeout)
 
 
 async def analyze_with_claude(
@@ -63,11 +91,11 @@ async def analyze_with_claude(
     interval: str,
     candles: List[Dict],
     feedback: Optional[Dict] = None,
+    api_key: Optional[str] = None,
 ) -> Dict:
     start_price = candles[0]["close"] if candles else 0
     end_price = candles[-1]["close"] if candles else 0
     period_pct = ((end_price - start_price) / start_price * 100) if start_price else 0
-
     data_str = _format_data(candles, max_rows=80)
 
     feedback_block = ""
@@ -127,7 +155,7 @@ Respond with ONLY raw JSON (no markdown, no code fences):
   "confidence": 70
 }}"""
 
-    return await _call_proxy("", prompt, timeout=270)
+    return await _call_claude(prompt, api_key=api_key, timeout=270)
 
 
 async def get_live_signal(
@@ -139,6 +167,7 @@ async def get_live_signal(
     strategy_name: str = "",
     strategy_analysis: str = "",
     strategy_patterns: Optional[List[str]] = None,
+    api_key: Optional[str] = None,
 ) -> Dict:
     data_str = _format_data(candles, max_rows=80)
     current_price = candles[-1]["close"] if candles else 0
@@ -184,12 +213,14 @@ Respond with ONLY raw JSON:
 }}"""
 
     try:
-        return await _call_proxy("", prompt, timeout=60)
+        return await _call_claude(prompt, api_key=api_key, timeout=60)
     except Exception:
-        return {"action": "HOLD", "confidence": 0, "reason": "Proxy error", "stop_loss_pct": 2, "take_profit_pct": 4}
+        return {"action": "HOLD", "confidence": 0, "reason": "Claude error",
+                "stop_loss_pct": 2, "take_profit_pct": 4}
 
 
-async def scan_market(symbol_summaries: List[Dict], interval: str) -> Dict:
+async def scan_market(symbol_summaries: List[Dict], interval: str,
+                      api_key: Optional[str] = None) -> Dict:
     rows = ["Symbol      | Price       | 24h%   | 7d%    | ATR%  | RSI   | MACD  | Vol",
             "-" * 75]
     for s in symbol_summaries:
@@ -222,6 +253,18 @@ Respond with ONLY raw JSON:
 }}"""
 
     try:
-        return await _call_proxy("", prompt, timeout=90)
+        return await _call_claude(prompt, api_key=api_key, timeout=90)
     except Exception as e:
         return {"best_symbol": "", "ranking": [], "recommendation": f"Scan fehlgeschlagen: {e}"}
+
+
+async def test_connection(api_key: Optional[str] = None) -> bool:
+    """Quick ping to verify Claude connectivity."""
+    try:
+        result = await _call_claude(
+            'Respond with exactly: {"ok": true}',
+            api_key=api_key, timeout=30,
+        )
+        return bool(result)
+    except Exception:
+        return False

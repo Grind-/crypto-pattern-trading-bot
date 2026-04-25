@@ -10,7 +10,12 @@
   <header>
     <div class="logo">⬡ Crypto Pattern AI</div>
     <div class="subtitle">Claude-powered backtesting &amp; live trading</div>
-    <button class="btn-logout" onclick="logout()">Abmelden</button>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <span id="header-user" style="color:var(--text-muted);font-size:12px"></span>
+      <a id="btn-admin" href="/admin" style="display:none" class="btn-logout">Admin</a>
+      <a href="/settings" class="btn-logout">Einstellungen</a>
+      <button class="btn-logout" onclick="logout()">Abmelden</button>
+    </div>
   </header>
 
   <nav class="tabs">

@@ -2,35 +2,45 @@ import json
 import os
 from typing import List, Optional
 
-SIMS_DIR = "/app/data/sims"
-SIMS_INDEX = "/app/data/simulations.json"
+_DATA_ROOT = "/app/data/users"
 
 
-def save_simulation(entry: dict, full_result: dict = None) -> None:
-    os.makedirs(SIMS_DIR, exist_ok=True)
+def _sims_dir(username: str) -> str:
+    return f"{_DATA_ROOT}/{username}/sims"
+
+
+def _sims_index(username: str) -> str:
+    return f"{_DATA_ROOT}/{username}/simulations.json"
+
+
+def save_simulation(username: str, entry: dict, full_result: dict = None) -> None:
+    sims_dir = _sims_dir(username)
+    os.makedirs(sims_dir, exist_ok=True)
     if full_result:
-        with open(f"{SIMS_DIR}/{entry['id']}.json", "w") as f:
+        with open(f"{sims_dir}/{entry['id']}.json", "w") as f:
             json.dump(full_result, f, indent=2)
-    sims = load_simulations()
+    sims = load_simulations(username)
     sims.insert(0, entry)
     sims = sims[:50]
-    os.makedirs(os.path.dirname(SIMS_INDEX), exist_ok=True)
-    with open(SIMS_INDEX, "w") as f:
+    index_path = _sims_index(username)
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+    with open(index_path, "w") as f:
         json.dump(sims, f, indent=2)
 
 
-def load_simulations() -> List[dict]:
-    if not os.path.exists(SIMS_INDEX):
+def load_simulations(username: str) -> List[dict]:
+    path = _sims_index(username)
+    if not os.path.exists(path):
         return []
     try:
-        with open(SIMS_INDEX) as f:
+        with open(path) as f:
             return json.load(f)
     except Exception:
         return []
 
 
-def load_simulation_detail(sim_id: str) -> Optional[dict]:
-    path = f"{SIMS_DIR}/{sim_id}.json"
+def load_simulation_detail(username: str, sim_id: str) -> Optional[dict]:
+    path = f"{_sims_dir(username)}/{sim_id}.json"
     if not os.path.exists(path):
         return None
     try:
