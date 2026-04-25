@@ -407,18 +407,40 @@ async function pollLive() {
 
 // ── Market scanner ────────────────────────────────────────────────────────────
 
+function getExtraSyms() {
+  return [1, 2, 3]
+    .map(i => (document.getElementById(`extra-sym-${i}`)?.value || '').trim().toUpperCase())
+    .filter(s => s.length > 0);
+}
+
+function saveExtraSyms() {
+  localStorage.setItem('scanExtraSyms', JSON.stringify(getExtraSyms()));
+}
+
+function loadExtraSyms() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('scanExtraSyms') || '[]');
+    saved.forEach((s, i) => {
+      const el = document.getElementById(`extra-sym-${i + 1}`);
+      if (el) el.value = s;
+    });
+  } catch (e) {}
+}
+
 async function runScanner() {
   const interval = document.getElementById('scan-interval').value;
+  const extra_symbols = getExtraSyms();
   const btn = document.getElementById('btn-scan');
   const el = document.getElementById('scanner-result');
   btn.disabled = true;
+  const total = 10 + extra_symbols.length;
   btn.textContent = '⏳ Scanne…';
-  el.innerHTML = '<div class="empty-state">Claude analysiert 10 USDC-Paare…</div>';
+  el.innerHTML = `<div class="empty-state">Claude analysiert ${total} USDC-Paare…</div>`;
   try {
     const r = await fetch('/api/scan/symbols', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({interval}),
+      body: JSON.stringify({interval, extra_symbols}),
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     renderScanResult(await r.json(), interval);
@@ -752,6 +774,7 @@ async function initPage() {
   } catch (e) {}
 
   loadSimHistory();
+  loadExtraSyms();
 }
 
 // Load symbols on startup

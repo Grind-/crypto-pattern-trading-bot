@@ -191,7 +191,7 @@
 
     <div class="card" id="scanner-card">
       <h2>Marktscanner — Welches Paar jetzt?</h2>
-      <div class="sim-picker-row" style="margin-bottom:12px">
+      <div class="sim-picker-row" style="margin-bottom:10px">
         <label>Intervall:</label>
         <select id="scan-interval">
           <option value="1h">1h</option>
@@ -199,6 +199,12 @@
           <option value="1d">1d</option>
         </select>
         <button class="btn btn-primary btn-sm" id="btn-scan" onclick="runScanner()">Markt scannen</button>
+      </div>
+      <div class="sim-picker-row" style="margin-bottom:0;gap:6px">
+        <label style="white-space:nowrap">+ Eigene Paare:</label>
+        <input id="extra-sym-1" class="extra-sym-input" type="text" placeholder="z.B. SUIUSDC" maxlength="20" oninput="saveExtraSyms()" />
+        <input id="extra-sym-2" class="extra-sym-input" type="text" placeholder="z.B. WIFUSDC" maxlength="20" oninput="saveExtraSyms()" />
+        <input id="extra-sym-3" class="extra-sym-input" type="text" placeholder="z.B. PEPEUSDC" maxlength="20" oninput="saveExtraSyms()" />
       </div>
       <div id="scanner-result" class="empty-state">Scannt die Top 10 USDC-Paare und empfiehlt das beste für jetzt.</div>
     </div>

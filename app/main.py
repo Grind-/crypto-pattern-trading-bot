@@ -198,14 +198,16 @@ SCAN_SYMBOLS = [
 ]
 
 
-async def _fetch_scan_summaries(interval: str) -> list:
-    tasks = [fetch_latest_klines(sym, interval, limit=60) for sym in SCAN_SYMBOLS]
+async def _fetch_scan_summaries(interval: str, symbols: list = None) -> list:
+    if symbols is None:
+        symbols = SCAN_SYMBOLS
+    tasks = [fetch_latest_klines(sym, interval, limit=60) for sym in symbols]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     interval_mins = {"1h": 60, "4h": 240, "1d": 1440}.get(interval, 240)
     c24 = max(1, 1440 // interval_mins)
     c7d = max(1, 10080 // interval_mins)
     summaries = []
-    for sym, raw in zip(SCAN_SYMBOLS, results):
+    for sym, raw in zip(symbols, results):
         if isinstance(raw, Exception) or not raw:
             continue
         enriched = compute_indicators(raw)
@@ -229,7 +231,9 @@ async def _fetch_scan_summaries(interval: str) -> list:
 @app.post("/api/scan/symbols")
 async def scan_symbols(body: dict):
     interval = body.get("interval", "4h")
-    summaries = await _fetch_scan_summaries(interval)
+    extra = [s.strip().upper() for s in body.get("extra_symbols", []) if s.strip()]
+    symbols = SCAN_SYMBOLS + [s for s in extra if s not in SCAN_SYMBOLS]
+    summaries = await _fetch_scan_summaries(interval, symbols)
     if not summaries:
         raise HTTPException(503, "Keine Marktdaten verfügbar")
     return await scan_market(summaries, interval)
