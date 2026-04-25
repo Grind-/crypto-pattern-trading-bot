@@ -7,9 +7,6 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'live' && !livePolling) {
-      runScanner();
-    }
   });
 });
 

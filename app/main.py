@@ -492,8 +492,8 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
         sim_state["running"] = False
 
 
-async def _scan_and_switch(interval: str, current_symbol: str) -> str:
-    """Run market scanner; return new best symbol (may be same as current)."""
+async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: str, position_symbol: str) -> str:
+    """Run market scanner every cycle. Switch current_symbol only when FLAT."""
     try:
         summaries = await _fetch_scan_summaries(interval)
         if not summaries:
@@ -501,15 +501,25 @@ async def _scan_and_switch(interval: str, current_symbol: str) -> str:
         result = await scan_market(summaries, interval)
         best = result.get("best_symbol", "")
         rec = result.get("recommendation", "")
-        if best and best != current_symbol:
-            _log(live_state, f"🔄 Scanner: {current_symbol} → {best} | {rec[:80]}")
-            live_state["symbol"] = best
-            update_position(live_state["position"])  # persist updated symbol too
+        if not best:
+            return current_symbol
+        if position == "FLAT":
+            if best != current_symbol:
+                _log(live_state, f"🔄 Wechsel: {current_symbol} → {best} | {rec[:100]}")
+                live_state["symbol"] = best
+                update_position("FLAT")
+                return best
+            else:
+                _log(live_state, f"✓ Scanner bestätigt {current_symbol} als bestes Setup")
         else:
-            _log(live_state, f"🔍 Scanner bestätigt: {current_symbol} weiterhin bestes Setup")
-        return best or current_symbol
+            # IN_POSITION — can't switch, just inform
+            if best != position_symbol:
+                _log(live_state, f"ℹ Scanner: {best} wäre jetzt besser — Wechsel nach Verkauf von {position_symbol}")
+            else:
+                _log(live_state, f"✓ Scanner bestätigt {position_symbol} weiterhin stark")
+        return current_symbol
     except Exception as e:
-        _log(live_state, f"⚠ Scanner-Fehler: {e} — bleibe bei {current_symbol}")
+        _log(live_state, f"⚠ Scanner-Fehler: {e}")
         return current_symbol
 
 
@@ -543,11 +553,6 @@ async def _live_loop(req: LiveRequest):
         first_run = True
         while live_state["running"]:
 
-            # ── Auto-scan when FLAT (at start and after each sell) ────────────
-            if live_state["position"] == "FLAT":
-                _log(live_state, "🔍 Scanne Markt nach bestem Symbol…")
-                current_symbol = await _scan_and_switch(req.interval, current_symbol)
-
             # ── Wait until next candle close ──────────────────────────────────
             next_close_ts = _next_close()
             wake_at = next_close_ts + CLOSE_BUFFER
@@ -571,11 +576,17 @@ async def _live_loop(req: LiveRequest):
             if not live_state["running"]:
                 break
 
-            # Use position_symbol when holding, current_symbol when flat
-            active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
-
             live_state["candle_count"] += 1
             _log(live_state, f"\n── Kerze #{live_state['candle_count']} geschlossen ({_fmt_ts(next_close_ts)}) ──")
+
+            # ── Scan every cycle: switch if FLAT, inform if IN_POSITION ───────
+            _log(live_state, "🔍 Marktcheck…")
+            current_symbol = await _scan_and_maybe_switch(
+                req.interval, current_symbol, live_state["position"], position_symbol
+            )
+
+            # Use position_symbol when holding, current_symbol when flat
+            active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
 
             _log(live_state, f"Lade {active_symbol} {req.interval} Daten…")
             candles = await fetch_latest_klines(active_symbol, req.interval, limit=100)
