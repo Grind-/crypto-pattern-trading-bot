@@ -254,6 +254,12 @@ async def settings_page():
     return FileResponse("frontend/settings.html")
 
 
+@app.get("/docs")
+async def docs_page(request: Request):
+    _require_admin(request)
+    return FileResponse("frontend/docs.html")
+
+
 # ── User profile + settings API ────────────────────────────────────────────────
 
 @app.get("/api/user/profile")
