@@ -316,7 +316,12 @@ async function startLive() {
     strategy_analysis: selectedSimForLive?.strategy_analysis || '',
     strategy_patterns: selectedSimForLive?.strategy_patterns || [],
   };
-  if (!body.api_key || !body.api_secret) { alert('Bitte API Key und Secret eingeben.'); return; }
+  // Empty fields are OK if server has saved credentials
+  const hasSaved = document.getElementById('live-api-key').dataset.saved === '1';
+  if ((!body.api_key || !body.api_secret) && !hasSaved) {
+    alert('Bitte API Key und Secret eingeben.');
+    return;
+  }
 
   lastLiveLogLen = 0;
   document.getElementById('live-log-box').textContent = '';
@@ -587,6 +592,26 @@ async function logout() {
   window.location.href = '/login';
 }
 
+function toggleMobileMenu() {
+  const menu = document.getElementById('header-actions');
+  const btn  = document.getElementById('burger-btn');
+  if (!menu || !btn) return;
+  const open = menu.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  btn.setAttribute('aria-label', open ? 'Menü schließen' : 'Menü öffnen');
+}
+
+document.addEventListener('click', e => {
+  const menu = document.getElementById('header-actions');
+  const btn  = document.getElementById('burger-btn');
+  if (!menu || !btn) return;
+  if (!menu.contains(e.target) && !btn.contains(e.target)) {
+    menu.classList.remove('open');
+    btn.classList.remove('open');
+    btn.setAttribute('aria-label', 'Menü öffnen');
+  }
+});
+
 // ── Simulation history & picker ───────────────────────────────────────────────
 
 let _simList = [];
@@ -812,7 +837,27 @@ function switchTab(name) {
   if (sec) sec.classList.add('active');
 }
 
+async function loadSavedCredentials() {
+  try {
+    const creds = await fetch('/api/live/credentials').then(r => r.json());
+    const keyEl = document.getElementById('live-api-key');
+    const secEl = document.getElementById('live-api-secret');
+    const hintEl = document.getElementById('live-key-hint');
+    if (creds.api_key) {
+      keyEl.value = creds.api_key;
+      keyEl.dataset.saved = '1';
+    }
+    if (creds.api_secret) {
+      secEl.value = creds.api_secret;
+    }
+    if (hintEl) {
+      hintEl.textContent = creds.has_key ? `Gespeicherter Key: ${creds.key_hint}` : '';
+    }
+  } catch {}
+}
+
 async function initPage() {
+  loadSavedCredentials();
   try {
     const state = await fetch('/api/live/status').then(r => r.json());
     if (state.running) {

@@ -72,6 +72,16 @@ def clear_live_state(username: str) -> None:
         conn.commit()
 
 
+def deactivate_live_state(username: str) -> None:
+    """Mark live state as stopped while preserving session data (position, history)."""
+    with engine.connect() as conn:
+        conn.execute(
+            update(live_states).where(live_states.c.username == username)
+            .values(was_running=False, updated_at=datetime.now(timezone.utc).isoformat())
+        )
+        conn.commit()
+
+
 def update_position(username: str, position: str, symbol: str = None) -> None:
     vals = {"position": position}
     if symbol:

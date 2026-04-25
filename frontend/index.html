@@ -4,18 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
 </head>
 <body>
   <header>
     <div class="logo">⬡ Crypto Pattern AI</div>
     <div class="subtitle">Claude-powered backtesting &amp; live trading</div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-      <span id="header-user" style="color:var(--text-muted);font-size:12px"></span>
+    <div class="header-actions" id="header-actions">
+      <span id="header-user"></span>
       <a id="btn-admin" href="/admin" style="display:none" class="btn-logout">Admin</a>
       <a href="/settings" class="btn-logout">Einstellungen</a>
       <button class="btn-logout" onclick="logout()">Abmelden</button>
     </div>
+    <button class="burger-btn" id="burger-btn" onclick="toggleMobileMenu()" aria-label="Menü öffnen">
+      <span></span><span></span><span></span>
+    </button>
   </header>
 
   <nav class="tabs">
@@ -173,7 +176,7 @@
       <h2>Konfiguration</h2>
       <div class="form-grid">
         <div class="field full">
-          <label>API Key</label>
+          <label>API Key <span id="live-key-hint" style="font-size:0.75em;color:var(--muted);margin-left:6px;font-weight:400"></span></label>
           <input id="live-api-key" type="password" placeholder="Binance API Key" />
         </div>
         <div class="field full">
@@ -272,6 +275,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

@@ -15,10 +15,13 @@ from .data_fetcher import fetch_klines, fetch_latest_klines, get_available_symbo
 from .indicators import compute_indicators
 from .claude_analyst import (analyze_with_claude, get_live_signal,
                               scan_market, test_connection,
-                              synthesize_learnings, update_global_rules)
+                              synthesize_learnings,
+                              distill_and_promote_rules,
+                              promote_symbol_patterns_via_claude)
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
-from .state_store import save_live_state, load_live_state, clear_live_state, update_position
+from .state_store import (save_live_state, load_live_state, clear_live_state,
+                          deactivate_live_state, update_position)
 from .sim_store import (save_simulation, load_simulations as _load_sims,
                         load_simulation_detail)
 from .database import init_db
@@ -26,7 +29,8 @@ from .user_store import (init_users, list_users, get_user, authenticate,
                          create_user, delete_user, set_enabled, reset_password,
                          update_claude_config, set_platform_access,
                          get_claude_api_key, get_claude_oauth_token,
-                         uses_platform, uses_subscription)
+                         uses_platform, uses_subscription,
+                         save_binance_keys, get_binance_keys)
 
 # ── Session store ─────────────────────────────────────────────────────────────
 _SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
@@ -94,9 +98,19 @@ async def _auto_resume_all():
         saved = load_live_state(username)
         if not saved or not saved.get("was_running"):
             continue
+
+        # Prefer keys from persistent user store; fall back to live_states row
+        bkey, bsec = get_binance_keys(username)
+        if not bkey or not bsec:
+            bkey = saved.get("api_key") or ""
+            bsec = saved.get("api_secret") or ""
+        if not bkey or not bsec:
+            deactivate_live_state(username)
+            continue
+
         req = LiveRequest(
-            api_key=saved["api_key"],
-            api_secret=saved["api_secret"],
+            api_key=bkey,
+            api_secret=bsec,
             symbol=saved["symbol"],
             interval=saved["interval"],
             trade_amount_usdt=saved["trade_amount"],
@@ -104,9 +118,9 @@ async def _auto_resume_all():
             strategy_analysis=saved.get("strategy_analysis", ""),
             strategy_patterns=saved.get("strategy_patterns", []),
         )
-        valid = await BinanceTrader(req.api_key, req.api_secret).validate_keys()
+        valid = await BinanceTrader(bkey, bsec).validate_keys()
         if not valid:
-            clear_live_state(username)
+            deactivate_live_state(username)
             continue
         api_key, oauth_token = _claude_creds(username)
         state = _get_live_state(username)
@@ -203,8 +217,8 @@ class SimRequest(BaseModel):
 
 
 class LiveRequest(BaseModel):
-    api_key: str
-    api_secret: str
+    api_key: str = ""
+    api_secret: str = ""
     symbol: str = "BTCUSDC"
     interval: str = "4h"
     trade_amount_usdt: float = 50.0
@@ -381,6 +395,49 @@ async def admin_update_user(username: str, body: dict, request: Request):
     return {"ok": True}
 
 
+# ── Admin knowledge endpoints ─────────────────────────────────────────────────
+
+@app.get("/api/admin/knowledge/status")
+async def knowledge_status(request: Request):
+    _require_admin(request)
+    from .knowledge_store import get_knowledge_status
+    return get_knowledge_status()
+
+
+@app.post("/api/admin/knowledge/promote")
+async def knowledge_promote(body: dict, request: Request):
+    """
+    Promote user patterns to the core knowledge base.
+    body: {"type": "rules"}
+       OR {"type": "symbol", "username": "...", "symbol": "BTCUSDC", "interval": "4h"}
+    """
+    admin = _require_admin(request)
+    api_key, oauth_token = _claude_creds(admin["username"])
+    promote_type = body.get("type", "rules")
+
+    if promote_type == "rules":
+        new_rules = await distill_and_promote_rules(api_key=api_key, oauth_token=oauth_token)
+        if not new_rules:
+            raise HTTPException(400, "Zu wenig Simulationsdaten oder Claude-Fehler")
+        return {"ok": True, "rules_count": len(new_rules)}
+
+    elif promote_type == "symbol":
+        username = body.get("username", "").strip()
+        symbol   = body.get("symbol", "").strip().upper()
+        interval = body.get("interval", "").strip()
+        if not (username and symbol and interval):
+            raise HTTPException(400, "username, symbol und interval erforderlich")
+        ok = await promote_symbol_patterns_via_claude(
+            username, symbol, interval, api_key=api_key, oauth_token=oauth_token
+        )
+        if not ok:
+            raise HTTPException(400, f"Keine Patterns für {username}/{symbol}/{interval} oder Claude-Fehler")
+        return {"ok": True, "promoted": f"{username}/{symbol}/{interval}"}
+
+    else:
+        raise HTTPException(400, "type muss 'rules' oder 'symbol' sein")
+
+
 # ── Market scanner ─────────────────────────────────────────────────────────────
 
 SCAN_SYMBOLS = [
@@ -429,7 +486,8 @@ async def scan_symbols(body: dict, request: Request):
     if not summaries:
         raise HTTPException(503, "Keine Marktdaten verfügbar")
     api_key, oauth_token = _claude_creds(user["username"])
-    return await scan_market(summaries, interval, api_key=api_key, oauth_token=oauth_token)
+    return await scan_market(summaries, interval, username=user["username"],
+                             api_key=api_key, oauth_token=oauth_token)
 
 
 @app.get("/api/symbols")
@@ -525,10 +583,29 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         raise HTTPException(400, "Claude nicht konfiguriert. Bitte in Einstellungen API-Key oder OAuth-Token hinterlegen.")
     api_key, oauth_token = _claude_creds(username)
 
-    trader = BinanceTrader(req.api_key, req.api_secret)
-    valid = await trader.validate_keys()
+    # Resolve Binance keys: form > saved in users table
+    bkey = req.api_key.strip()
+    bsec = req.api_secret.strip()
+    if not bkey or not bsec:
+        bkey, bsec = get_binance_keys(username)
+    if not bkey or not bsec:
+        raise HTTPException(400, "Binance API-Key und Secret erforderlich")
+
+    valid = await BinanceTrader(bkey, bsec).validate_keys()
     if not valid:
         raise HTTPException(400, "Ungültige Binance API-Keys")
+
+    save_binance_keys(username, bkey, bsec)
+
+    # Reconstruct req with resolved keys so _live_loop receives them
+    req = LiveRequest(
+        api_key=bkey, api_secret=bsec,
+        symbol=req.symbol, interval=req.interval,
+        trade_amount_usdt=req.trade_amount_usdt,
+        strategy_name=req.strategy_name,
+        strategy_analysis=req.strategy_analysis,
+        strategy_patterns=req.strategy_patterns,
+    )
 
     strategy_note = f" | Strategie: {req.strategy_name}" if req.strategy_name else ""
     live_state.update({
@@ -537,7 +614,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "trade_amount": req.trade_amount_usdt,
         "signals": [],
         "log": [f"Live Trading gestartet: {req.symbol} {req.interval}, ${req.trade_amount_usdt} pro Trade{strategy_note}"],
-        "api_key": req.api_key, "api_secret": req.api_secret,
+        "api_key": bkey, "api_secret": bsec,
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
         "strategy_name": req.strategy_name,
         "strategy_analysis": req.strategy_analysis,
@@ -546,7 +623,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
     })
     save_live_state(username, {
         "was_running": True,
-        "api_key": req.api_key, "api_secret": req.api_secret,
+        "api_key": bkey, "api_secret": bsec,
         "symbol": req.symbol, "interval": req.interval,
         "trade_amount": req.trade_amount_usdt, "position": "FLAT",
         "strategy_name": req.strategy_name,
@@ -566,8 +643,21 @@ async def stop_live(request: Request):
     live_state["running"] = False
     live_state["status"] = "stopped"
     live_state["log"].append("Live Trading gestoppt")
-    clear_live_state(username)
+    deactivate_live_state(username)
     return {"ok": True}
+
+
+@app.get("/api/live/credentials")
+async def get_live_credentials(request: Request):
+    user = _get_current_user(request)
+    bkey, bsec = get_binance_keys(user["username"])
+    return {
+        "has_key": bool(bkey),
+        "has_secret": bool(bsec),
+        "key_hint": f"...{bkey[-4:]}" if len(bkey) >= 4 else ("✓" if bkey else ""),
+        "api_key": bkey,
+        "api_secret": bsec,
+    }
 
 
 @app.get("/api/live/status")
@@ -620,7 +710,7 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
 
             analysis = await analyze_with_claude(
                 symbol=req.symbol, interval=req.interval,
-                candles=enriched, feedback=feedback,
+                candles=enriched, username=username, feedback=feedback,
                 api_key=api_key, oauth_token=oauth_token,
             )
 
@@ -699,19 +789,12 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
             }
             save_simulation(username, entry, full_result)
 
-            # Fire-and-forget: let Claude update the knowledge base
+            # Fire-and-forget: let Claude update this user's knowledge area
             asyncio.create_task(
                 synthesize_learnings(req.symbol, req.interval, entry,
+                                     username=username,
                                      api_key=api_key, oauth_token=oauth_token)
             )
-
-            # Every 10th simulation: distill cross-symbol global rules
-            from .knowledge_store import load_global_insights
-            total = load_global_insights().get("total_simulations", 0)
-            if total > 0 and total % 10 == 0:
-                asyncio.create_task(
-                    update_global_rules(api_key=api_key, oauth_token=oauth_token)
-                )
 
     except Exception as e:
         sim_state["status"] = "error"
@@ -826,6 +909,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             signal = await get_live_signal(
                 symbol=active_symbol, interval=req.interval,
                 candles=enriched, current_position=live_state["position"],
+                username=username,
                 signal_history=live_state["signals"][-10:],
                 strategy_name=req.strategy_name,
                 strategy_analysis=req.strategy_analysis,

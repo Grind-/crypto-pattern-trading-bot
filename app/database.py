@@ -9,7 +9,7 @@ import os
 import shutil
 
 from sqlalchemy import (
-    Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine
+    Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, text
 )
 from sqlalchemy.pool import StaticPool
 
@@ -32,9 +32,11 @@ users = Table(
     Column("role",              Text,    nullable=False, default="user"),
     Column("enabled",           Boolean, nullable=False, default=True),
     Column("created_at",        Text,    nullable=False),
-    Column("claude_mode",       Text,    nullable=False, default="api_key"),
-    Column("claude_api_key",    Text),
+    Column("claude_mode",        Text,    nullable=False, default="api_key"),
+    Column("claude_api_key",     Text),
     Column("claude_oauth_token", Text),
+    Column("binance_api_key",    Text),
+    Column("binance_api_secret", Text),
 )
 
 live_states = Table(
@@ -89,8 +91,20 @@ simulation_details = Table(
 def init_db() -> None:
     os.makedirs("/app/data", exist_ok=True)
     metadata.create_all(engine)
+    _migrate_add_binance_keys()
     _migrate_json_to_sqlite()
     _migrate_knowledge_to_tiered()
+
+
+def _migrate_add_binance_keys() -> None:
+    """Add binance_api_key/secret columns to users table if they don't exist."""
+    with engine.connect() as conn:
+        for col in ("binance_api_key", "binance_api_secret"):
+            try:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} TEXT"))
+            except Exception:
+                pass  # column already exists
+        conn.commit()
 
 
 def _migrate_json_to_sqlite() -> None:

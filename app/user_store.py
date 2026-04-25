@@ -162,6 +162,22 @@ def set_platform_access(username: str, allow: bool) -> bool:
     return result.rowcount > 0
 
 
+def save_binance_keys(username: str, api_key: str, api_secret: str) -> None:
+    with engine.connect() as conn:
+        conn.execute(
+            update(users).where(users.c.username == username)
+            .values(binance_api_key=api_key, binance_api_secret=api_secret)
+        )
+        conn.commit()
+
+
+def get_binance_keys(username: str) -> tuple:
+    user = get_user(username)
+    if not user:
+        return ("", "")
+    return (user.get("binance_api_key") or "", user.get("binance_api_secret") or "")
+
+
 def get_claude_api_key(username: str) -> Optional[str]:
     user = get_user(username)
     if not user:
