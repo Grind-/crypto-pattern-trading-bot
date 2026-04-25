@@ -6,770 +6,790 @@
   <title>Dokumentation — Crypto Pattern AI</title>
   <link rel="stylesheet" href="/static/style.css" />
   <style>
-    :root { --sidebar-w: 240px; }
+    :root { --sidebar-w: 220px; }
 
-    .doc-layout {
-      display: flex;
-      min-height: 100vh;
-    }
+    body { background: var(--bg); }
+
+    .doc-layout { display: flex; min-height: 100vh; }
 
     /* ── Sidebar ── */
     .sidebar {
-      width: var(--sidebar-w);
-      flex-shrink: 0;
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      height: 100vh;
-      overflow-y: auto;
+      width: var(--sidebar-w); flex-shrink: 0;
+      background: var(--surface); border-right: 1px solid var(--border);
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
       padding: 0 0 40px;
     }
     .sidebar-header {
-      padding: 16px 16px 10px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 8px;
+      padding: 14px 16px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
     }
-    .sidebar-header a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 12px;
-    }
+    .sidebar-header a { color: var(--text-muted); text-decoration: none; font-size: 12px; }
     .sidebar-header a:hover { color: var(--text); }
-    .sidebar-title { font-size: 13px; font-weight: 700; color: var(--text); margin-top: 8px; }
-    .nav-group { margin-bottom: 4px; }
+    .sidebar-title { font-size: 13px; font-weight: 700; color: var(--text); margin-top: 6px; }
     .nav-group-label {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-muted);
-      padding: 8px 16px 4px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--text-muted); padding: 10px 16px 3px;
     }
     .nav-link {
-      display: block;
-      padding: 5px 16px;
-      font-size: 12px;
-      color: var(--text-muted);
-      text-decoration: none;
-      border-left: 2px solid transparent;
-      transition: color .1s, border-color .1s;
+      display: block; padding: 4px 16px; font-size: 12px;
+      color: var(--text-muted); text-decoration: none;
+      border-left: 2px solid transparent; transition: color .1s, border-color .1s;
     }
     .nav-link:hover { color: var(--text); border-left-color: var(--border); }
     .nav-link.active { color: var(--blue); border-left-color: var(--blue); }
 
     /* ── Content ── */
-    .doc-content {
-      flex: 1;
-      max-width: 820px;
-      padding: 40px 40px 80px;
-      margin: 0 auto;
-    }
+    .doc-content { flex: 1; max-width: 860px; padding: 0 40px 80px; margin: 0 auto; }
 
-    h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; }
-    h2 {
-      font-size: 18px; font-weight: 700;
+    /* Hero */
+    .hero {
+      padding: 48px 0 32px;
       border-bottom: 1px solid var(--border);
-      padding-bottom: 8px;
-      margin: 48px 0 16px;
-      color: var(--text);
+      margin-bottom: 0;
     }
-    h3 { font-size: 14px; font-weight: 700; margin: 24px 0 10px; color: var(--text); }
-    h4 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; color: var(--blue); }
-    p { line-height: 1.65; color: var(--text-muted); margin-bottom: 12px; font-size: 13px; }
+    .hero h1 { font-size: 28px; font-weight: 800; color: var(--text); margin-bottom: 10px; }
+    .hero-sub { font-size: 15px; color: var(--text-muted); line-height: 1.6; max-width: 600px; margin-bottom: 20px; }
+    .tag-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tag-doc { font-size: 11px; padding: 3px 10px; border-radius: 20px; border: 1px solid; }
+    .tag-py    { color: var(--blue);   border-color: var(--blue);   background: rgba(88,166,255,0.08); }
+    .tag-js    { color: var(--yellow); border-color: var(--yellow); background: rgba(210,153,34,0.08); }
+    .tag-docker{ color: var(--purple); border-color: var(--purple); background: rgba(188,140,255,0.08); }
+    .tag-ext   { color: var(--green);  border-color: var(--green);  background: rgba(63,185,80,0.08); }
+
+    /* Section headings */
+    .section { padding: 44px 0 0; }
+    h2 {
+      font-size: 20px; font-weight: 700; color: var(--text);
+      margin-bottom: 6px; display: flex; align-items: center; gap: 10px;
+    }
+    .section-icon {
+      width: 32px; height: 32px; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+    .ic-blue   { background: rgba(88,166,255,0.15); }
+    .ic-green  { background: rgba(63,185,80,0.15); }
+    .ic-purple { background: rgba(188,140,255,0.15); }
+    .ic-yellow { background: rgba(210,153,34,0.15); }
+    .ic-red    { background: rgba(248,81,73,0.15); }
+    .section-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-bottom: 20px; }
+    h3 { font-size: 14px; font-weight: 700; color: var(--text); margin: 28px 0 10px; }
+    h4 { font-size: 13px; font-weight: 600; color: var(--blue); margin: 18px 0 6px; }
+    p  { font-size: 13px; color: var(--text-muted); line-height: 1.65; margin-bottom: 12px; }
     li { font-size: 13px; color: var(--text-muted); line-height: 1.7; }
     ul, ol { padding-left: 20px; margin-bottom: 12px; }
     strong { color: var(--text); }
-
-    .lead { font-size: 14px; color: var(--text); margin-bottom: 24px; line-height: 1.6; }
-
     code {
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 11.5px;
-      background: var(--surface2);
-      padding: 2px 6px;
-      border-radius: 4px;
-      color: var(--blue);
+      font-family: 'SF Mono','Fira Code',monospace; font-size: 11.5px;
+      background: var(--surface2); padding: 2px 6px; border-radius: 4px; color: var(--blue);
     }
 
+    /* Feature cards (3-up grid) */
+    .feature-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 20px 0; }
+    .feature-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px 14px;
+    }
+    .feature-card-icon { font-size: 22px; margin-bottom: 8px; }
+    .feature-card-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .feature-card-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+    /* Architecture diagram (CSS boxes) */
+    .arch-wrap {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 24px 20px; margin: 20px 0; overflow-x: auto;
+    }
+    .arch-row { display: flex; justify-content: center; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .arch-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 16px; font-size: 12px;
+      color: var(--text); white-space: nowrap; text-align: center; min-width: 140px;
+    }
+    .arch-box-title { font-weight: 700; margin-bottom: 3px; }
+    .arch-box-sub { font-size: 10px; color: var(--text-muted); }
+    .arch-box.blue  { border-color: var(--blue);   background: rgba(88,166,255,0.06); }
+    .arch-box.green { border-color: var(--green);  background: rgba(63,185,80,0.06); }
+    .arch-box.purple{ border-color: var(--purple); background: rgba(188,140,255,0.06); }
+    .arch-box.yellow{ border-color: var(--yellow); background: rgba(210,153,34,0.06); }
+    .arch-arrow { font-size: 18px; color: var(--text-muted); }
+    .arch-divider {
+      width: 100%; height: 1px; background: var(--border); margin: 16px 0;
+    }
+    .arch-label { font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 10px; }
+
+    /* Flow steps */
+    .flow-steps { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+    .flow-step { display: flex; gap: 14px; align-items: flex-start; }
+    .flow-num {
+      width: 26px; height: 26px; border-radius: 50%; background: var(--blue);
+      color: #0d1117; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    }
+    .flow-text { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+    .flow-text strong { color: var(--text); }
+
+    /* Module cards */
+    .module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
+    .module-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px;
+    }
+    .module-name { font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; color: var(--blue); font-weight: 600; margin-bottom: 5px; }
+    .module-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+    /* Table */
+    .table-doc {
+      width: 100%; border-collapse: collapse; font-size: 12px; margin: 12px 0 20px;
+    }
+    .table-doc th {
+      text-align: left; padding: 7px 12px; border-bottom: 2px solid var(--border);
+      color: var(--text-muted); font-weight: 600; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .table-doc td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .table-doc tr:last-child td { border-bottom: none; }
+    .table-doc code { font-size: 11px; }
+    .td-name { color: var(--blue); font-family: 'SF Mono','Fira Code',monospace; white-space:nowrap; }
+    .td-type { color: var(--purple); font-family: 'SF Mono','Fira Code',monospace; }
+    .td-desc { color: var(--text-muted); }
+
+    /* Claude mode cards */
+    .claude-modes { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 16px 0; }
+    .mode-card {
+      border: 1px solid var(--border); border-radius: 10px; padding: 16px 14px;
+    }
+    .mode-card.platform { border-color: var(--green); background: rgba(63,185,80,0.04); }
+    .mode-card.subscription { border-color: var(--blue); background: rgba(88,166,255,0.04); }
+    .mode-card.api { border-color: var(--yellow); background: rgba(210,153,34,0.04); }
+    .mode-badge {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+      padding: 2px 8px; border-radius: 20px; display: inline-block; margin-bottom: 10px;
+    }
+    .mode-card.platform .mode-badge { background: rgba(63,185,80,0.15); color: var(--green); }
+    .mode-card.subscription .mode-badge { background: rgba(88,166,255,0.15); color: var(--blue); }
+    .mode-card.api .mode-badge { background: rgba(210,153,34,0.15); color: var(--yellow); }
+    .mode-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .mode-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+    /* Endpoint rows */
+    .method { display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px; margin-right: 6px; font-family: monospace; }
+    .get    { background: rgba(63,185,80,0.15);  color: var(--green); }
+    .post   { background: rgba(88,166,255,0.15); color: var(--blue); }
+    .delete { background: rgba(248,81,73,0.15);  color: var(--red); }
+    .patch  { background: rgba(188,140,255,0.15);color: var(--purple); }
+    .endpoint-row {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 8px 12px; background: var(--surface2);
+      border-radius: 6px; margin-bottom: 5px; font-size: 12px;
+    }
+    .endpoint-path { font-family: 'SF Mono','Fira Code',monospace; color: var(--text); flex: 1; }
+    .endpoint-desc { color: var(--text-muted); font-size: 11px; }
+
+    /* JSON / code blocks */
     pre {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      overflow-x: auto;
-      margin: 12px 0 20px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      color: var(--text-muted);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px; overflow-x: auto; margin: 12px 0 20px;
+      font-family: 'SF Mono','Fira Code',monospace; font-size: 12px;
+      line-height: 1.6; color: var(--text-muted);
     }
     pre .k { color: var(--purple); }
     pre .s { color: var(--green); }
     pre .c { color: #6e7681; font-style: italic; }
     pre .n { color: var(--blue); }
 
-    .arch-diagram {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      line-height: 1.9;
-      color: var(--text-muted);
-      margin: 12px 0 20px;
-      overflow-x: auto;
-    }
-    .arch-diagram .box { color: var(--blue); }
-    .arch-diagram .arrow { color: var(--text-muted); }
-    .arch-diagram .label { color: var(--yellow); }
-    .arch-diagram .ext { color: var(--green); }
-
-    .table-doc {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      margin: 12px 0 20px;
-    }
-    .table-doc th {
-      text-align: left;
-      padding: 7px 12px;
-      border-bottom: 2px solid var(--border);
-      color: var(--text-muted);
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .table-doc td {
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-    }
-    .table-doc tr:last-child td { border-bottom: none; }
-    .table-doc code { font-size: 11px; }
-    .td-name { color: var(--blue); font-family: 'SF Mono','Fira Code',monospace; white-space:nowrap; }
-    .td-type { color: var(--purple); font-family: 'SF Mono','Fira Code',monospace; white-space:nowrap; }
-    .td-desc { color: var(--text-muted); }
-
-    .method { display: inline-block; font-size: 10px; font-weight: 700;
-      padding: 2px 7px; border-radius: 4px; margin-right: 6px; font-family: monospace; }
-    .get { background: rgba(63,185,80,0.15); color: var(--green); }
-    .post { background: rgba(88,166,255,0.15); color: var(--blue); }
-    .delete { background: rgba(248,81,73,0.15); color: var(--red); }
-    .patch { background: rgba(188,140,255,0.15); color: var(--purple); }
-
-    .endpoint-row {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-      padding: 8px 12px;
-      background: var(--surface2);
-      border-radius: 6px;
-      margin-bottom: 6px;
-      font-size: 12px;
-    }
-    .endpoint-path { font-family: 'SF Mono','Fira Code',monospace; color: var(--text); flex:1; }
-    .endpoint-desc { color: var(--text-muted); font-size: 11px; }
-
-    .tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 16px; }
-    .tag-doc {
-      font-size: 11px; padding: 3px 10px; border-radius: 20px;
-      border: 1px solid;
-    }
-    .tag-py { color: var(--blue); border-color: var(--blue); background: rgba(88,166,255,0.08); }
-    .tag-js { color: var(--yellow); border-color: var(--yellow); background: rgba(210,153,34,0.08); }
-    .tag-docker { color: var(--purple); border-color: var(--purple); background: rgba(188,140,255,0.08); }
-    .tag-ext { color: var(--green); border-color: var(--green); background: rgba(63,185,80,0.08); }
-
+    /* Callouts */
     .callout {
-      border-left: 3px solid;
-      padding: 10px 14px;
-      border-radius: 0 6px 6px 0;
-      font-size: 12px;
-      line-height: 1.6;
-      margin: 12px 0;
+      border-left: 3px solid; padding: 10px 14px;
+      border-radius: 0 6px 6px 0; font-size: 12px; line-height: 1.6; margin: 12px 0;
     }
-    .callout-blue { border-color: var(--blue); background: rgba(88,166,255,0.06); color: var(--text-muted); }
-    .callout-yellow { border-color: var(--yellow); background: rgba(210,153,34,0.06); color: var(--yellow); }
-    .callout-green { border-color: var(--green); background: rgba(63,185,80,0.06); color: var(--text-muted); }
+    .callout-blue   { border-color: var(--blue);   background: rgba(88,166,255,0.06);  color: var(--text-muted); }
+    .callout-yellow { border-color: var(--yellow);  background: rgba(210,153,34,0.06);  color: var(--yellow); }
+    .callout-green  { border-color: var(--green);   background: rgba(63,185,80,0.06);   color: var(--text-muted); }
+    .callout-purple { border-color: var(--purple);  background: rgba(188,140,255,0.06); color: var(--text-muted); }
 
-    .flow-step {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 10px;
-      align-items: flex-start;
+    /* Indicator pills */
+    .pill-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .pill {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 5px 12px; font-size: 12px;
     }
-    .flow-num {
-      width: 24px; height: 24px; border-radius: 50%;
-      background: var(--blue); color: #0d1117;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 700; flex-shrink: 0;
-    }
-    .flow-text { font-size: 12px; color: var(--text-muted); line-height: 1.6; padding-top: 3px; }
-    .flow-text strong { color: var(--text); }
+    .pill-name { color: var(--blue); font-weight: 600; }
+    .pill-param { color: var(--text-muted); font-size: 11px; }
+
+    /* Divider */
+    .section-divider { border: none; border-top: 1px solid var(--border); margin: 48px 0 0; }
 
     @media (max-width: 700px) {
       .sidebar { display: none; }
-      .doc-content { padding: 20px 16px; }
+      .doc-content { padding: 0 16px 60px; }
+      .feature-grid, .claude-modes, .module-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="doc-layout">
+<div class="doc-layout">
 
-    <!-- Sidebar -->
-    <nav class="sidebar">
-      <div class="sidebar-header">
-        <a href="/admin">← Admin</a>
-        <div class="sidebar-title">Dokumentation</div>
-      </div>
+  <!-- ── Sidebar ── -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <a href="/admin">← Admin</a>
+      <div class="sidebar-title">Dokumentation</div>
+    </div>
+    <div class="nav-group-label">Überblick</div>
+    <a class="nav-link" href="#overview">Was ist Crypto Pattern AI?</a>
+    <a class="nav-link" href="#features">Kernfunktionen</a>
+    <div class="nav-group-label">Architektur</div>
+    <a class="nav-link" href="#arch">Systemarchitektur</a>
+    <a class="nav-link" href="#modules">Module (Backend)</a>
+    <a class="nav-link" href="#frontend">Frontend</a>
+    <div class="nav-group-label">Funktionsweise</div>
+    <a class="nav-link" href="#flow-sim">Simulations-Flow</a>
+    <a class="nav-link" href="#flow-live">Live-Trading-Flow</a>
+    <a class="nav-link" href="#claude-modes">Claude-Modi</a>
+    <a class="nav-link" href="#indicators">Indikatoren</a>
+    <div class="nav-group-label">Datenformate</div>
+    <a class="nav-link" href="#db-users">users.json</a>
+    <a class="nav-link" href="#db-live">live_state.json</a>
+    <a class="nav-link" href="#db-sims">simulations.json</a>
+    <a class="nav-link" href="#db-simdetail">sim detail</a>
+    <div class="nav-group-label">API-Referenz</div>
+    <a class="nav-link" href="#api-auth">Auth</a>
+    <a class="nav-link" href="#api-user">User</a>
+    <a class="nav-link" href="#api-admin">Admin</a>
+    <a class="nav-link" href="#api-sim">Simulation</a>
+    <a class="nav-link" href="#api-live">Live Trading</a>
+    <a class="nav-link" href="#api-market">Markt</a>
+    <div class="nav-group-label">Betrieb</div>
+    <a class="nav-link" href="#auth-roles">Auth &amp; Rollen</a>
+    <a class="nav-link" href="#persistence">Persistenz</a>
+    <a class="nav-link" href="#envvars">Umgebungsvariablen</a>
+    <a class="nav-link" href="#fees">Gebühren</a>
+    <a class="nav-link" href="#security">Sicherheit</a>
+  </nav>
 
-      <div class="nav-group">
-        <div class="nav-group-label">Überblick</div>
-        <a class="nav-link" href="#overview">Projektübersicht</a>
-        <a class="nav-link" href="#stack">Tech-Stack</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-label">Architektur</div>
-        <a class="nav-link" href="#arch">Systemarchitektur</a>
-        <a class="nav-link" href="#modules">Module</a>
-        <a class="nav-link" href="#dataflow">Datenfluss</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-label">Datenformate</div>
-        <a class="nav-link" href="#db-users">users.json</a>
-        <a class="nav-link" href="#db-live">live_state.json</a>
-        <a class="nav-link" href="#db-sims">simulations.json</a>
-        <a class="nav-link" href="#db-simdetail">sim detail</a>
-        <a class="nav-link" href="#db-candle">Kerzendaten</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-label">API-Referenz</div>
-        <a class="nav-link" href="#api-auth">Auth</a>
-        <a class="nav-link" href="#api-user">User</a>
-        <a class="nav-link" href="#api-admin">Admin</a>
-        <a class="nav-link" href="#api-sim">Simulation</a>
-        <a class="nav-link" href="#api-live">Live Trading</a>
-        <a class="nav-link" href="#api-market">Markt</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-label">Komponenten</div>
-        <a class="nav-link" href="#claude">Claude-Integration</a>
-        <a class="nav-link" href="#indicators">Indikatoren</a>
-        <a class="nav-link" href="#simulator">Simulator</a>
-        <a class="nav-link" href="#scanner">Marktscanner</a>
-        <a class="nav-link" href="#liveloop">Live-Loop</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-label">Betrieb</div>
-        <a class="nav-link" href="#auth-system">Auth & Rollen</a>
-        <a class="nav-link" href="#fees">Gebührenmodell</a>
-        <a class="nav-link" href="#security">Sicherheit</a>
-        <a class="nav-link" href="#envvars">Umgebungsvariablen</a>
-        <a class="nav-link" href="#persistence">Persistenz</a>
-      </div>
-    </nav>
+  <!-- ── Content ── -->
+  <main class="doc-content">
 
-    <!-- Content -->
-    <main class="doc-content">
-
+    <!-- HERO -->
+    <div class="hero" id="overview">
       <h1>Crypto Pattern AI</h1>
-      <p class="lead">Claude-gesteuertes Backtesting &amp; Live-Trading-System für USDC-Kryptowährungspaare auf Binance.</p>
-
+      <p class="hero-sub">
+        Claude-gesteuertes Backtesting- und Live-Trading-System für USDC-Kryptowährungspaare auf Binance.
+        Claude analysiert Chartmuster, generiert BUY/SELL-Signale — der Rest läuft automatisch.
+      </p>
       <div class="tag-row">
-        <span class="tag-doc tag-py">Python 3.12</span>
-        <span class="tag-doc tag-py">FastAPI</span>
-        <span class="tag-doc tag-js">Chart.js 4.4</span>
+        <span class="tag-doc tag-py">Python 3.12 · FastAPI</span>
+        <span class="tag-doc tag-js">Vanilla JS · Chart.js 4.4</span>
         <span class="tag-doc tag-docker">Docker Compose</span>
-        <span class="tag-doc tag-ext">Binance API</span>
-        <span class="tag-doc tag-ext">Anthropic Claude</span>
+        <span class="tag-doc tag-ext">Binance Spot API</span>
+        <span class="tag-doc tag-ext">Claude Sonnet 4.6</span>
+      </div>
+    </div>
+
+    <!-- FEATURES -->
+    <hr class="section-divider" />
+    <div class="section" id="features">
+      <h2><span class="section-icon ic-blue">✦</span>Kernfunktionen</h2>
+      <p class="section-desc">Drei integrierte Subsysteme arbeiten zusammen — vom Backtesting bis zur automatischen Orderausführung.</p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-card-icon">🔬</div>
+          <div class="feature-card-title">Backtesting / Simulation</div>
+          <div class="feature-card-desc">Claude analysiert bis zu 1000 historische Kerzen mit 11 Indikatoren und generiert BUY/SELL-Signale. Der Simulator berechnet P&L inkl. Gebühren. Nicht profitable Strategien gehen mit Feedback zurück an Claude — iterativ bis zu einer profitablen Lösung.</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">📡</div>
+          <div class="feature-card-title">Live Trading</div>
+          <div class="feature-card-desc">Wartet auf UTC-alignierte Kerzenschlüsse, scannt parallel alle konfigurierten Paare, wählt das beste Symbol und fragt Claude nach einem Signal. Marktorders werden automatisch auf Binance ausgeführt.</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">👥</div>
+          <div class="feature-card-title">Multi-User-System</div>
+          <div class="feature-card-desc">Vollständig isolierte Datenbereiche pro User — eigene Simulationen, eigener Live-State, eigene Claude-Credentials. Admin-Panel zur Benutzerverwaltung, drei Claude-Zugangsmodi.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ARCHITECTURE -->
+    <hr class="section-divider" />
+    <div class="section" id="arch">
+      <h2><span class="section-icon ic-purple">⬡</span>Systemarchitektur</h2>
+      <p class="section-desc">Zwei Docker-Container im selben Netzwerk. Der Hauptcontainer enthält FastAPI + alle Geschäftslogik; der Proxy-Container kapselt die Claude CLI für Platform/Subscription-Modus.</p>
+
+      <div class="arch-wrap">
+        <p class="arch-label">Eingehender Traffic</p>
+        <div class="arch-row">
+          <div class="arch-box green">
+            <div class="arch-box-title">Browser / User</div>
+            <div class="arch-box-sub">HTTP über Reverse-Proxy (Plesk)</div>
+          </div>
+        </div>
+
+        <div class="arch-row" style="margin: 10px 0;">
+          <div class="arch-arrow">↓</div>
+        </div>
+
+        <div class="arch-row">
+          <div class="arch-box blue" style="min-width:380px">
+            <div class="arch-box-title">crypto-pattern-ai · Port 7891→8080</div>
+            <div class="arch-box-sub">FastAPI + Uvicorn · Background Tasks: Sim-Loop, Live-Loop, Scanner</div>
+          </div>
+        </div>
+
+        <div class="arch-divider"></div>
+        <p class="arch-label">Claude-Aufrufe — je nach User-Modus</p>
+
+        <div class="arch-row">
+          <div class="arch-box purple">
+            <div class="arch-box-title">crypto-claude-proxy</div>
+            <div class="arch-box-sub">Port 8081 (intern) · claude CLI subprocess<br/>Platform &amp; Subscription-Modus</div>
+          </div>
+          <div class="arch-arrow">|</div>
+          <div class="arch-box yellow">
+            <div class="arch-box-title">api.anthropic.com</div>
+            <div class="arch-box-sub">Direkt · API-Key-Modus<br/>/v1/messages</div>
+          </div>
+        </div>
+
+        <div class="arch-divider"></div>
+        <p class="arch-label">Externe Services</p>
+
+        <div class="arch-row">
+          <div class="arch-box">
+            <div class="arch-box-title">Host-Volume /app/data</div>
+            <div class="arch-box-sub">users.json · live_state · sims</div>
+          </div>
+          <div class="arch-arrow">|</div>
+          <div class="arch-box green">
+            <div class="arch-box-title">api.binance.com</div>
+            <div class="arch-box-sub">OHLCV-Daten · Marktorders · Kontoinfos</div>
+          </div>
+        </div>
       </div>
 
-      <!-- ── OVERVIEW ─────────────────────────────────────────────────── -->
-      <h2 id="overview">Projektübersicht</h2>
-      <p>Crypto Pattern AI nutzt Claude als KI-Analyst, um technische Chartmuster in historischen Kerzendaten zu erkennen, daraus Handelsstrategien abzuleiten, diese per Backtesting zu validieren und schließlich automatisiert auf Binance live zu handeln.</p>
-      <ul>
-        <li><strong>Simulation:</strong> Claude analysiert bis zu 1000 Kerzen mit 8 technischen Indikatoren, generiert BUY/SELL-Signale, der Simulator berechnet P&amp;L inkl. Gebühren — iterativ bis zu einer profitablen Strategie.</li>
-        <li><strong>Live Trading:</strong> Wartet auf Kerzen-Schlusskurs (UTC-aligned), scannt alle konfigurierten Paare, wählt das beste, fragt Claude nach einem Signal und führt Marktorders auf Binance aus.</li>
-        <li><strong>Multi-User:</strong> Vollständig isolierte Datenbereiche pro User — eigene Simulationen, eigener Live-State, eigene Claude-Credentials.</li>
-      </ul>
-
-      <!-- ── TECH STACK ───────────────────────────────────────────────── -->
-      <h2 id="stack">Tech-Stack</h2>
+      <h3>Docker-Stack</h3>
       <table class="table-doc">
-        <thead><tr><th>Komponente</th><th>Technologie</th><th>Version</th><th>Zweck</th></tr></thead>
+        <thead><tr><th>Container</th><th>Port</th><th>Netzwerk</th><th>Zweck</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">Backend</td><td>FastAPI + Uvicorn</td><td>0.115.5 / 0.32.1</td><td class="td-desc">Async HTTP-Server, REST-API, Background-Tasks</td></tr>
-          <tr><td class="td-name">HTTP-Client</td><td>httpx</td><td>0.28.0</td><td class="td-desc">Async HTTP für Binance &amp; Anthropic API</td></tr>
-          <tr><td class="td-name">Indikatoren</td><td>pandas + numpy</td><td>2.2.3 / 2.1.3</td><td class="td-desc">Zeitreihenanalyse, Indikatorberechnung</td></tr>
-          <tr><td class="td-name">Frontend</td><td>Vanilla JS + Chart.js</td><td>— / 4.4.4</td><td class="td-desc">SPA ohne Framework, Kurs- &amp; Portfolio-Charts</td></tr>
-          <tr><td class="td-name">KI-Analyse</td><td>Claude Sonnet 4.6</td><td>claude-sonnet-4-6</td><td class="td-desc">Mustererkennung, Signalgenerierung, Markt-Ranking</td></tr>
-          <tr><td class="td-name">Claude-Proxy</td><td>Claude CLI + FastAPI</td><td>—</td><td class="td-desc">Wrapper für claude CLI bei Platform/Subscription-Modus</td></tr>
-          <tr><td class="td-name">Infrastruktur</td><td>Docker Compose</td><td>—</td><td class="td-desc">2-Container-Stack mit eigenem Netzwerk</td></tr>
-          <tr><td class="td-name">Datenhaltung</td><td>JSON-Dateien</td><td>—</td><td class="td-desc">Kein Datenbank-Server; alles als strukturierte JSON-Files</td></tr>
-          <tr><td class="td-name">Börse</td><td>Binance Spot API v3</td><td>—</td><td class="td-desc">OHLCV-Daten, Marktorders, Kontoabfragen</td></tr>
+          <tr><td class="td-name">crypto-pattern-ai</td><td>7891→8080</td><td class="td-desc">crypto-pattern-ai-net</td><td class="td-desc">FastAPI-App, alle Routes, Background Tasks</td></tr>
+          <tr><td class="td-name">crypto-claude-proxy</td><td>8081 (intern)</td><td class="td-desc">crypto-pattern-ai-net</td><td class="td-desc">Claude CLI-Wrapper für Platform/Subscription</td></tr>
         </tbody>
       </table>
+    </div>
 
-      <!-- ── ARCHITECTURE ─────────────────────────────────────────────── -->
-      <h2 id="arch">Systemarchitektur</h2>
+    <!-- MODULES -->
+    <hr class="section-divider" />
+    <div class="section" id="modules">
+      <h2><span class="section-icon ic-blue">⚙</span>Backend-Module (app/)</h2>
+      <p class="section-desc">Jede Datei hat eine klar abgegrenzte Verantwortung. Kein Framework-Overhead — nur Python-Standardbibliotheken + FastAPI + httpx + pandas.</p>
 
-      <div class="arch-diagram">
-<span class="ext">Browser / Telegram</span>
-        │  HTTP
-        ▼
-<span class="box">┌──────────────────────────────────────────────┐</span>
-<span class="box">│  crypto-pattern-ai  (Port 7891→8080)         │</span>
-<span class="box">│  FastAPI (uvicorn)                            │</span>
-<span class="box">│                                              │</span>
-<span class="box">│  ┌──────────┐  ┌──────────┐  ┌───────────┐  │</span>
-<span class="box">│  │ Sim-Loop │  │Live-Loop │  │  Scanner  │  │</span>
-<span class="box">│  │(bg task) │  │(bg task) │  │  (adhoc)  │  │</span>
-<span class="box">│  └────┬─────┘  └────┬─────┘  └─────┬─────┘  │</span>
-<span class="box">│       └─────────────┴──────────────┘        │</span>
-<span class="box">│                     │ Claude-Anfragen        │</span>
-<span class="box">└─────────────────────┼────────────────────────┘</span>
-          ┌────────────┘
-          │ HTTP :8081 (intern)
-          ▼
-<span class="box">┌──────────────────────────────┐</span>
-<span class="box">│  crypto-claude-proxy         │</span>  <span class="label">──── Platform/Subscription Modus</span>
-<span class="box">│  FastAPI (uvicorn)           │</span>
-<span class="box">│  → claude CLI subprocess     │</span>
-<span class="box">│    CLAUDE_CODE_OAUTH_TOKEN   │</span>
-<span class="box">└──────────────────────────────┘</span>
+      <div class="module-grid">
+        <div class="module-card">
+          <div class="module-name">main.py</div>
+          <div class="module-desc">FastAPI-App, alle Routes, Auth-Middleware, per-User In-Memory-State (<code>sim_states</code>, <code>live_states</code>), Background Task Orchestrierung, Auto-Resume bei Start</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">user_store.py</div>
+          <div class="module-desc">Vollständiges User-CRUD auf <code>users.json</code>: Anlegen, Löschen, Sperren, Passwortverwaltung, Claude-Konfiguration pro User. PBKDF2-SHA256 Hashing.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">claude_analyst.py</div>
+          <div class="module-desc">Alle Claude-Aufrufe: Backtesting-Analyse, Live-Signal, Markt-Scan, Verbindungstest. Dispatcht zwischen Proxy (Platform/Subscription) und direkter API (API-Key).</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">indicators.py</div>
+          <div class="module-desc">Technische Indikatorberechnung auf pandas DataFrame: RSI, MACD, Bollinger Bands, SMA/EMA, ATR, StochRSI, Volume Ratio, Price Changes.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">simulator.py</div>
+          <div class="module-desc">Backtesting-Engine: strikte BUY→SELL-Alternierung, P&L inkl. Gebühren auf beiden Seiten, rollendes Drawdown, Portfolio-Historie für Chart-Darstellung.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">binance_trader.py</div>
+          <div class="module-desc">HMAC-signierte Binance API: Kontoabfragen, Guthaben, Marktorders (BUY/SELL quoteOrderQty), API-Key-Validierung.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">data_fetcher.py</div>
+          <div class="module-desc">Binance REST: historische Kerzen (<code>/api/v3/klines</code>), verfügbare USDC-Paare, aktuelle Kursdaten für den Scanner.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">state_store.py / sim_store.py</div>
+          <div class="module-desc">Disk-Persistenz: <code>live_state.json</code> pro User (Restart-Sicherheit), Simulationsindex + Vollresultate pro User.</div>
+        </div>
+      </div>
+    </div>
 
-          <span class="arrow">──────────────────────────────────────────</span>
+    <!-- FRONTEND -->
+    <hr class="section-divider" />
+    <div class="section" id="frontend">
+      <h2><span class="section-icon ic-yellow">◈</span>Frontend</h2>
+      <p class="section-desc">Single-Page-App ohne Framework. Alle Seiten werden vom FastAPI-Server als statische HTML-Dateien ausgeliefert.</p>
 
-          <span class="label">API-Key Modus: direkt zu Anthropic</span>
-          ▼
-<span class="ext">https://api.anthropic.com/v1/messages</span>
+      <table class="table-doc">
+        <thead><tr><th>Datei</th><th>Route</th><th>Inhalt</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">index.html + app.js</td><td><code>/</code></td><td class="td-desc">Haupt-App: drei Tabs (Simulation, Live Trading, Vergangene Simulationen). Chart.js für Preis- und Portfolio-Charts. Live-Poll via <code>setInterval</code>.</td></tr>
+          <tr><td class="td-name">login.html</td><td><code>/login</code></td><td class="td-desc">Anmeldeformular. Einzige öffentliche Route.</td></tr>
+          <tr><td class="td-name">settings.html</td><td><code>/settings</code></td><td class="td-desc">Claude-Zugang konfigurieren (3 Modes), Passwort ändern.</td></tr>
+          <tr><td class="td-name">admin.html</td><td><code>/admin</code></td><td class="td-desc">User-Verwaltung: Anlegen, Sperren, Löschen, Platform-Zugang, PW-Reset. Nur Admin.</td></tr>
+          <tr><td class="td-name">docs.html</td><td><code>/docs</code></td><td class="td-desc">Diese Dokumentation. Nur Admin.</td></tr>
+          <tr><td class="td-name">style.css</td><td><code>/static/style.css</code></td><td class="td-desc">Globales Dark-Theme: CSS-Variablen, Karten, Buttons, Inputs, Tabellen.</td></tr>
+        </tbody>
+      </table>
+    </div>
 
-          <span class="arrow">──────────────────────────────────────────</span>
+    <!-- SIMULATION FLOW -->
+    <hr class="section-divider" />
+    <div class="section" id="flow-sim">
+      <h2><span class="section-icon ic-green">▷</span>Simulations-Flow</h2>
+      <p class="section-desc">Eine Simulation iteriert zwischen Claude-Analyse und Backtesting, bis eine profitable Strategie gefunden oder das Maximum an Iterationen erreicht ist.</p>
 
-<span class="box">┌────────────────────────────────────┐</span>
-<span class="box">│  Host-Volume (Persistenz)          │</span>
-<span class="box">│  /opt/.../crypto-pattern-ai/data   │</span>
-<span class="box">│  → /app/data (im Container)        │</span>
-<span class="box">└────────────────────────────────────┘</span>
+      <div class="flow-steps">
+        <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>Kerzen laden:</strong> <code>fetch_klines(symbol, interval, days)</code> — bis zu 1000 OHLCV-Kerzen von Binance (<code>/api/v3/klines</code>).</div></div>
+        <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Indikatoren:</strong> <code>compute_indicators(candles)</code> — 11 Indikatoren werden auf jedem Datenpunkt der pandas-DataFrame berechnet (RSI, MACD, Bollinger etc.).</div></div>
+        <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Claude-Analyse:</strong> Gesampelte Indikatortabelle (max. 80 Zeilen) → Claude antwortet mit Strategiename, Analyse, erkannten Mustern, BUY/SELL-Signalen mit Confidence.</div></div>
+        <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Backtesting:</strong> <code>run_simulation(candles, signals, fee_pct)</code> — berechnet P&L, Win-Rate, Drawdown, Gebühren, Portfolio-Historie für jeden Trade.</div></div>
+        <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Feedback-Loop:</strong> Nicht profitabel? Fehlgeschlagene Trades werden als Feedback an Claude übergeben. Nächste Iteration mit angepasster Strategie. Max. N Iterationen (User-konfigurierbar).</div></div>
+        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>Speichern:</strong> Bestes Ergebnis → <code>save_simulation(username, ...)</code> — Metadaten in <code>simulations.json</code>, Vollresultat (Trades, Signale, Candles) in <code>sims/{id}.json</code>.</div></div>
+      </div>
+    </div>
 
-<span class="ext">https://api.binance.com</span>  <span class="arrow">← Kurs-Daten &amp; Marktorders</span>
+    <!-- LIVE TRADING FLOW -->
+    <hr class="section-divider" />
+    <div class="section" id="flow-live">
+      <h2><span class="section-icon ic-green">▶</span>Live-Trading-Flow</h2>
+      <p class="section-desc">Der Live-Loop läuft als FastAPI Background Task und synchronisiert sich auf UTC-alignierte Kerzenschlüsse.</p>
+
+      <div class="flow-steps">
+        <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>Zeitalignierung:</strong> <code>next_close = (int(now/interval_s)+1) * interval_s + 10s</code> — 10s Buffer nach offiziellem Kerzenschluss. Loop schläft in 30s-Chunks (damit Stop-Requests sofort greifen).</div></div>
+        <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Marktscan:</strong> Alle 10 Standard-Paare + bis zu 3 User-definierte Extras werden gleichzeitig über <code>asyncio.gather()</code> gefetcht. Claude rankt alle Paare nach Handelspotenzial (0–100 Punkte).</div></div>
+        <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Symbol-Wahl:</strong> Bei FLAT → wechsle zum besten Paar. Bei IN_POSITION → bleibe beim <code>position_symbol</code> (das gelockte Paar beim letzten BUY). Wechsel nur nach SELL.</div></div>
+        <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Signal:</strong> <code>get_live_signal()</code> mit 100 Kerzen + aktuelle Position + letzten 10 Signalen + optionaler Strategie-Kontext aus einer gespeicherten Simulation.</div></div>
+        <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Ausführung:</strong> BUY wenn Confidence ≥ 60 % und FLAT. SELL wenn Confidence ≥ 55 % und IN_POSITION. Orders werden als Binance Market-Orders platziert (<code>quoteOrderQty</code>).</div></div>
+        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>State-Update:</strong> Position, Trade-History, Buy-Preis → in-memory + <code>live_state.json</code> auf Disk. Ermöglicht Wiederaufnahme nach Container-Neustart (<code>_auto_resume_all()</code>).</div></div>
       </div>
 
-      <h3>Docker-Container</h3>
+      <h3>Konfidenz-Schwellwerte</h3>
       <table class="table-doc">
-        <thead><tr><th>Container</th><th>Image</th><th>Port</th><th>Netzwerk</th></tr></thead>
+        <thead><tr><th>Aktion</th><th>Min. Confidence</th><th>Bedingung</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">crypto-pattern-ai</td><td>lokales Dockerfile</td><td>7891→8080</td><td class="td-desc">crypto-pattern-ai-net</td></tr>
-          <tr><td class="td-name">crypto-claude-proxy</td><td>lokales Dockerfile</td><td>intern :8081</td><td class="td-desc">crypto-pattern-ai-net</td></tr>
+          <tr><td class="td-name">BUY</td><td>≥ 60 %</td><td class="td-desc">Position muss FLAT sein</td></tr>
+          <tr><td class="td-name">SELL</td><td>≥ 55 %</td><td class="td-desc">Position muss IN_POSITION sein</td></tr>
+          <tr><td class="td-name">HOLD</td><td>—</td><td class="td-desc">Kein Schwellwert; keine Order wird ausgeführt</td></tr>
         </tbody>
       </table>
+    </div>
 
-      <!-- ── MODULES ──────────────────────────────────────────────────── -->
-      <h2 id="modules">Module (app/)</h2>
+    <!-- CLAUDE MODES -->
+    <hr class="section-divider" />
+    <div class="section" id="claude-modes">
+      <h2><span class="section-icon ic-purple">◯</span>Claude-Zugangsmodi</h2>
+      <p class="section-desc">Drei Wege, Claude zu nutzen — konfigurierbar pro User in den Einstellungen.</p>
+
+      <div class="claude-modes">
+        <div class="mode-card platform">
+          <span class="mode-badge">Platform</span>
+          <div class="mode-title">Server-Account</div>
+          <div class="mode-desc">Nutzt den OAuth-Token des Servers. Kein eigener Key nötig. Wird vom Admin freigeschaltet. Route: <code>claude-proxy → claude CLI</code> mit <code>CLAUDE_CODE_OAUTH_TOKEN</code> des Servers.</div>
+        </div>
+        <div class="mode-card subscription">
+          <span class="mode-badge">Subscription</span>
+          <div class="mode-title">Eigene claude.ai-Sub</div>
+          <div class="mode-desc">User hinterlegt eigenen OAuth-Token (<code>sk-ant-oat01-…</code>) aus <code>~/.claude/.credentials.json</code>. Proxy überschreibt den Server-Token per-Request durch den User-Token.</div>
+        </div>
+        <div class="mode-card api">
+          <span class="mode-badge">API-Key</span>
+          <div class="mode-title">Eigener API-Key</div>
+          <div class="mode-desc">User hinterlegt <code>sk-ant-api03-…</code> Key. Direkte HTTP-Anfrage an <code>api.anthropic.com/v1/messages</code> — kein Proxy involviert. Pay-per-use.</div>
+        </div>
+      </div>
+
+      <h3>Claude-Prompts im Überblick</h3>
       <table class="table-doc">
-        <thead><tr><th>Datei</th><th>Verantwortung</th></tr></thead>
+        <thead><tr><th>Funktion</th><th>Input</th><th>Output (JSON)</th><th>Timeout</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">main.py</td><td class="td-desc">FastAPI-App, alle Routes, Auth-Middleware, Background-Task-Orchestrierung, per-User State-Management (<code>sim_states</code>, <code>live_states</code>)</td></tr>
-          <tr><td class="td-name">user_store.py</td><td class="td-desc">User-CRUD auf <code>users.json</code>: Erstellen, Löschen, Aktivieren, Passwortverwaltung, Claude-Konfiguration pro User</td></tr>
-          <tr><td class="td-name">state_store.py</td><td class="td-desc">Lesen/Schreiben von <code>live_state.json</code> pro User — ermöglicht Restart-Persistenz des Live-Tradings</td></tr>
-          <tr><td class="td-name">sim_store.py</td><td class="td-desc">Simulationsindex (<code>simulations.json</code>) und Vollresultate (<code>sims/{id}.json</code>) pro User</td></tr>
-          <tr><td class="td-name">claude_analyst.py</td><td class="td-desc">Claude-Aufrufe: Backtesting-Analyse, Live-Signal, Markt-Scan. Unterstützt drei Modi: Proxy, direkte API, Proxy mit User-Token</td></tr>
-          <tr><td class="td-name">data_fetcher.py</td><td class="td-desc">Binance REST API: historische Kerzen (<code>/api/v3/klines</code>), aktuelle Kerzen, verfügbare Symbole</td></tr>
-          <tr><td class="td-name">indicators.py</td><td class="td-desc">Technische Indikatorberechnung auf pandas DataFrame: RSI, MACD, Bollinger Bands, ATR, StochRSI, SMA/EMA, Volumen-Ratio</td></tr>
-          <tr><td class="td-name">simulator.py</td><td class="td-desc">Backtesting-Engine: BUY→SELL-Alternierung, P&amp;L-Berechnung inkl. Gebühren, Drawdown, Portfolio-Historie</td></tr>
-          <tr><td class="td-name">binance_trader.py</td><td class="td-desc">HMAC-signierte Binance-API-Aufrufe: Kontostatus, Guthaben, Marktorders (BUY/SELL), Schlüsselvalidierung</td></tr>
-      </tbody>
+          <tr><td class="td-name">analyze_with_claude</td><td class="td-desc">80-Zeilen Indikatortabelle + optionales Feedback aus letzter Iteration</td><td class="td-desc"><code>strategy_name, analysis, patterns_found, signals[], confidence</code></td><td>270 s</td></tr>
+          <tr><td class="td-name">get_live_signal</td><td class="td-desc">100 Kerzen + Position + letzte 10 Signale + Strategie-Kontext</td><td class="td-desc"><code>action, confidence, reason, stop_loss_pct, take_profit_pct</code></td><td>60 s</td></tr>
+          <tr><td class="td-name">scan_market</td><td class="td-desc">Kompakte Tabelle aller Symbole (Preis, ATR%, RSI, MACD-Richtung, Vol)</td><td class="td-desc"><code>best_symbol, ranking[], recommendation</code></td><td>90 s</td></tr>
+          <tr><td class="td-name">test_connection</td><td class="td-desc">Minimaler Ping-Prompt</td><td class="td-desc"><code>ok: true</code></td><td>30 s</td></tr>
+        </tbody>
       </table>
+    </div>
 
-      <!-- ── DATA FLOW ────────────────────────────────────────────────── -->
-      <h2 id="dataflow">Datenfluss</h2>
+    <!-- INDICATORS -->
+    <hr class="section-divider" />
+    <div class="section" id="indicators">
+      <h2><span class="section-icon ic-green">∿</span>Technische Indikatoren</h2>
+      <p class="section-desc">Berechnet in <code>indicators.py</code> mit pandas/numpy. Alle Indikatoren werden vor der Übergabe an Claude auf jedem Datenpunkt berechnet.</p>
 
-      <h3>Simulations-Flow</h3>
-      <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>Daten laden:</strong> <code>fetch_klines(symbol, interval, days)</code> → bis zu 1000 OHLCV-Kerzen von Binance</div></div>
-      <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Indikatoren:</strong> <code>compute_indicators(candles)</code> → 8 Indikator-Spalten auf jedem Datenpunkt</div></div>
-      <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Claude-Analyse:</strong> Gesampelte Indikatortabelle (max. 80 Zeilen) → Claude generiert BUY/SELL-Signale + Strategiename + Konfidenz</div></div>
-      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Simulation:</strong> <code>run_simulation(candles, signals)</code> → P&amp;L, Win-Rate, Drawdown, Gebühren, Portfolio-Historie</div></div>
-      <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Feedback-Loop:</strong> Nicht profitabel → Feedback (Fehlschläge) an Claude für nächste Iteration. Max. N Iterationen.</div></div>
-      <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>Persistenz:</strong> Bestes Ergebnis → <code>save_simulation(username, entry, full_result)</code> auf Disk</div></div>
+      <div class="pill-grid">
+        <span class="pill"><span class="pill-name">RSI</span> <span class="pill-param">Periode 14</span></span>
+        <span class="pill"><span class="pill-name">MACD</span> <span class="pill-param">EMA 12/26/9</span></span>
+        <span class="pill"><span class="pill-name">Bollinger Bands</span> <span class="pill-param">SMA 20 · 2σ</span></span>
+        <span class="pill"><span class="pill-name">SMA 20 / 50</span></span>
+        <span class="pill"><span class="pill-name">EMA 12 / 26</span></span>
+        <span class="pill"><span class="pill-name">ATR</span> <span class="pill-param">Periode 14</span></span>
+        <span class="pill"><span class="pill-name">StochRSI</span> <span class="pill-param">Periode 14</span></span>
+        <span class="pill"><span class="pill-name">Volume Ratio</span> <span class="pill-param">vs. SMA-20-Vol</span></span>
+        <span class="pill"><span class="pill-name">Price Change</span> <span class="pill-param">1 / 4 / 12 Kerzen</span></span>
+      </div>
 
-      <h3>Live-Trading-Flow</h3>
-      <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>Kerzenschluss berechnen:</strong> UTC-alignierter nächster Schlusskurs + 10s Buffer → sleep</div></div>
-      <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Marktscan:</strong> Alle 10 + konfigurierten Extra-Paare gleichzeitig fetchen → Claude rankt und wählt bestes Paar</div></div>
-      <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Symbol-Wechsel:</strong> FLAT → wechsle zu bestem Paar; IN_POSITION → bleibe beim aktuellen Symbol</div></div>
-      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Signal:</strong> <code>get_live_signal()</code> mit letzten 100 Kerzen + optional Strategie-Kontext + Signal-Historie</div></div>
-      <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Ausführung:</strong> BUY bei Konfidenz ≥ 60 % (FLAT); SELL bei Konfidenz ≥ 55 % (IN_POSITION) → Binance Market-Order</div></div>
-      <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>State-Update:</strong> Position, Trade-History, Buy-Preis → in-memory + periodisch auf Disk (Restart-Sicherheit)</div></div>
+      <table class="table-doc">
+        <thead><tr><th>Indikator</th><th>Interpretation</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">RSI</td><td class="td-desc">&lt; 30 = überverkauft (Kaufsignal); &gt; 70 = überkauft (Verkaufssignal)</td></tr>
+          <tr><td class="td-name">MACD / Histogramm</td><td class="td-desc">Positiv + steigend = bullish; negativ + fallend = bearish. Histogramm zeigt Momentum-Divergenz.</td></tr>
+          <tr><td class="td-name">bb_pct (Bollinger)</td><td class="td-desc">0 = Preis am unteren Band (überverkauft); 1 = Preis am oberen Band (überkauft)</td></tr>
+          <tr><td class="td-name">ATR</td><td class="td-desc">Volatilitätsmaß in Preis-Einheiten. Hoher ATR = große Schwankungen → engere Stops empfehlenswert.</td></tr>
+          <tr><td class="td-name">StochRSI</td><td class="td-desc">RSI des RSI, normiert 0–1. Sensitiver als RSI, reagiert früher auf Trendwenden.</td></tr>
+          <tr><td class="td-name">Volume Ratio</td><td class="td-desc">&gt; 1.5 = überdurchschnittliches Volumen (bestätigt Bewegung); &lt; 0.5 = schwaches Signal.</td></tr>
+        </tbody>
+      </table>
+    </div>
 
-      <!-- ── DATA FORMATS ─────────────────────────────────────────────── -->
-      <h2 id="db-users">Datenformat: users.json</h2>
-      <p>Pfad: <code>/app/data/users.json</code><br/>
-      Enthält alle Benutzer-Accounts. Wird bei Erststart angelegt wenn nicht vorhanden.</p>
+    <!-- DATA FORMATS -->
+    <hr class="section-divider" />
+    <div class="section" id="db-users">
+      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: users.json</h2>
+      <p class="section-desc">Pfad: <code>/app/data/users.json</code> — wird einmalig beim ersten Start angelegt.</p>
       <pre>{
   <span class="s">"username"</span>: {
-    <span class="s">"password_hash"</span>: <span class="s">"hex"</span>,         <span class="c">// PBKDF2-SHA256, 200.000 Iterationen</span>
-    <span class="s">"role"</span>:          <span class="s">"admin | user"</span>,
-    <span class="s">"enabled"</span>:       <span class="k">true</span>,
-    <span class="s">"created_at"</span>:    <span class="s">"2026-04-25T12:00:00+00:00"</span>,
-    <span class="s">"claude_mode"</span>:   <span class="s">"platform | api_key | subscription"</span>,
-    <span class="s">"claude_api_key"</span>:    <span class="s">"sk-ant-api03-... | null"</span>,
+    <span class="s">"password_hash"</span>:    <span class="s">"hex"</span>,              <span class="c">// PBKDF2-SHA256, 200 000 Iterationen</span>
+    <span class="s">"role"</span>:             <span class="s">"admin | user"</span>,
+    <span class="s">"enabled"</span>:          <span class="k">true</span>,
+    <span class="s">"created_at"</span>:       <span class="s">"2026-04-25T12:00:00+00:00"</span>,
+    <span class="s">"claude_mode"</span>:      <span class="s">"platform | api_key | subscription"</span>,
+    <span class="s">"claude_api_key"</span>:   <span class="s">"sk-ant-api03-... | null"</span>,
     <span class="s">"claude_oauth_token"</span>: <span class="s">"sk-ant-oat01-... | null"</span>
   }
 }</pre>
+    </div>
 
-      <h2 id="db-live">Datenformat: live_state.json</h2>
-      <p>Pfad: <code>/app/data/users/{username}/live_state.json</code><br/>
-      Ermöglicht Wiederaufnahme des Live-Tradings nach Container-Neustart. Wird beim Stopp gelöscht.</p>
+    <div class="section" id="db-live">
+      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: live_state.json</h2>
+      <p class="section-desc">Pfad: <code>/app/data/users/{username}/live_state.json</code> — ermöglicht Auto-Resume nach Neustart.</p>
       <pre>{
   <span class="s">"was_running"</span>:       <span class="k">true</span>,
   <span class="s">"api_key"</span>:           <span class="s">"Binance API Key"</span>,
-  <span class="s">"api_secret"</span>:        <span class="s">"Binance API Secret"</span>,
+  <span class="s">"api_secret"</span>:        <span class="s">"Binance Secret"</span>,
   <span class="s">"symbol"</span>:            <span class="s">"BTCUSDC"</span>,
   <span class="s">"interval"</span>:          <span class="s">"4h"</span>,
   <span class="s">"trade_amount"</span>:      <span class="n">50.0</span>,
   <span class="s">"position"</span>:          <span class="s">"FLAT | IN_POSITION"</span>,
-  <span class="s">"buy_price"</span>:         <span class="n">45000.0</span>,  <span class="c">// null wenn FLAT</span>
+  <span class="s">"buy_price"</span>:         <span class="n">45000.0</span>,        <span class="c">// null wenn FLAT</span>
   <span class="s">"strategy_name"</span>:     <span class="s">"RSI Oversold Recovery"</span>,
-  <span class="s">"strategy_analysis"</span>: <span class="s">"..."</span>,
-  <span class="s">"strategy_patterns"</span>: <span class="s">["RSI Divergence", "MACD Crossover"]</span>,
   <span class="s">"trade_history"</span>: [
-    {
-      <span class="s">"type"</span>:      <span class="s">"BUY | SELL"</span>,
-      <span class="s">"symbol"</span>:    <span class="s">"BTCUSDC"</span>,
-      <span class="s">"price"</span>:     <span class="n">45000.0</span>,
-      <span class="s">"timestamp"</span>: <span class="n">1745000000000</span>,   <span class="c">// Unix ms</span>
-      <span class="s">"order_id"</span>:  <span class="s">"1234567890"</span>,
-      <span class="s">"pnl_pct"</span>:   <span class="n">null</span>              <span class="c">// null bei BUY, float bei SELL</span>
-    }
+    { <span class="s">"type"</span>: <span class="s">"BUY"</span>, <span class="s">"price"</span>: <span class="n">45000.0</span>, <span class="s">"pnl_pct"</span>: <span class="k">null</span>, <span class="s">"order_id"</span>: <span class="s">"123"</span> }
   ]
 }</pre>
+    </div>
 
-      <h2 id="db-sims">Datenformat: simulations.json (Index)</h2>
-      <p>Pfad: <code>/app/data/users/{username}/simulations.json</code><br/>
-      Liste der letzten 50 Simulationen (nur Metadaten, keine Rohdaten). Neueste zuerst.</p>
-      <pre>[
-  {
-    <span class="s">"id"</span>:                <span class="s">"sim_1745000000"</span>,
-    <span class="s">"created_at"</span>:        <span class="s">"2026-04-25T12:00:00+00:00"</span>,
-    <span class="s">"symbol"</span>:            <span class="s">"BTCUSDC"</span>,
-    <span class="s">"interval"</span>:          <span class="s">"4h"</span>,
-    <span class="s">"days"</span>:              <span class="n">30</span>,
-    <span class="s">"capital"</span>:           <span class="n">1000.0</span>,
-    <span class="s">"fee_tier"</span>:          <span class="s">"standard"</span>,
-    <span class="s">"total_return_pct"</span>:  <span class="n">5.23</span>,
-    <span class="s">"win_rate"</span>:          <span class="n">66.7</span>,
-    <span class="s">"num_trades"</span>:        <span class="n">6</span>,
-    <span class="s">"max_drawdown"</span>:      <span class="n">3.2</span>,
-    <span class="s">"total_fees_usdt"</span>:   <span class="n">2.15</span>,
-    <span class="s">"fee_drag_pct"</span>:      <span class="n">0.215</span>,
-    <span class="s">"strategy_name"</span>:     <span class="s">"RSI Oversold Recovery"</span>,
-    <span class="s">"strategy_analysis"</span>: <span class="s">"2-3 Satz Marktstruktur..."</span>,
-    <span class="s">"strategy_patterns"</span>: <span class="s">["RSI Divergence"]</span>,
-    <span class="s">"profitable"</span>:        <span class="k">true</span>,
-    <span class="s">"iterations"</span>:        <span class="n">3</span>
-  }
-]</pre>
+    <div class="section" id="db-sims">
+      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: simulations.json (Index)</h2>
+      <p class="section-desc">Pfad: <code>/app/data/users/{username}/simulations.json</code> — max. 50 Einträge, neueste zuerst.</p>
+      <pre>[{
+  <span class="s">"id"</span>:               <span class="s">"sim_1745000000"</span>,
+  <span class="s">"created_at"</span>:       <span class="s">"2026-04-25T12:00:00+00:00"</span>,
+  <span class="s">"symbol"</span>:           <span class="s">"BTCUSDC"</span>,   <span class="s">"interval"</span>: <span class="s">"4h"</span>,   <span class="s">"days"</span>: <span class="n">30</span>,
+  <span class="s">"capital"</span>:          <span class="n">1000.0</span>,      <span class="s">"fee_tier"</span>: <span class="s">"standard"</span>,
+  <span class="s">"total_return_pct"</span>: <span class="n">5.23</span>,        <span class="s">"win_rate"</span>: <span class="n">66.7</span>,
+  <span class="s">"num_trades"</span>:       <span class="n">6</span>,           <span class="s">"max_drawdown"</span>: <span class="n">3.2</span>,
+  <span class="s">"total_fees_usdt"</span>:  <span class="n">2.15</span>,        <span class="s">"fee_drag_pct"</span>: <span class="n">0.215</span>,
+  <span class="s">"strategy_name"</span>:    <span class="s">"RSI Oversold Recovery"</span>,
+  <span class="s">"profitable"</span>:       <span class="k">true</span>,        <span class="s">"iterations"</span>: <span class="n">3</span>
+}]</pre>
+    </div>
 
-      <h2 id="db-simdetail">Datenformat: sims/{id}.json (Vollresultat)</h2>
-      <p>Pfad: <code>/app/data/users/{username}/sims/sim_XXXX.json</code><br/>
-      Enthält alle Index-Felder plus vollständige Rohdaten für Charts und Trade-Protokoll.</p>
+    <div class="section" id="db-simdetail">
+      <h2><span class="section-icon ic-yellow">🗄</span>Datenformat: sims/{id}.json (Vollresultat)</h2>
+      <p class="section-desc">Pfad: <code>/app/data/users/{username}/sims/sim_XXXX.json</code> — alle Index-Felder plus Rohdaten.</p>
       <pre>{
-  <span class="c">// alle Felder aus simulations.json, plus:</span>
-  <span class="s">"candle_prices"</span>:    <span class="s">[45000.0, 45200.0, ...]</span>,      <span class="c">// Close-Preise</span>
-  <span class="s">"candle_timestamps"</span>: <span class="s">[1744000000000, ...]</span>,        <span class="c">// Unix ms</span>
-  <span class="s">"signals"</span>: [
-    { <span class="s">"candle_index"</span>: <span class="n">42</span>, <span class="s">"action"</span>: <span class="s">"BUY"</span>,  <span class="s">"reason"</span>: <span class="s">"..."</span> },
-    { <span class="s">"candle_index"</span>: <span class="n">68</span>, <span class="s">"action"</span>: <span class="s">"SELL"</span>, <span class="s">"reason"</span>: <span class="s">"..."</span> }
-  ],
-  <span class="s">"trades"</span>: [
-    {
-      <span class="s">"buy_index"</span>:      <span class="n">42</span>,
-      <span class="s">"sell_index"</span>:     <span class="n">68</span>,
-      <span class="s">"buy_price"</span>:      <span class="n">44500.0</span>,
-      <span class="s">"sell_price"</span>:     <span class="n">46200.0</span>,
-      <span class="s">"pnl_pct"</span>:        <span class="n">3.456</span>,    <span class="c">// netto (nach Gebühren)</span>
-      <span class="s">"price_move_pct"</span>: <span class="n">3.820</span>,    <span class="c">// reine Preisbewegung</span>
-      <span class="s">"fee_buy"</span>:        <span class="n">0.4450</span>,
-      <span class="s">"fee_sell"</span>:       <span class="n">0.4620</span>,
-      <span class="s">"fees_total"</span>:     <span class="n">0.9070</span>,
-      <span class="s">"reason_buy"</span>:     <span class="s">"RSI 26 oversold + MACD bullish..."</span>,
-      <span class="s">"reason_sell"</span>:    <span class="s">"RSI 74 overbought..."</span>
-    }
-  ],
+  <span class="c">// …alle Felder aus simulations.json, plus:</span>
+  <span class="s">"candle_prices"</span>:     <span class="s">[45000.0, 45200.0, ...]</span>,
+  <span class="s">"candle_timestamps"</span>: <span class="s">[1744000000000, ...]</span>,
+  <span class="s">"signals"</span>:  [{ <span class="s">"candle_index"</span>: <span class="n">42</span>, <span class="s">"action"</span>: <span class="s">"BUY"</span>,  <span class="s">"reason"</span>: <span class="s">"..."</span> }],
+  <span class="s">"trades"</span>: [{
+    <span class="s">"buy_index"</span>: <span class="n">42</span>,  <span class="s">"sell_index"</span>: <span class="n">68</span>,
+    <span class="s">"buy_price"</span>: <span class="n">44500.0</span>,  <span class="s">"sell_price"</span>: <span class="n">46200.0</span>,
+    <span class="s">"pnl_pct"</span>:   <span class="n">3.456</span>,    <span class="c">// netto nach Gebühren</span>
+    <span class="s">"fee_buy"</span>:   <span class="n">0.445</span>,    <span class="s">"fee_sell"</span>: <span class="n">0.462</span>,
+    <span class="s">"reason_buy"</span>: <span class="s">"RSI 26 oversold..."</span>,  <span class="s">"reason_sell"</span>: <span class="s">"RSI 74..."</span>
+  }],
   <span class="s">"portfolio_history"</span>: [
-    { <span class="s">"candle_index"</span>: <span class="n">0</span>, <span class="s">"timestamp"</span>: <span class="n">1744000000000</span>,
-      <span class="s">"value"</span>: <span class="n">1000.0</span>, <span class="s">"close"</span>: <span class="n">44000.0</span> }
+    { <span class="s">"candle_index"</span>: <span class="n">0</span>, <span class="s">"value"</span>: <span class="n">1000.0</span>, <span class="s">"close"</span>: <span class="n">44000.0</span> }
   ]
 }</pre>
+    </div>
 
-      <h2 id="db-candle">Datenformat: Kerzendaten (in-memory)</h2>
-      <p>Rohdaten von Binance, angereichert mit Indikatoren. Werden nicht auf Disk gespeichert (nur Close-Preise im sim-Detail).</p>
-      <pre>{
-  <span class="s">"timestamp"</span>:    <span class="n">1744000000000</span>,   <span class="c">// Unix ms (Öffnungszeitpunkt)</span>
-  <span class="s">"open"</span>:         <span class="n">44000.0</span>,
-  <span class="s">"high"</span>:         <span class="n">44800.0</span>,
-  <span class="s">"low"</span>:          <span class="n">43500.0</span>,
-  <span class="s">"close"</span>:        <span class="n">44500.0</span>,
-  <span class="s">"volume"</span>:       <span class="n">1250.5</span>,
-  <span class="c">// Indikatoren (nach compute_indicators):</span>
-  <span class="s">"rsi"</span>:          <span class="n">42.3</span>,
-  <span class="s">"macd"</span>:         <span class="n">-12.5</span>,
-  <span class="s">"macd_signal"</span>:  <span class="n">-8.2</span>,
-  <span class="s">"macd_hist"</span>:    <span class="n">-4.3</span>,
-  <span class="s">"bb_upper"</span>:     <span class="n">46000.0</span>,
-  <span class="s">"bb_lower"</span>:     <span class="n">42000.0</span>,
-  <span class="s">"bb_pct"</span>:       <span class="n">0.625</span>,     <span class="c">// 0=unteres Band, 1=oberes Band</span>
-  <span class="s">"sma20"</span>:        <span class="n">44100.0</span>,
-  <span class="s">"sma50"</span>:        <span class="n">43200.0</span>,
-  <span class="s">"ema12"</span>:        <span class="n">44300.0</span>,
-  <span class="s">"ema26"</span>:        <span class="n">43800.0</span>,
-  <span class="s">"volume_ratio"</span>: <span class="n">1.35</span>,     <span class="c">// vol / 20-Perioden-SMA</span>
-  <span class="s">"change_1"</span>:     <span class="n">0.45</span>,     <span class="c">// %-Änderung letzte Kerze</span>
-  <span class="s">"change_4"</span>:     <span class="n">1.82</span>,     <span class="c">// %-Änderung letzte 4 Kerzen</span>
-  <span class="s">"change_12"</span>:    <span class="n">-2.1</span>,
-  <span class="s">"atr"</span>:          <span class="n">850.0</span>,    <span class="c">// Average True Range (14)</span>
-  <span class="s">"stoch_rsi"</span>:    <span class="n">0.38</span>      <span class="c">// 0–1</span>
-}</pre>
+    <!-- API REFERENCE -->
+    <hr class="section-divider" />
+    <div class="section" id="api-auth">
+      <h2><span class="section-icon ic-blue">⌗</span>API-Referenz</h2>
+      <p class="section-desc">Alle Endpoints erfordern eine aktive Session (Cookie <code>session</code>), außer den Auth-Routes. JSON Request/Response überall.</p>
 
-      <!-- ── API REFERENCE ──────────────────────────────────────────────── -->
-      <h2 id="api-auth">API: Authentifizierung</h2>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/login</span><span class="endpoint-desc">Login-Seite</span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/auth/login</span><span class="endpoint-desc">Body: <code>{username, password}</code> → setzt session-Cookie (7 Tage)</span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/auth/logout</span><span class="endpoint-desc">Löscht Session, Redirect zu /login</span></div>
+      <h3>Authentifizierung</h3>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/login</span><span class="endpoint-desc">Login-Seite (öffentlich)</span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/auth/login</span><span class="endpoint-desc"><code>{username, password}</code> → setzt session-Cookie (7 Tage)</span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/auth/logout</span><span class="endpoint-desc">Session löschen → Redirect zu /login</span></div>
+    </div>
 
-      <h2 id="api-user">API: User-Einstellungen</h2>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/user/profile</span><span class="endpoint-desc">Eigenes Profil: username, role, claude_mode, has_api_key, has_oauth_token</span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/user/claude-config</span><span class="endpoint-desc">Body: <code>{mode, api_key?, oauth_token?}</code> — Claude-Modus konfigurieren</span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/user/test-claude</span><span class="endpoint-desc">Claude-Verbindung testen → <code>{ok: bool}</code></span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/user/change-password</span><span class="endpoint-desc">Body: <code>{current_password, new_password}</code></span></div>
+    <div class="section" id="api-user">
+      <h3>User-Einstellungen</h3>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/user/profile</span><span class="endpoint-desc">username, role, claude_mode, has_api_key, has_oauth_token</span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/user/claude-config</span><span class="endpoint-desc"><code>{mode, api_key?, oauth_token?}</code></span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/user/test-claude</span><span class="endpoint-desc">Verbindung testen → <code>{ok: bool}</code></span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/user/change-password</span><span class="endpoint-desc"><code>{current_password, new_password}</code></span></div>
+    </div>
 
-      <h2 id="api-admin">API: Admin (Rolle admin erforderlich)</h2>
+    <div class="section" id="api-admin">
+      <h3>Admin <span style="font-weight:400;color:var(--text-muted);font-size:12px">(Rolle admin erforderlich)</span></h3>
       <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/admin/users</span><span class="endpoint-desc">Alle User auflisten (ohne Passwort-Hashes)</span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/admin/users</span><span class="endpoint-desc">Body: <code>{username, password, role, claude_mode}</code> — User anlegen</span></div>
-      <div class="endpoint-row"><span class="method patch">PATCH</span><span class="endpoint-path">/api/admin/users/{username}</span><span class="endpoint-desc">Body: <code>{enabled?, new_password?, claude_mode?}</code> — User aktualisieren</span></div>
-      <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/admin/users/{username}</span><span class="endpoint-desc">User löschen (admin kann nicht gelöscht werden)</span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/admin/users</span><span class="endpoint-desc"><code>{username, password, role, claude_mode}</code> — anlegen</span></div>
+      <div class="endpoint-row"><span class="method patch">PATCH</span><span class="endpoint-path">/api/admin/users/{username}</span><span class="endpoint-desc"><code>{enabled?, new_password?, claude_mode?}</code></span></div>
+      <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/admin/users/{username}</span><span class="endpoint-desc">User löschen (admin selbst nicht löschbar)</span></div>
+    </div>
 
-      <h2 id="api-sim">API: Simulation</h2>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/simulate/start</span><span class="endpoint-desc">Body: <code>{symbol, interval, days, initial_capital, max_iterations, fee_tier}</code></span></div>
+    <div class="section" id="api-sim">
+      <h3>Simulation</h3>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/simulate/start</span><span class="endpoint-desc"><code>{symbol, interval, days, initial_capital, max_iterations, fee_tier}</code></span></div>
       <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/simulate/stop</span><span class="endpoint-desc">Laufende Simulation abbrechen</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulate/status</span><span class="endpoint-desc">Aktueller Status: running, iteration, status, log[], best_result</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulate/chart-data</span><span class="endpoint-desc">Kurspreise, Zeitstempel, Iterationsergebnisse für Charts</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulate/status</span><span class="endpoint-desc">running, iteration, log[], best_result</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulate/chart-data</span><span class="endpoint-desc">Kurspreise, Timestamps, Iterationsergebnisse</span></div>
       <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulations</span><span class="endpoint-desc">Simulationsindex des eingeloggten Users (max. 50)</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulations/{sim_id}</span><span class="endpoint-desc">Vollständiges Simulationsresultat inkl. Candles, Signals, Trades</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/simulations/{sim_id}</span><span class="endpoint-desc">Vollresultat: Candles, Signals, Trades, Portfolio-Historie</span></div>
+    </div>
 
-      <h2 id="api-live">API: Live Trading</h2>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/start</span><span class="endpoint-desc">Body: <code>{api_key, api_secret, symbol, interval, trade_amount_usdt, strategy_*}</code></span></div>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/stop</span><span class="endpoint-desc">Live Trading beenden + live_state.json löschen</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/status</span><span class="endpoint-desc">Status: running, position, symbol, next_check_ts, log[], trade_history</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/chart-data</span><span class="endpoint-desc">Letzte 80 Kerzen + vollständige trade_history für Live-Chart</span></div>
+    <div class="section" id="api-live">
+      <h3>Live Trading</h3>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/start</span><span class="endpoint-desc"><code>{api_key, api_secret, symbol, interval, trade_amount_usdt, strategy_*}</code></span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/stop</span><span class="endpoint-desc">Stopp + live_state.json löschen</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/status</span><span class="endpoint-desc">running, position, symbol, next_check_ts, log[], trade_history</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/chart-data</span><span class="endpoint-desc">Letzte 80 Kerzen + vollständige Trade-History</span></div>
+    </div>
 
-      <h2 id="api-market">API: Markt</h2>
-      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/scan/symbols</span><span class="endpoint-desc">Body: <code>{interval, extra_symbols[]}</code> → Claude-Ranking aller Paare</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/symbols</span><span class="endpoint-desc">Alle verfügbaren USDC-Paare von Binance (Priority-Liste + bis zu 50 weitere)</span></div>
+    <div class="section" id="api-market">
+      <h3>Markt</h3>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/scan/symbols</span><span class="endpoint-desc"><code>{interval, extra_symbols[]}</code> → Claude-Ranking aller Paare</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/symbols</span><span class="endpoint-desc">Alle verfügbaren USDC-Paare von Binance</span></div>
+    </div>
 
-      <!-- ── CLAUDE INTEGRATION ─────────────────────────────────────────── -->
-      <h2 id="claude">Claude-Integration</h2>
-      <p>Alle Claude-Aufrufe laufen über <code>claude_analyst.py</code> → <code>_call_claude(prompt, api_key, oauth_token)</code>.</p>
-      <table class="table-doc">
-        <thead><tr><th>Modus</th><th>Konfiguration</th><th>Transport</th><th>Modell</th></tr></thead>
-        <tbody>
-          <tr>
-            <td class="td-name">platform</td>
-            <td class="td-desc">Admin-Einstellung; kein User-Key</td>
-            <td class="td-desc">HTTP → claude-proxy → <code>claude -p</code> mit Server-<code>CLAUDE_CODE_OAUTH_TOKEN</code></td>
-            <td class="td-desc">claude-sonnet-4-6 (via CLI)</td>
-          </tr>
-          <tr>
-            <td class="td-name">subscription</td>
-            <td class="td-desc">User hinterlegt eigenen OAuth-Token</td>
-            <td class="td-desc">HTTP → claude-proxy → <code>claude -p</code> mit User-<code>CLAUDE_CODE_OAUTH_TOKEN</code> (per-Request-Override)</td>
-            <td class="td-desc">claude-sonnet-4-6 (via CLI)</td>
-          </tr>
-          <tr>
-            <td class="td-name">api_key</td>
-            <td class="td-desc">User hinterlegt <code>sk-ant-...</code> Key</td>
-            <td class="td-desc">Direkt → <code>https://api.anthropic.com/v1/messages</code></td>
-            <td class="td-desc">claude-sonnet-4-6 (max_tokens 4096)</td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- AUTH & ROLES -->
+    <hr class="section-divider" />
+    <div class="section" id="auth-roles">
+      <h2><span class="section-icon ic-red">🔒</span>Auth &amp; Rollen</h2>
+      <p class="section-desc">Sitzungs-basierte Authentifizierung, vollständig in-memory. Keine externe Datenbank, kein JWT.</p>
 
-      <h3>Claude-Prompts</h3>
-      <table class="table-doc">
-        <thead><tr><th>Funktion</th><th>Input</th><th>Output</th><th>Timeout</th></tr></thead>
-        <tbody>
-          <tr><td class="td-name">analyze_with_claude</td><td class="td-desc">80-Zeilen Indikatortabelle + optionales Feedback</td><td class="td-desc"><code>{strategy_name, analysis, patterns_found, signals[], confidence}</code></td><td>270 s</td></tr>
-          <tr><td class="td-name">get_live_signal</td><td class="td-desc">80 Kerzen + Position + Signal-Historie + Strategie-Kontext</td><td class="td-desc"><code>{action, confidence, reason, stop_loss_pct, take_profit_pct}</code></td><td>60 s</td></tr>
-          <tr><td class="td-name">scan_market</td><td class="td-desc">Kompakte Tabelle aller Symbole (Preis, RSI, ATR, Vol etc.)</td><td class="td-desc"><code>{best_symbol, ranking[], recommendation}</code></td><td>90 s</td></tr>
-          <tr><td class="td-name">test_connection</td><td class="td-desc">Minimaler Ping-Prompt</td><td class="td-desc"><code>{ok: true}</code></td><td>30 s</td></tr>
-        </tbody>
-      </table>
-
-      <!-- ── INDICATORS ─────────────────────────────────────────────────── -->
-      <h2 id="indicators">Technische Indikatoren</h2>
-      <p>Berechnet in <code>indicators.py</code> mit pandas/numpy auf jedem Datenpunkt der Kerzen-Liste.</p>
-      <table class="table-doc">
-        <thead><tr><th>Indikator</th><th>Parameter</th><th>Bedeutung</th></tr></thead>
-        <tbody>
-          <tr><td class="td-name">RSI</td><td>Periode 14</td><td class="td-desc">Relative Stärke. &lt;30 überverkauft (Kaufsignal), &gt;70 überkauft (Verkaufssignal)</td></tr>
-          <tr><td class="td-name">MACD</td><td>EMA 12/26/9</td><td class="td-desc">Trendstärke und -richtung. Positiv + steigend = bullish; negativ + fallend = bearish</td></tr>
-          <tr><td class="td-name">MACD Signal</td><td>EMA 9 des MACD</td><td class="td-desc">Gleitender Durchschnitt des MACD für Crossover-Signale</td></tr>
-          <tr><td class="td-name">MACD Histogramm</td><td>MACD − Signal</td><td class="td-desc">Momentum-Divergenz</td></tr>
-          <tr><td class="td-name">Bollinger Bands</td><td>SMA 20, 2σ</td><td class="td-desc">bb_pct: 0 = unteres Band (überverkauft), 1 = oberes Band (überkauft)</td></tr>
-          <tr><td class="td-name">SMA 20 / 50</td><td>—</td><td class="td-desc">Trendrichtung und Support/Resistance</td></tr>
-          <tr><td class="td-name">EMA 12 / 26</td><td>—</td><td class="td-desc">Basis für MACD; schnellerer Trend</td></tr>
-          <tr><td class="td-name">ATR</td><td>Periode 14</td><td class="td-desc">Average True Range: Volatilitätsmaß in Preis-Einheiten</td></tr>
-          <tr><td class="td-name">StochRSI</td><td>Periode 14</td><td class="td-desc">RSI des RSI, normiert 0–1. Sensitiver als RSI allein</td></tr>
-          <tr><td class="td-name">Volume Ratio</td><td>SMA 20</td><td class="td-desc">&gt;1.5 = hohes Volumen (bestätigt Bewegung); &lt;0.5 = schwaches Signal</td></tr>
-          <tr><td class="td-name">Change 1/4/12</td><td>—</td><td class="td-desc">%-Preisänderung über 1, 4, 12 Kerzen (Momentum)</td></tr>
-        </tbody>
-      </table>
-
-      <!-- ── SIMULATOR ──────────────────────────────────────────────────── -->
-      <h2 id="simulator">Simulator</h2>
-      <p>Die Backtesting-Engine in <code>simulator.py</code> berechnet realistische P&amp;L inkl. Gebühren.</p>
-      <ul>
-        <li><strong>Strikte Alternierung:</strong> Nur BUY→SELL→BUY-Sequenzen; offene BUY-Positionen am Ende werden zum Schlusskurs mit Gebühr geschlossen.</li>
-        <li><strong>Gebühren:</strong> Werden auf Kapital (BUY) und Erlös (SELL) separat abgezogen. Fee-Drag = Gesamtgebühren / Startkapital.</li>
-        <li><strong>Net P&amp;L:</strong> Vergleicht Netto-Erlös nach Sell-Fee mit originalem Kapital vor Buy-Fee (echter Return).</li>
-        <li><strong>Drawdown:</strong> Rollendes Maximum des Portfolio-Werts; Drawdown = (Peak − Current) / Peak.</li>
-        <li><strong>Portfolio-Historie:</strong> Snapshot nach jeder Kerze (für Chart-Darstellung).</li>
-      </ul>
-
-      <!-- ── SCANNER ────────────────────────────────────────────────────── -->
-      <h2 id="scanner">Marktscanner</h2>
-      <p>Vor jedem Kerzenschluss im Live-Loop werden alle konfigurierten Paare parallel gescannt.</p>
-      <ul>
-        <li><strong>Standard-Paare (10):</strong> BTC, ETH, BNB, SOL, XRP, ADA, AVAX, DOGE, DOT, LINK — alle USDC</li>
-        <li><strong>Extra-Paare (bis zu 3):</strong> Vom User frei konfigurierbar (per localStorage gespeichert)</li>
-        <li><strong>Parallel-Fetch:</strong> Alle Symbole werden gleichzeitig über <code>asyncio.gather()</code> geladen (60 Kerzen)</li>
-        <li><strong>Claude-Ranking:</strong> Kompakte Tabelle mit Preis, 24h/7d-Änderung, ATR%, RSI, MACD-Richtung, Volumen-Ratio → Claude vergibt 0–100 Punkte</li>
-        <li><strong>Symbol-Wechsel:</strong> Nur bei FLAT möglich. Bei IN_POSITION wird nur informiert, gewechselt wird nach dem nächsten SELL.</li>
-      </ul>
-
-      <!-- ── LIVE LOOP ───────────────────────────────────────────────────── -->
-      <h2 id="liveloop">Live-Loop Details</h2>
-
-      <h3>Zeitalignierung</h3>
-      <p>Der nächste Kerzenschluss wird UTC-aligniert berechnet:</p>
-      <pre>next_close = (int(now / interval_seconds) + 1) * interval_seconds
-wake_at    = next_close + 10  <span class="c"># 10s Buffer nach offiziellem Schluss</span></pre>
-      <p>Der Loop schläft in 30s-Chunks damit <code>live_state["running"] = False</code> prompt erkannt wird.</p>
-
-      <h3>Konfidenz-Schwellwerte</h3>
-      <table class="table-doc">
-        <thead><tr><th>Aktion</th><th>Minimale Konfidenz</th><th>Bedingung</th></tr></thead>
-        <tbody>
-          <tr><td class="td-name">BUY</td><td>≥ 60 %</td><td class="td-desc">Nur wenn Position FLAT</td></tr>
-          <tr><td class="td-name">SELL</td><td>≥ 55 %</td><td class="td-desc">Nur wenn Position IN_POSITION</td></tr>
-          <tr><td class="td-name">HOLD</td><td>—</td><td class="td-desc">Immer möglich, keine Order</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Symbol-Tracking</h3>
-      <ul>
-        <li><code>current_symbol</code>: Aktuell bevorzugtes Paar (kann sich bei FLAT ändern)</li>
-        <li><code>position_symbol</code>: Gesperrtes Paar sobald eine BUY-Order platziert wird; wird erst nach SELL freigegeben</li>
-        <li><code>active_symbol</code>: <code>position_symbol</code> wenn IN_POSITION, sonst <code>current_symbol</code></li>
-      </ul>
-
-      <!-- ── AUTH SYSTEM ────────────────────────────────────────────────── -->
-      <h2 id="auth-system">Auth &amp; Rollen</h2>
       <table class="table-doc">
         <thead><tr><th>Aspekt</th><th>Detail</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">Sessions</td><td class="td-desc">In-Memory Dict <code>token → {username, expiry}</code>. Token = 64-char Hex via <code>secrets.token_hex(32)</code>. TTL: 7 Tage. Werden bei Neustart zurückgesetzt (Re-Login erforderlich).</td></tr>
-          <tr><td class="td-name">Passwörter</td><td class="td-desc">PBKDF2-SHA256 mit Salt <code>"cpa_salt_bioval_2026"</code>, 200.000 Iterationen. Nur Hash in users.json gespeichert.</td></tr>
-          <tr><td class="td-name">Middleware</td><td class="td-desc">Alle Pfade außer <code>/login</code>, <code>/auth/*</code>, <code>/static/*</code> prüfen Session-Cookie. APIs geben 401 JSON zurück; Seiten → Redirect zu /login.</td></tr>
-          <tr><td class="td-name">Rolle: admin</td><td class="td-desc">Zugang zu <code>/admin</code> und allen <code>/api/admin/*</code>-Endpoints. Kann user anlegen/löschen/sperren, Platform-Zugang vergeben.</td></tr>
-          <tr><td class="td-name">Rolle: user</td><td class="td-desc">Zugang zu eigenen Daten. Kann eigenen API-Key / OAuth-Token konfigurieren, Passwort ändern. Kein Platform-Zugang ohne Admin-Freigabe.</td></tr>
-          <tr><td class="td-name">Datenisolation</td><td class="td-desc">Alle API-Routes extrahieren Username aus Session; Simulation und Live-State sind per-User getrennt (in-memory + on-disk).</td></tr>
+          <tr><td class="td-name">Sessions</td><td class="td-desc">In-Memory Dict <code>token → {username, expiry}</code>. Token: 64-char Hex (<code>secrets.token_hex(32)</code>). TTL: 7 Tage. Verfallen bei Container-Neustart.</td></tr>
+          <tr><td class="td-name">Passwörter</td><td class="td-desc">PBKDF2-SHA256, 200 000 Iterationen. Nur Hash in users.json.</td></tr>
+          <tr><td class="td-name">Middleware</td><td class="td-desc">Alle Pfade außer <code>/login</code>, <code>/auth/*</code>, <code>/static/*</code> prüfen Cookie. APIs → 401 JSON; Seiten → Redirect zu /login.</td></tr>
+          <tr><td class="td-name">Rolle admin</td><td class="td-desc">Zugang zu <code>/admin</code>, <code>/docs</code>, allen <code>/api/admin/*</code>. Kann User anlegen, sperren, löschen, Platform-Zugang vergeben.</td></tr>
+          <tr><td class="td-name">Rolle user</td><td class="td-desc">Zugang nur zu eigenen Daten. Kann API-Key/OAuth-Token konfigurieren, Passwort ändern. Kein Platform-Zugang ohne Admin-Freigabe.</td></tr>
+          <tr><td class="td-name">Datenisolation</td><td class="td-desc">Alle Routes holen Username aus Session; State-Dicts und Disk-Pfade sind vollständig per-User getrennt.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PERSISTENCE -->
+    <hr class="section-divider" />
+    <div class="section" id="persistence">
+      <h2><span class="section-icon ic-green">💾</span>Persistenz &amp; Restart</h2>
+      <p class="section-desc">Das Host-Volume <code>./data → /app/data</code> überlebt Container-Neustarts. Beim Start ruft <code>_auto_resume_all()</code> alle User mit <code>was_running=true</code> wieder auf.</p>
+
+      <table class="table-doc">
+        <thead><tr><th>Daten</th><th>Persistiert</th><th>Restart-Verhalten</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">Simulationsergebnisse</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">Vollständig erhalten; werden beim Start nicht neu geladen.</td></tr>
+          <tr><td class="td-name">Live-State (war aktiv)</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc"><code>_auto_resume_all()</code>: alle User mit <code>was_running=true</code> werden automatisch wiederaufgenommen.</td></tr>
+          <tr><td class="td-name">User-Datenbank</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">users.json bleibt erhalten; Admin wird nur einmalig beim ersten Start angelegt.</td></tr>
+          <tr><td class="td-name">In-Memory Sessions</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Alle Sessions verfallen → Re-Login erforderlich.</td></tr>
+          <tr><td class="td-name">Laufende Simulationen</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Werden abgebrochen. Bereits gespeicherte Ergebnisse bleiben.</td></tr>
         </tbody>
       </table>
 
-      <!-- ── FEES ───────────────────────────────────────────────────────── -->
-      <h2 id="fees">Gebührenmodell</h2>
+      <div class="callout callout-green">
+        <strong>Verzeichnisstruktur:</strong><br/>
+        <code>/app/data/users.json</code> — User-Datenbank<br/>
+        <code>/app/data/users/{name}/live_state.json</code> — Live-State<br/>
+        <code>/app/data/users/{name}/simulations.json</code> — Index<br/>
+        <code>/app/data/users/{name}/sims/{id}.json</code> — Vollresultate
+      </div>
+    </div>
+
+    <!-- ENV VARS -->
+    <hr class="section-divider" />
+    <div class="section" id="envvars">
+      <h2><span class="section-icon ic-purple">⚑</span>Umgebungsvariablen</h2>
       <table class="table-doc">
-        <thead><tr><th>Tier</th><th>Taker-Rate</th><th>Voraussetzung</th></tr></thead>
+        <thead><tr><th>Variable</th><th>Container</th><th>Beschreibung</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">standard</td><td>0.10 %</td><td class="td-desc">Standard Binance Spot</td></tr>
-          <tr><td class="td-name">bnb</td><td>0.075 %</td><td class="td-desc">Gebühren in BNB zahlen (25 % Rabatt)</td></tr>
+          <tr><td class="td-name">CLAUDE_PROXY_URL</td><td>crypto-pattern-ai</td><td class="td-desc">Interne URL des Proxy. Default: <code>http://claude-proxy:8081</code></td></tr>
+          <tr><td class="td-name">CLAUDE_CODE_OAUTH_TOKEN</td><td>crypto-claude-proxy</td><td class="td-desc">Server-weiter OAuth-Token für Platform-Modus. Aus Orchestrator-Umgebung geerbt.</td></tr>
+          <tr><td class="td-name">ANTHROPIC_MODEL</td><td>crypto-claude-proxy</td><td class="td-desc">Claude-Modell für CLI. Default: <code>claude-sonnet-4-6</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- FEES -->
+    <hr class="section-divider" />
+    <div class="section" id="fees">
+      <h2><span class="section-icon ic-yellow">%</span>Gebührenmodell</h2>
+      <p class="section-desc">Gebühren gelten nur für Simulation/Backtesting (werden auf beide Seiten eines Trades angewendet). Live-Trades nutzen die tatsächlichen Binance-Konditionen.</p>
+      <table class="table-doc">
+        <thead><tr><th>Tier</th><th>Rate</th><th>Voraussetzung</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">standard</td><td>0.10 %</td><td class="td-desc">Binance Spot Standard</td></tr>
+          <tr><td class="td-name">bnb</td><td>0.075 %</td><td class="td-desc">25 % Rabatt bei Zahlung in BNB</td></tr>
           <tr><td class="td-name">vip1</td><td>0.09 %</td><td class="td-desc">VIP 1</td></tr>
           <tr><td class="td-name">vip2</td><td>0.08 %</td><td class="td-desc">VIP 2</td></tr>
           <tr><td class="td-name">vip3</td><td>0.07 %</td><td class="td-desc">VIP 3</td></tr>
           <tr><td class="td-name">vip4</td><td>0.05 %</td><td class="td-desc">VIP 4</td></tr>
         </tbody>
       </table>
-      <div class="callout callout-blue">Gebühren gelten nur für Simulation/Backtesting. Live-Trades nutzen die tatsächlichen Binance-Konditionen des jeweiligen Accounts.</div>
+    </div>
 
-      <!-- ── SECURITY ───────────────────────────────────────────────────── -->
-      <h2 id="security">Sicherheitshinweise</h2>
+    <!-- SECURITY -->
+    <hr class="section-divider" />
+    <div class="section" id="security">
+      <h2><span class="section-icon ic-red">⚠</span>Sicherheitshinweise</h2>
+
       <div class="callout callout-yellow">
-        <strong>Claude API-Keys und OAuth-Tokens</strong> werden aktuell im Klartext in <code>users.json</code> gespeichert. Für Produktionsumgebungen sollte eine Verschlüsselung (z.B. Fernet) ergänzt werden.
+        <strong>Claude API-Keys und OAuth-Tokens</strong> werden im Klartext in <code>users.json</code> gespeichert. Für höhere Sicherheit kann eine Verschlüsselung (z.B. Fernet/AES) ergänzt werden.
       </div>
       <div class="callout callout-yellow">
-        <strong>Binance API-Keys</strong> werden für Restart-Persistenz in <code>live_state.json</code> gespeichert. Die Datei liegt auf dem Host-Volume und ist nur root-lesbar.
+        <strong>Binance API-Keys</strong> werden für Restart-Persistenz in <code>live_state.json</code> gespeichert. Die Datei liegt auf dem Host-Volume (nur root-lesbar).
       </div>
       <div class="callout callout-blue">
-        Empfohlene Binance API-Berechtigungen: <strong>Spot Trading (Enable Spot &amp; Margin Trading)</strong>. Keine Auszahlungsrechte vergeben.
+        <strong>Empfohlene Binance-Berechtigungen:</strong> Nur <em>Spot Trading (Enable Spot &amp; Margin Trading)</em>. Keine Auszahlungs- oder Transferrechte.
       </div>
-
-      <!-- ── ENV VARS ───────────────────────────────────────────────────── -->
-      <h2 id="envvars">Umgebungsvariablen</h2>
-      <table class="table-doc">
-        <thead><tr><th>Variable</th><th>Container</th><th>Beschreibung</th></tr></thead>
-        <tbody>
-          <tr><td class="td-name">CLAUDE_PROXY_URL</td><td>crypto-pattern-ai</td><td class="td-desc">Interne URL des Claude-Proxy. Default: <code>http://claude-proxy:8081</code></td></tr>
-          <tr><td class="td-name">CLAUDE_CODE_OAUTH_TOKEN</td><td>crypto-claude-proxy</td><td class="td-desc">Server-weiter OAuth-Token für Platform-Modus. Aus der Orchestrator-Umgebung geerbt.</td></tr>
-          <tr><td class="td-name">ANTHROPIC_MODEL</td><td>crypto-claude-proxy</td><td class="td-desc">Claude-Modell für CLI. Default: <code>claude-sonnet-4-6</code></td></tr>
-          <tr><td class="td-name">BINANCE_API_KEY</td><td>crypto-pattern-ai</td><td class="td-desc">Optional: globaler Binance-Key (ungenutzt — User geben Keys über UI ein)</td></tr>
-        </tbody>
-      </table>
-
-      <!-- ── PERSISTENCE ────────────────────────────────────────────────── -->
-      <h2 id="persistence">Persistenz &amp; Restart-Verhalten</h2>
-      <p>Das Host-Volume <code>/opt/.../crypto-pattern-ai/data → /app/data</code> überlebt Container-Neustarts.</p>
-      <table class="table-doc">
-        <thead><tr><th>Daten</th><th>Persistiert?</th><th>Verhalten bei Neustart</th></tr></thead>
-        <tbody>
-          <tr><td class="td-name">Simulationsergebnisse</td><td style="color:var(--green)">Ja</td><td class="td-desc">Vollständig erhalten. Werden beim Start nicht neu geladen.</td></tr>
-          <tr><td class="td-name">Live-State (war aktiv)</td><td style="color:var(--green)">Ja</td><td class="td-desc"><code>_auto_resume_all()</code> beim Startup: alle User mit <code>was_running=true</code> werden automatisch wiederaufgenommen.</td></tr>
-          <tr><td class="td-name">User-Datenbank</td><td style="color:var(--green)">Ja</td><td class="td-desc">users.json bleibt erhalten. Admin wird einmalig angelegt.</td></tr>
-          <tr><td class="td-name">In-Memory Sessions</td><td style="color:var(--red)">Nein</td><td class="td-desc">Alle Sessions verfallen bei Neustart → Re-Login erforderlich.</td></tr>
-          <tr><td class="td-name">In-Memory sim_states</td><td style="color:var(--red)">Nein</td><td class="td-desc">Laufende Simulationen werden abgebrochen. Gespeicherte Ergebnisse bleiben.</td></tr>
-          <tr><td class="td-name">Live-Candles (Chart)</td><td style="color:var(--red)">Nein</td><td class="td-desc">Wird beim nächsten Poll-Cycle neu befüllt.</td></tr>
-        </tbody>
-      </table>
-
-      <div class="callout callout-green">
-        <strong>Verzeichnisstruktur auf Disk:</strong><br/>
-        <code>/app/data/users.json</code> — User-Datenbank<br/>
-        <code>/app/data/users/{name}/live_state.json</code> — Live-Trading-State<br/>
-        <code>/app/data/users/{name}/simulations.json</code> — Simulationsindex<br/>
-        <code>/app/data/users/{name}/sims/{id}.json</code> — Vollresultate
+      <div class="callout callout-purple">
+        <strong>Sessions:</strong> In-Memory — nicht zwischen Instanzen teilbar und nicht persistent. Multi-Instance-Deployments würden ein externes Session-Store (Redis o.ä.) erfordern.
       </div>
+    </div>
 
-    </main>
-  </div>
+  </main>
+</div>
 
-  <script>
-    // Aktiven Nav-Link beim Scrollen hervorheben
-    const links = document.querySelectorAll('.nav-link');
-    const sections = [...links].map(l => document.querySelector(l.getAttribute('href'))).filter(Boolean);
+<script>
+  const links = document.querySelectorAll('.nav-link');
+  const sections = [...links]
+    .map(l => document.querySelector(l.getAttribute('href')))
+    .filter(Boolean);
 
-    const io = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          links.forEach(l => l.classList.remove('active'));
-          const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
-          if (active) active.classList.add('active');
-        }
-      });
-    }, { rootMargin: '-10% 0px -80% 0px' });
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-5% 0px -80% 0px' });
 
-    sections.forEach(s => io.observe(s));
-  </script>
+  sections.forEach(s => io.observe(s));
+</script>
 </body>
 </html>
