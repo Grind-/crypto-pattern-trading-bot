@@ -26,8 +26,10 @@ def clear_live_state() -> None:
         os.remove(STATE_FILE)
 
 
-def update_position(position: str) -> None:
+def update_position(position: str, symbol: str = None) -> None:
     state = load_live_state()
     if state:
         state["position"] = position
+        if symbol:
+            state["symbol"] = symbol
         save_live_state(state)

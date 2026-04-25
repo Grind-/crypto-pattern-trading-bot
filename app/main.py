@@ -198,12 +198,12 @@ SCAN_SYMBOLS = [
 ]
 
 
-@app.post("/api/scan/symbols")
-async def scan_symbols(body: dict):
-    interval = body.get("interval", "4h")
+async def _fetch_scan_summaries(interval: str) -> list:
     tasks = [fetch_latest_klines(sym, interval, limit=60) for sym in SCAN_SYMBOLS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-
+    interval_mins = {"1h": 60, "4h": 240, "1d": 1440}.get(interval, 240)
+    c24 = max(1, 1440 // interval_mins)
+    c7d = max(1, 10080 // interval_mins)
     summaries = []
     for sym, raw in zip(SCAN_SYMBOLS, results):
         if isinstance(raw, Exception) or not raw:
@@ -211,31 +211,27 @@ async def scan_symbols(body: dict):
         enriched = compute_indicators(raw)
         cur = enriched[-1]
         price = cur["close"]
-
-        def _chg(n):
-            idx = max(0, len(enriched) - n)
-            p0 = enriched[idx]["close"]
-            return (price - p0) / p0 * 100 if p0 else 0
-
-        # intervals → approximate candle counts for 24h / 7d
-        interval_mins = {"1h": 60, "4h": 240, "1d": 1440}.get(interval, 240)
-        c24 = max(1, 1440 // interval_mins)
-        c7d = max(1, 10080 // interval_mins)
-
+        def _chg(n, e=enriched, p=price):
+            idx = max(0, len(e) - n)
+            p0 = e[idx]["close"]
+            return (p - p0) / p0 * 100 if p0 else 0
         summaries.append({
-            "symbol": sym,
-            "price": price,
-            "h24": _chg(c24),
-            "h7d": _chg(c7d),
+            "symbol": sym, "price": price,
+            "h24": _chg(c24), "h7d": _chg(c7d),
             "atr_pct": (cur.get("atr") or 0) / price * 100 if price else 0,
             "rsi": cur.get("rsi") or 50,
             "macd": cur.get("macd") or 0,
             "vol_ratio": cur.get("volume_ratio") or 1.0,
         })
+    return summaries
 
+
+@app.post("/api/scan/symbols")
+async def scan_symbols(body: dict):
+    interval = body.get("interval", "4h")
+    summaries = await _fetch_scan_summaries(interval)
     if not summaries:
         raise HTTPException(503, "Keine Marktdaten verfügbar")
-
     return await scan_market(summaries, interval)
 
 
@@ -492,13 +488,38 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
         sim_state["running"] = False
 
 
+async def _scan_and_switch(interval: str, current_symbol: str) -> str:
+    """Run market scanner; return new best symbol (may be same as current)."""
+    try:
+        summaries = await _fetch_scan_summaries(interval)
+        if not summaries:
+            return current_symbol
+        result = await scan_market(summaries, interval)
+        best = result.get("best_symbol", "")
+        rec = result.get("recommendation", "")
+        if best and best != current_symbol:
+            _log(live_state, f"🔄 Scanner: {current_symbol} → {best} | {rec[:80]}")
+            live_state["symbol"] = best
+            update_position(live_state["position"])  # persist updated symbol too
+        else:
+            _log(live_state, f"🔍 Scanner bestätigt: {current_symbol} weiterhin bestes Setup")
+        return best or current_symbol
+    except Exception as e:
+        _log(live_state, f"⚠ Scanner-Fehler: {e} — bleibe bei {current_symbol}")
+        return current_symbol
+
+
 async def _live_loop(req: LiveRequest):
     trader = BinanceTrader(req.api_key, req.api_secret)
     interval_seconds = _interval_to_seconds(req.interval)
-    CLOSE_BUFFER = 10  # seconds after candle close before fetching (Binance needs a moment)
+    CLOSE_BUFFER = 10
+
+    # current_symbol can change between trades when FLAT
+    # position_symbol is locked once we buy (used for selling)
+    current_symbol = req.symbol
+    position_symbol = req.symbol
 
     def _next_close() -> float:
-        """Unix timestamp of the next candle close, aligned to UTC grid."""
         now = time.time()
         return (int(now / interval_seconds) + 1) * interval_seconds
 
@@ -518,6 +539,11 @@ async def _live_loop(req: LiveRequest):
         first_run = True
         while live_state["running"]:
 
+            # ── Auto-scan when FLAT (at start and after each sell) ────────────
+            if live_state["position"] == "FLAT":
+                _log(live_state, "🔍 Scanne Markt nach bestem Symbol…")
+                current_symbol = await _scan_and_switch(req.interval, current_symbol)
+
             # ── Wait until next candle close ──────────────────────────────────
             next_close_ts = _next_close()
             wake_at = next_close_ts + CLOSE_BUFFER
@@ -527,12 +553,11 @@ async def _live_loop(req: LiveRequest):
             live_state["next_check_str"] = _fmt_ts(next_close_ts)
 
             if first_run:
-                _log(live_state, f"Live Trading gestartet — {req.symbol} {req.interval}")
-                _log(live_state, f"Erste Analyse: Kerzenschluss {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
+                _log(live_state, f"Live Trading aktiv — {current_symbol} {req.interval}")
+                _log(live_state, f"Erste Analyse: {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
                 first_run = False
 
             if wait_secs > 0:
-                # Sleep in small chunks so we can react to stop-signal
                 slept = 0.0
                 while slept < wait_secs and live_state["running"]:
                     chunk = min(30.0, wait_secs - slept)
@@ -542,20 +567,21 @@ async def _live_loop(req: LiveRequest):
             if not live_state["running"]:
                 break
 
+            # Use position_symbol when holding, current_symbol when flat
+            active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
+
             live_state["candle_count"] += 1
             _log(live_state, f"\n── Kerze #{live_state['candle_count']} geschlossen ({_fmt_ts(next_close_ts)}) ──")
 
-            # ── Fetch closed candles (last candle is now finalized) ───────────
-            _log(live_state, f"Lade {req.symbol} {req.interval} Daten…")
-            candles = await fetch_latest_klines(req.symbol, req.interval, limit=100)
+            _log(live_state, f"Lade {active_symbol} {req.interval} Daten…")
+            candles = await fetch_latest_klines(active_symbol, req.interval, limit=100)
             enriched = compute_indicators(candles)
             price = candles[-1]["close"] if candles else 0
             _log(live_state, f"Schlusskurs: ${price:,.2f}")
 
-            # ── Ask Claude for signal ─────────────────────────────────────────
             _log(live_state, "Frage Claude nach Signal…")
             signal = await get_live_signal(
-                symbol=req.symbol,
+                symbol=active_symbol,
                 interval=req.interval,
                 candles=enriched,
                 current_position=live_state["position"],
@@ -568,42 +594,43 @@ async def _live_loop(req: LiveRequest):
             action = signal.get("action", "HOLD")
             confidence = signal.get("confidence", 0)
             reason = signal.get("reason", "")
-
             _log(live_state, f"Signal: {action} | Konfidenz: {confidence}% | {reason}")
 
             live_state["signals"].append({
-                "action": action,
-                "confidence": confidence,
-                "reason": reason,
-                "price": price,
+                "action": action, "confidence": confidence,
+                "reason": reason, "price": price,
+                "symbol": active_symbol,
                 "timestamp": candles[-1]["timestamp"] if candles else 0,
             })
 
-            # ── Execute trade if signal strong enough ─────────────────────────
+            # ── Execute trades ────────────────────────────────────────────────
             if action == "BUY" and live_state["position"] == "FLAT" and confidence >= 60:
                 try:
                     order = await trader.place_market_order(
-                        symbol=req.symbol, side="BUY",
+                        symbol=current_symbol, side="BUY",
                         quote_quantity=req.trade_amount_usdt,
                     )
+                    position_symbol = current_symbol  # lock symbol for this trade
                     live_state["position"] = "IN_POSITION"
+                    live_state["symbol"] = current_symbol
                     update_position("IN_POSITION")
-                    _log(live_state, f"✅ KAUF ausgeführt — Order {order.get('orderId', '?')} @ ${price:,.2f}")
+                    _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f}")
                 except Exception as e:
                     _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
 
             elif action == "SELL" and live_state["position"] == "IN_POSITION" and confidence >= 55:
                 try:
-                    base_asset = req.symbol.replace("USDC", "").replace("USDT", "")
+                    base_asset = position_symbol.replace("USDC", "").replace("USDT", "")
                     balances = await trader.get_balances()
                     qty = balances.get(base_asset, 0)
                     if qty > 0:
                         order = await trader.place_market_order(
-                            symbol=req.symbol, side="SELL", quantity=qty,
+                            symbol=position_symbol, side="SELL", quantity=qty,
                         )
                         live_state["position"] = "FLAT"
                         update_position("FLAT")
-                        _log(live_state, f"✅ VERKAUF ausgeführt — Order {order.get('orderId', '?')} @ ${price:,.2f}")
+                        _log(live_state, f"✅ VERKAUF {position_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f}")
+                        # Scanner runs at next loop iteration (FLAT branch)
                     else:
                         _log(live_state, f"⚠ Kein {base_asset}-Guthaben zum Verkaufen")
                 except Exception as e:
@@ -611,11 +638,9 @@ async def _live_loop(req: LiveRequest):
 
             elif action == "HOLD":
                 _log(live_state, f"→ HALTEN (Position: {live_state['position']})")
-
             else:
-                _log(live_state, f"→ Signal {action} ignoriert (Konfidenz {confidence}% unter Schwellwert oder falsche Position)")
+                _log(live_state, f"→ {action} ignoriert (Konfidenz {confidence}% unter Schwellwert)")
 
-            # Show next check time
             next2 = _next_close()
             live_state["next_check_ts"] = next2 + CLOSE_BUFFER
             live_state["next_check_str"] = _fmt_ts(next2)
