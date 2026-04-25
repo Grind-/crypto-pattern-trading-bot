@@ -247,6 +247,7 @@
     <a class="nav-link" href="#flow-live">Live-Trading-Flow</a>
     <a class="nav-link" href="#claude-modes">Claude-Modi</a>
     <a class="nav-link" href="#indicators">Indikatoren</a>
+    <a class="nav-link" href="#knowledge">Knowledge Base</a>
     <div class="nav-group-label">Datenbankschema (SQLite)</div>
     <a class="nav-link" href="#db-users">users</a>
     <a class="nav-link" href="#db-live">live_states</a>
@@ -407,7 +408,11 @@
         </div>
         <div class="module-card">
           <div class="module-name">claude_analyst.py</div>
-          <div class="module-desc">Alle Claude-Aufrufe: Backtesting-Analyse, Live-Signal, Markt-Scan, Verbindungstest. Dispatcht zwischen Proxy (Platform/Subscription) und direkter API (API-Key).</div>
+          <div class="module-desc">Alle Claude-Aufrufe: Backtesting-Analyse, Live-Signal, Markt-Scan, Verbindungstest, Knowledge-Synthese nach Simulationen, Admin-Promotion in den Core. Dispatcht zwischen Proxy und direkter API.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">knowledge_store.py</div>
+          <div class="module-desc">3-Tier-Wissensspeicher auf JSON-Dateien (git-tracked Volume). Liest Core (read-only), schreibt in <code>users/{username}/</code>. Aggregiert alle User für Community-Kontext in Claude-Prompts.</div>
         </div>
         <div class="module-card">
           <div class="module-name">indicators.py</div>
@@ -658,6 +663,8 @@
       <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/admin/users</span><span class="endpoint-desc"><code>{username, password, role, claude_mode}</code> — anlegen</span></div>
       <div class="endpoint-row"><span class="method patch">PATCH</span><span class="endpoint-path">/api/admin/users/{username}</span><span class="endpoint-desc"><code>{enabled?, new_password?, claude_mode?}</code></span></div>
       <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/admin/users/{username}</span><span class="endpoint-desc">User löschen (admin selbst nicht löschbar)</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/admin/knowledge/status</span><span class="endpoint-desc">Überblick: Core-Regeln, alle User-Pattern-Counts, sim_count, symbol_performance</span></div>
+      <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/admin/knowledge/promote</span><span class="endpoint-desc"><code>{type:"rules"}</code> → destilliert alle Sim-Logs → Core | <code>{type:"symbol", username, symbol, interval}</code> → merged User-Pattern → Core via Claude</span></div>
     </div>
 
     <div class="section" id="api-sim">
@@ -682,6 +689,120 @@
       <h3>Markt</h3>
       <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/scan/symbols</span><span class="endpoint-desc"><code>{interval, extra_symbols[]}</code> → Claude-Ranking aller Paare</span></div>
       <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/symbols</span><span class="endpoint-desc">Alle verfügbaren USDC-Paare von Binance</span></div>
+    </div>
+
+    <!-- KNOWLEDGE SYSTEM -->
+    <hr class="section-divider" />
+    <div class="section" id="knowledge">
+      <h2><span class="section-icon ic-purple">🧠</span>Self-Learning Knowledge Base</h2>
+      <p class="section-desc">Nach jeder Simulation lernt Claude aus dem Ergebnis und schreibt strukturierte Patterns in eine git-getrackte JSON-Datei. Mit der Zeit verbessern sich die Trading-Entscheidungen durch akkumuliertes Wissen — pro User und community-weit.</p>
+
+      <h3>3-Tier-Architektur</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;margin-bottom:8px">TIER 1 — CORE (read-only)</div>
+          <code style="font-size:12px;color:var(--blue)">knowledge/core/patterns.json</code>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.6">Community-verifizierte Patterns + globale Handelsregeln. <strong>Kein Claude darf hier direkt schreiben.</strong> Änderungen nur durch Admin-Promotion.</div>
+          <div style="margin-top:10px;font-size:11px">
+            <span style="background:rgba(147,51,234,.15);color:#a78bfa;padding:2px 7px;border-radius:10px">global_rules[]</span>
+            <span style="background:rgba(147,51,234,.15);color:#a78bfa;padding:2px 7px;border-radius:10px;margin-left:4px">interval_notes{}</span>
+            <span style="background:rgba(147,51,234,.15);color:#a78bfa;padding:2px 7px;border-radius:10px;margin-left:4px">symbol_patterns{}</span>
+          </div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;margin-bottom:8px">TIER 2 — USER (schreibbar)</div>
+          <code style="font-size:12px;color:var(--green)">knowledge/users/{username}/patterns.json</code>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.6">Claude schreibt nach jeder Simulation automatisch die gelernten Patterns in den <strong>eigenen</strong> Bereich. Jeder User akkumuliert seine eigenen Erkenntnisse.</div>
+          <div style="margin-top:10px;font-size:11px">
+            <span style="background:rgba(34,197,94,.15);color:#4ade80;padding:2px 7px;border-radius:10px">winning_patterns[]</span>
+            <span style="background:rgba(34,197,94,.15);color:#4ade80;padding:2px 7px;border-radius:10px;margin-left:4px">losing_patterns[]</span>
+            <span style="background:rgba(34,197,94,.15);color:#4ade80;padding:2px 7px;border-radius:10px;margin-left:4px">symbol_performance{}</span>
+          </div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;margin-bottom:8px">TIER 2 — USER (Sim-Log)</div>
+          <code style="font-size:12px;color:var(--green)">knowledge/users/{username}/sim_log.json</code>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.6">Chronologisches Log aller Simulationen des Users (max. 100 Einträge). Basis für die globale Regel-Destillation.</div>
+          <div style="margin-top:10px;font-size:11px">
+            <span style="background:rgba(34,197,94,.15);color:#4ade80;padding:2px 7px;border-radius:10px">entries[] (max 100)</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>Zugriffs-Matrix</h3>
+      <table class="table-doc">
+        <thead><tr><th>Ebene</th><th>Schreiben</th><th>Lesen</th><th>Inhalt</th></tr></thead>
+        <tbody>
+          <tr><td class="td-name">core/patterns.json</td><td style="color:var(--red)">✗ Nur Admin-Promote</td><td style="color:var(--green)">✓ Alle Claudes</td><td class="td-desc">Globale Regeln, verifizierte Symbol-Patterns, Interval-Hinweise</td></tr>
+          <tr><td class="td-name">users/{me}/patterns.json</td><td style="color:var(--green)">✓ Eigener Claude</td><td style="color:var(--green)">✓ Alle Claudes</td><td class="td-desc">Eigene Symbol/Interval-Patterns, Gewinn-/Verlustmuster</td></tr>
+          <tr><td class="td-name">users/{me}/sim_log.json</td><td style="color:var(--green)">✓ Eigener Claude</td><td style="color:var(--green)">✓ Alle Claudes</td><td class="td-desc">Simulationshistorie für Regel-Destillation</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Lern-Flow</h3>
+      <div class="flow-steps">
+        <div class="flow-step"><span class="step-num">1</span><div><strong>Simulation abgeschlossen</strong> — best_result wird in SQLite gespeichert</div></div>
+        <div class="flow-step"><span class="step-num">2</span><div><strong>Fire-and-forget Task</strong> — <code>synthesize_learnings(username, ...)</code> startet asynchron (blockiert UI nicht)</div></div>
+        <div class="flow-step"><span class="step-num">3</span><div><strong>Claude analysiert</strong> — aktuelle Patterns des Users + Simulations-Ergebnis → aktualisiertes Pattern-JSON</div></div>
+        <div class="flow-step"><span class="step-num">4</span><div><strong>Atomic Write</strong> — <code>users/{username}/patterns.json</code> via tempfile+rename (kein Korruptions-Risiko)</div></div>
+        <div class="flow-step"><span class="step-num">5</span><div><strong>Knowledge-Injection</strong> — Bei nächster Simulation liest Claude beide Ebenen (User + Core) als Kontext-Block</div></div>
+        <div class="flow-step"><span class="step-num">6</span><div><strong>Admin-Promotion</strong> — Bei guten Ergebnissen: Claude merged User-Patterns via <code>POST /api/admin/knowledge/promote</code> in den Core</div></div>
+      </div>
+
+      <h3>Dateiformat: patterns.json (User-Ebene)</h3>
+      <div class="code-block"><pre>{
+  "version": 1,
+  "username": "alice",
+  "updated_at": "2026-04-25T10:00:00Z",
+  "symbols": {
+    "BTCUSDC": {
+      "4h": {
+        "session_count": 12,
+        "profitable_sessions": 8,
+        "winning_patterns": [
+          {
+            "description": "RSI &lt; 28 + MACD bullish cross + volume_ratio &gt; 1.3",
+            "avg_return_pct": 4.7,
+            "win_rate": 75,
+            "sample_count": 5
+          }
+        ],
+        "losing_patterns": [
+          { "description": "BUY on RSI &lt; 25 without MACD confirmation — whipsaws" }
+        ],
+        "market_notes": "BTC 4h responds well to BB + volume combos",
+        "last_updated": "2026-04-25"
+      }
+    }
+  },
+  "symbol_performance": {
+    "BTCUSDC": { "sessions": 12, "profitable": 8, "avg_return": 3.2 },
+    "SOLUSDC": { "sessions": 5,  "profitable": 4, "avg_return": 5.1 }
+  }
+}</pre></div>
+
+      <h3>Dateiformat: core/patterns.json</h3>
+      <div class="code-block"><pre>{
+  "version": 1,
+  "updated_at": "2026-04-25T10:00:00Z",
+  "global_rules": [
+    { "rule": "Confirm BUY with volume_ratio > 1.2 ...", "confidence": "high", "samples": 42 }
+  ],
+  "interval_notes": {
+    "1h": "Noisy — require higher confidence thresholds",
+    "4h": "Best balance of signal quality and trade frequency",
+    "1d": "Very reliable but few trades per month"
+  },
+  "symbol_patterns": {
+    "BTCUSDC": {
+      "4h": { /* promoted from user, same schema as user patterns */ }
+    }
+  }
+}</pre></div>
+
+      <div class="callout callout-green">
+        <strong>Git-tracked Volume:</strong> Das Verzeichnis <code>knowledge/</code> ist sowohl ins Repo committed als auch als Docker Volume gemountet. Claude schreibt direkt in diese Dateien — ein anschließendes <code>git commit</code> sichert das akkumulierte Wissen dauerhaft.
+      </div>
     </div>
 
     <!-- AUTH & ROLES -->

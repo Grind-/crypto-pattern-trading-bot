@@ -31,8 +31,17 @@ header {
   align-items: center;
   gap: 12px;
 }
-.btn-logout {
+.header-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-actions #header-user {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.btn-logout {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -40,8 +49,88 @@ header {
   padding: 5px 12px;
   font-size: 12px;
   cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
 }
 .btn-logout:hover { border-color: var(--red); color: var(--red); }
+
+.burger-btn {
+  display: none;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: border-color .15s, color .15s;
+}
+.burger-btn span {
+  display: block;
+  width: 16px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 2px;
+  transition: transform .2s, opacity .2s;
+}
+.burger-btn:hover { border-color: var(--blue); color: var(--blue); }
+.burger-btn.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+.burger-btn.open span:nth-child(2) { opacity: 0; }
+.burger-btn.open span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+
+@media (max-width: 600px) {
+  .subtitle { display: none; }
+
+  header { position: relative; }
+
+  .header-actions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    padding: 6px 0;
+    z-index: 200;
+  }
+  .header-actions.open { display: flex; }
+
+  .header-actions #header-user {
+    padding: 10px 18px 8px;
+    border-bottom: 1px solid var(--border);
+    display: block;
+    font-size: 13px;
+  }
+  .header-actions .btn-logout {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    padding: 13px 18px;
+    font-size: 14px;
+    text-align: left;
+    display: block;
+    width: 100%;
+  }
+  .header-actions .btn-logout:hover {
+    background: var(--surface2);
+    color: var(--text);
+    border-color: transparent;
+  }
+
+  .burger-btn { display: flex; }
+}
 .logo { font-size: 18px; font-weight: 700; color: var(--blue); letter-spacing: -0.5px; }
 .subtitle { color: var(--text-muted); font-size: 12px; }
 

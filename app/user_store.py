@@ -1,5 +1,7 @@
 import hashlib
+import logging
 import secrets
+import shutil
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -7,16 +9,29 @@ from sqlalchemy import delete, insert, select, update
 
 from .database import engine, live_states, simulation_details, simulations, users
 
-_SALT = "cpa_salt_bioval_2026"
-_DEFAULT_ADMIN_HASH = "700acb2e5e32e2cbdb1cc63418b0842ba87925541d9fe07a7193646bd563aa3a"
+logger = logging.getLogger(__name__)
+
+# Legacy global salt — used only to verify passwords of users who have not yet
+# been migrated to per-user salts (salt column is NULL).  Never used for new users.
+_LEGACY_SALT = "cpa_salt_bioval_2026"
+
+_KNOWLEDGE_USERS_DIR = "/app/knowledge/users"
 
 
-def hash_pw(password: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), _SALT.encode(), 200000).hex()
+def _hash_pw(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200000).hex()
 
 
-def verify_pw(stored_hash: str, password: str) -> bool:
-    return secrets.compare_digest(hash_pw(password), stored_hash)
+def verify_pw(stored_hash: str, salt: Optional[str], password: str) -> bool:
+    effective_salt = salt if salt else _LEGACY_SALT
+    return secrets.compare_digest(_hash_pw(password, effective_salt), stored_hash)
+
+
+def hash_pw(password: str, salt: Optional[str] = None) -> str:
+    """Hash a password.  If no salt is provided a new random one is generated."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    return _hash_pw(password, salt)
 
 
 def _row_to_dict(row) -> Dict:
@@ -26,15 +41,25 @@ def _row_to_dict(row) -> Dict:
 # ── public API ────────────────────────────────────────────────────────────────
 
 def init_users() -> None:
-    """Seed admin user on first start."""
+    """Seed admin user on first start with a random password printed to logs."""
     with engine.connect() as conn:
         exists = conn.execute(
             select(users.c.username).where(users.c.username == "admin")
         ).fetchone()
         if not exists:
+            new_password = secrets.token_urlsafe(16)
+            new_salt = secrets.token_hex(16)
+            print(
+                f"\n{'='*60}\n"
+                f"  ADMIN PASSWORD (shown only once): {new_password}\n"
+                f"{'='*60}\n",
+                flush=True,
+            )
+            logger.warning("Admin account created — see stdout for the initial password")
             conn.execute(insert(users).values(
                 username="admin",
-                password_hash=_DEFAULT_ADMIN_HASH,
+                password_hash=_hash_pw(new_password, new_salt),
+                salt=new_salt,
                 role="admin",
                 enabled=True,
                 created_at=datetime.now(timezone.utc).isoformat(),
@@ -67,8 +92,18 @@ def authenticate(username: str, password: str) -> Optional[Dict]:
     user = get_user(username)
     if not user or not user.get("enabled"):
         return None
-    if not verify_pw(user.get("password_hash", ""), password):
+    if not verify_pw(user.get("password_hash", ""), user.get("salt"), password):
         return None
+    # Transparently migrate legacy global-salt users to per-user salt on first login
+    if not user.get("salt"):
+        new_salt = secrets.token_hex(16)
+        with engine.connect() as conn:
+            conn.execute(
+                update(users).where(users.c.username == username)
+                .values(salt=new_salt, password_hash=_hash_pw(password, new_salt))
+            )
+            conn.commit()
+        logger.info("Migrated user '%s' to per-user salt", username)
     return user
 
 
@@ -76,6 +111,7 @@ def create_user(username: str, password: str, role: str = "user",
                 claude_mode: str = "api_key") -> bool:
     if not username or not password:
         return False
+    new_salt = secrets.token_hex(16)
     with engine.connect() as conn:
         exists = conn.execute(
             select(users.c.username).where(users.c.username == username)
@@ -84,7 +120,8 @@ def create_user(username: str, password: str, role: str = "user",
             return False
         conn.execute(insert(users).values(
             username=username,
-            password_hash=hash_pw(password),
+            password_hash=_hash_pw(password, new_salt),
+            salt=new_salt,
             role=role,
             enabled=True,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -112,6 +149,7 @@ def delete_user(username: str) -> bool:
             conn.execute(delete(simulations).where(simulations.c.sim_id.in_(to_delete)))
         result = conn.execute(delete(users).where(users.c.username == username))
         conn.commit()
+    shutil.rmtree(f"{_KNOWLEDGE_USERS_DIR}/{username}", ignore_errors=True)
     return result.rowcount > 0
 
 
@@ -127,10 +165,11 @@ def set_enabled(username: str, enabled: bool) -> bool:
 
 
 def reset_password(username: str, new_password: str) -> bool:
+    new_salt = secrets.token_hex(16)
     with engine.connect() as conn:
         result = conn.execute(
             update(users).where(users.c.username == username)
-            .values(password_hash=hash_pw(new_password))
+            .values(password_hash=_hash_pw(new_password, new_salt), salt=new_salt)
         )
         conn.commit()
     return result.rowcount > 0

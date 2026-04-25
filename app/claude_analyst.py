@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, List, Dict, Optional
@@ -7,6 +8,7 @@ from typing import Any, List, Dict, Optional
 import httpx
 
 from .news_fetcher import get_market_context
+from .news_analyst import get_news_context_for_trading
 from .knowledge_store import (
     MAX_WINNING,
     MAX_LOSING,
@@ -21,10 +23,26 @@ from .knowledge_store import (
     write_merged_symbol_to_core,
     load_core,
 )
+from .utils import parse_json as _parse_json
+
+logger = logging.getLogger(__name__)
 
 PROXY_URL = os.environ.get("CLAUDE_PROXY_URL", "http://claude-proxy:8081")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL = "claude-sonnet-4-6"
+
+TRADING_AGENT_SYSTEM = (
+    "You are an expert quantitative cryptocurrency trading analyst (Trading Agent). "
+    "Your responsibilities: analyse technical indicators and price action to identify "
+    "high-probability trading patterns; generate precise BUY/SELL signals with clear "
+    "reasoning; design, run, and evaluate backtesting simulations; execute live trades "
+    "via the Binance API. "
+    "You work alongside a separate News Agent that provides hourly market intelligence. "
+    "When NEWS INTELLIGENCE is present in the prompt, treat it as verified real-time "
+    "context and weight it alongside technical signals — it reflects catalysts that "
+    "price action alone cannot yet show. "
+    "Always respond with valid raw JSON only — no markdown, no code fences."
+)
 
 
 def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
@@ -52,23 +70,15 @@ def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
     return "\n".join(rows)
 
 
-def _parse_json(text: str) -> Any:
-    for open_ch, close_ch in (("{", "}"), ("[", "]")):
-        start = text.find(open_ch)
-        end   = text.rfind(close_ch) + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
-    raise ValueError(f"No JSON found in response: {text[:300]}")
-
-
 # ── Transport ─────────────────────────────────────────────────────────────────
 
 async def _call_proxy(prompt: str, timeout: int = 270,
-                      oauth_token: str = "") -> Dict:
+                      oauth_token: str = "",
+                      system: str = TRADING_AGENT_SYSTEM) -> Dict:
     async with httpx.AsyncClient(timeout=timeout + 30) as client:
         r = await client.post(
             f"{PROXY_URL}/analyze",
-            json={"system": "", "prompt": prompt, "oauth_token": oauth_token},
+            json={"system": system, "prompt": prompt, "oauth_token": oauth_token},
         )
         r.raise_for_status()
         data = r.json()
@@ -78,7 +88,8 @@ async def _call_proxy(prompt: str, timeout: int = 270,
     return data
 
 
-async def _call_api(prompt: str, api_key: str, timeout: int = 270) -> Dict:
+async def _call_api(prompt: str, api_key: str, timeout: int = 270,
+                    system: str = TRADING_AGENT_SYSTEM) -> Dict:
     async with httpx.AsyncClient(timeout=timeout + 30) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
@@ -90,6 +101,7 @@ async def _call_api(prompt: str, api_key: str, timeout: int = 270) -> Dict:
             json={
                 "model": CLAUDE_MODEL,
                 "max_tokens": 4096,
+                "system": system,
                 "messages": [{"role": "user", "content": prompt}],
             },
         )
@@ -101,10 +113,11 @@ async def _call_api(prompt: str, api_key: str, timeout: int = 270) -> Dict:
 
 
 async def _call_claude(prompt: str, api_key: Optional[str] = None,
-                       oauth_token: str = "", timeout: int = 270) -> Dict:
+                       oauth_token: str = "", timeout: int = 270,
+                       system: str = TRADING_AGENT_SYSTEM) -> Dict:
     if api_key:
-        return await _call_api(prompt, api_key, timeout)
-    return await _call_proxy(prompt, timeout, oauth_token=oauth_token)
+        return await _call_api(prompt, api_key, timeout, system=system)
+    return await _call_proxy(prompt, timeout, oauth_token=oauth_token, system=system)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -128,8 +141,13 @@ async def analyze_with_claude(
         get_market_context(symbol),
         return_exceptions=True,
     )
+    news_intel = get_news_context_for_trading(symbol)
     knowledge_block = f"\n{knowledge_ctx}\n" if isinstance(knowledge_ctx, str) and knowledge_ctx else ""
-    news_block      = f"\n{news_ctx}\n"      if isinstance(news_ctx, str)      and news_ctx      else ""
+    news_block = ""
+    if isinstance(news_ctx, str) and news_ctx:
+        news_block += f"\n{news_ctx}\n"
+    if news_intel:
+        news_block += f"\n{news_intel}\n"
 
     feedback_block = ""
     if feedback:
@@ -205,6 +223,11 @@ async def get_live_signal(
     api_key: Optional[str] = None,
     oauth_token: str = "",
 ) -> Dict:
+    # Sanitize user-controlled strings to prevent prompt injection
+    strategy_name     = (strategy_name or "")[:200]
+    strategy_analysis = (strategy_analysis or "")[:1000]
+    strategy_patterns = [(p or "")[:100] for p in (strategy_patterns or [])[:10]]
+
     data_str      = _format_data(candles, max_rows=80)
     current_price = candles[-1]["close"] if candles else 0
 
@@ -213,8 +236,13 @@ async def get_live_signal(
         get_market_context(symbol),
         return_exceptions=True,
     )
+    news_intel = get_news_context_for_trading(symbol)
     knowledge_block = f"{knowledge_ctx}\n\n" if isinstance(knowledge_ctx, str) and knowledge_ctx else ""
-    news_block      = f"{news_ctx}\n\n"      if isinstance(news_ctx, str)      and news_ctx      else ""
+    news_block = ""
+    if isinstance(news_ctx, str) and news_ctx:
+        news_block += f"{news_ctx}\n\n"
+    if news_intel:
+        news_block += f"{news_intel}\n\n"
 
     strategy_block = ""
     if strategy_name:
@@ -276,7 +304,12 @@ async def scan_market(symbol_summaries: List[Dict], interval: str,
     table = "\n".join(rows)
 
     news_ctx = await get_market_context("BTC")  # global sentiment for scan
-    news_block = f"{news_ctx}\n\n" if news_ctx else ""
+    news_intel = get_news_context_for_trading("BTC")
+    news_block = ""
+    if news_ctx:
+        news_block += f"{news_ctx}\n\n"
+    if news_intel:
+        news_block += f"{news_intel}\n\n"
 
     perf = aggregate_symbol_performance()
     perf_block = ""

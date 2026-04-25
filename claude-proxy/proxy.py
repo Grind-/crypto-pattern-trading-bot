@@ -23,7 +23,8 @@ async def health():
 
 @app.post("/analyze")
 async def analyze(req: PromptRequest):
-    full_prompt = req.prompt
+    # Prepend system prompt into the user message so the CLI receives full context
+    full_prompt = f"{req.system}\n\n{req.prompt}" if req.system else req.prompt
 
     env = {
         "HOME": HOME_DIR,

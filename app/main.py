@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import os
 import secrets
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -11,13 +13,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .data_fetcher import fetch_klines, fetch_latest_klines, get_available_symbols
+from .data_fetcher import INTERVAL_MINUTES, fetch_klines, fetch_latest_klines, get_available_symbols
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 from .indicators import compute_indicators
 from .claude_analyst import (analyze_with_claude, get_live_signal,
                               scan_market, test_connection,
                               synthesize_learnings,
                               distill_and_promote_rules,
                               promote_symbol_patterns_via_claude)
+from .news_analyst import run_news_cycle, get_news_intelligence
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import (save_live_state, load_live_state, clear_live_state,
@@ -37,6 +43,22 @@ _SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
 _SESSION_TTL = 86400 * 7
 
 PUBLIC_PATHS = {"/login", "/auth/login", "/auth/logout"}
+
+# ── Login rate limiter ─────────────────────────────────────────────────────────
+_LOGIN_ATTEMPTS: dict[str, list] = defaultdict(list)
+_LOGIN_MAX = 5
+_LOGIN_WINDOW = 60  # seconds
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed to attempt a login, False if rate-limited."""
+    now = time.time()
+    attempts = [t for t in _LOGIN_ATTEMPTS[ip] if now - t < _LOGIN_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = attempts
+    if len(attempts) >= _LOGIN_MAX:
+        return False
+    attempts.append(now)
+    return True
 
 
 def _valid_session(token: str) -> Optional[str]:
@@ -88,6 +110,31 @@ async def _startup():
     init_db()
     init_users()
     await _auto_resume_all()
+    asyncio.create_task(_news_loop())
+    asyncio.create_task(_session_cleanup_loop())
+
+
+async def _session_cleanup_loop():
+    """Periodically evict expired sessions to prevent unbounded growth."""
+    while True:
+        await asyncio.sleep(900)
+        now = time.time()
+        expired = [k for k, v in list(_SESSIONS.items()) if v["expiry"] <= now]
+        for k in expired:
+            _SESSIONS.pop(k, None)
+        if expired:
+            logger.debug("Evicted %d expired sessions", len(expired))
+
+
+async def _news_loop():
+    """Background task: News Agent runs every hour."""
+    await asyncio.sleep(30)  # brief delay so startup completes first
+    while True:
+        try:
+            await run_news_cycle()  # uses platform proxy (no explicit creds needed)
+        except Exception:
+            pass
+        await asyncio.sleep(3600)
 
 
 async def _auto_resume_all():
@@ -144,6 +191,8 @@ async def _auto_resume_all():
             "trade_history": saved.get("trade_history", []),
             "live_candles": [],
             "buy_price": saved.get("buy_price"),
+            "sl_pct": None,
+            "tp_pct": None,
         })
         asyncio.create_task(_live_loop(req, username, api_key, oauth_token))
 
@@ -171,6 +220,7 @@ def _default_live_state() -> dict:
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
         "strategy_name": "", "strategy_analysis": "", "strategy_patterns": [],
         "trade_history": [], "live_candles": [], "buy_price": None,
+        "sl_pct": None, "tp_pct": None,
     }
 
 
@@ -235,13 +285,19 @@ async def login_page():
 
 
 @app.post("/auth/login")
-async def do_login(req: LoginRequest, response: Response):
+async def do_login(req: LoginRequest, request: Request, response: Response):
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip):
+        raise HTTPException(status_code=429, detail="Zu viele Loginversuche. Bitte 60 Sekunden warten.")
     user = authenticate(req.username, req.password)
     if not user:
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
     token = secrets.token_hex(32)
     _SESSIONS[token] = {"username": req.username, "expiry": time.time() + _SESSION_TTL}
-    response.set_cookie("session", token, httponly=True, samesite="lax", max_age=_SESSION_TTL)
+    response.set_cookie(
+        "session", token,
+        httponly=True, samesite="lax", secure=True, max_age=_SESSION_TTL,
+    )
     return {"ok": True}
 
 
@@ -387,11 +443,12 @@ async def admin_update_user(username: str, body: dict, request: Request):
         if not reset_password(username, body["new_password"]):
             raise HTTPException(404, "User nicht gefunden")
     if "claude_mode" in body:
+        mode = body["claude_mode"]
+        if mode not in ("platform", "api_key", "subscription"):
+            raise HTTPException(400, "Ungültiger Modus")
         api_key = body.get("claude_api_key")
-        if not set_platform_access(username, body["claude_mode"] == "platform"):
+        if not update_claude_config(username, mode, api_key=api_key):
             raise HTTPException(404, "User nicht gefunden")
-        if api_key is not None:
-            update_claude_config(username, body["claude_mode"], api_key)
     return {"ok": True}
 
 
@@ -436,6 +493,24 @@ async def knowledge_promote(body: dict, request: Request):
 
     else:
         raise HTTPException(400, "type muss 'rules' oder 'symbol' sein")
+
+
+# ── News Agent endpoints ──────────────────────────────────────────────────────
+
+@app.get("/api/news/intelligence")
+async def news_intelligence(request: Request):
+    _get_current_user(request)  # auth check
+    return get_news_intelligence()
+
+
+@app.post("/api/news/refresh")
+async def news_refresh(request: Request):
+    """Manually trigger a News Agent cycle (admin only)."""
+    _require_admin(request)
+    result = await run_news_cycle()
+    if not result:
+        raise HTTPException(502, "News Agent cycle fehlgeschlagen")
+    return result
 
 
 # ── Market scanner ─────────────────────────────────────────────────────────────
@@ -583,11 +658,10 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         raise HTTPException(400, "Claude nicht konfiguriert. Bitte in Einstellungen API-Key oder OAuth-Token hinterlegen.")
     api_key, oauth_token = _claude_creds(username)
 
-    # Resolve Binance keys: form > saved in users table
-    bkey = req.api_key.strip()
-    bsec = req.api_secret.strip()
-    if not bkey or not bsec:
-        bkey, bsec = get_binance_keys(username)
+    # Resolve Binance keys independently: form value wins, saved is fallback
+    saved_key, saved_sec = get_binance_keys(username)
+    bkey = req.api_key.strip() or saved_key
+    bsec = req.api_secret.strip() or saved_sec
     if not bkey or not bsec:
         raise HTTPException(400, "Binance API-Key und Secret erforderlich")
 
@@ -655,8 +729,6 @@ async def get_live_credentials(request: Request):
         "has_key": bool(bkey),
         "has_secret": bool(bsec),
         "key_hint": f"...{bkey[-4:]}" if len(bkey) >= 4 else ("✓" if bkey else ""),
-        "api_key": bkey,
-        "api_secret": bsec,
     }
 
 
@@ -762,7 +834,7 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
 
         if sim_state.get("best_result"):
             br = sim_state["best_result"]
-            sim_id = f"sim_{int(time.time())}"
+            sim_id = f"sim_{int(time.time())}_{secrets.token_hex(4)}"
             entry = {
                 "id": sim_id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -905,22 +977,42 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 {"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]
             ]
 
-            _log(live_state, "Frage Claude nach Signal…")
-            signal = await get_live_signal(
-                symbol=active_symbol, interval=req.interval,
-                candles=enriched, current_position=live_state["position"],
-                username=username,
-                signal_history=live_state["signals"][-10:],
-                strategy_name=req.strategy_name,
-                strategy_analysis=req.strategy_analysis,
-                strategy_patterns=req.strategy_patterns,
-                api_key=api_key, oauth_token=oauth_token,
-            )
+            # ── Stop-Loss / Take-Profit check before asking Claude ──────────────
+            force_sell = False
+            force_sell_reason = ""
+            if live_state["position"] == "IN_POSITION":
+                buy_p  = live_state.get("buy_price") or 0
+                sl_pct = live_state.get("sl_pct") or 0
+                tp_pct = live_state.get("tp_pct") or 0
+                if buy_p and sl_pct and price <= buy_p * (1 - sl_pct / 100):
+                    force_sell = True
+                    limit = buy_p * (1 - sl_pct / 100)
+                    force_sell_reason = f"Stop-Loss {sl_pct}% — Kurs ${price:,.2f} ≤ Limit ${limit:,.2f}"
+                    _log(live_state, f"🛑 STOP-LOSS ausgelöst: {force_sell_reason}")
+                elif buy_p and tp_pct and price >= buy_p * (1 + tp_pct / 100):
+                    force_sell = True
+                    limit = buy_p * (1 + tp_pct / 100)
+                    force_sell_reason = f"Take-Profit {tp_pct}% — Kurs ${price:,.2f} ≥ Limit ${limit:,.2f}"
+                    _log(live_state, f"🎯 TAKE-PROFIT ausgelöst: {force_sell_reason}")
 
-            action = signal.get("action", "HOLD")
-            confidence = signal.get("confidence", 0)
-            reason = signal.get("reason", "")
-            _log(live_state, f"Signal: {action} | Konfidenz: {confidence}% | {reason}")
+            if force_sell:
+                action, confidence, reason = "SELL", 100, force_sell_reason
+            else:
+                _log(live_state, "Frage Claude nach Signal…")
+                signal = await get_live_signal(
+                    symbol=active_symbol, interval=req.interval,
+                    candles=enriched, current_position=live_state["position"],
+                    username=username,
+                    signal_history=live_state["signals"][-10:],
+                    strategy_name=req.strategy_name,
+                    strategy_analysis=req.strategy_analysis,
+                    strategy_patterns=req.strategy_patterns,
+                    api_key=api_key, oauth_token=oauth_token,
+                )
+                action     = signal.get("action", "HOLD")
+                confidence = signal.get("confidence", 0)
+                reason     = signal.get("reason", "")
+                _log(live_state, f"Signal: {action} | Konfidenz: {confidence}% | {reason}")
 
             live_state["signals"].append({
                 "action": action, "confidence": confidence, "reason": reason,
@@ -938,17 +1030,23 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     live_state["position"] = "IN_POSITION"
                     live_state["symbol"] = current_symbol
                     live_state["buy_price"] = price
+                    # Store SL/TP from the signal for automated exit checks
+                    if not force_sell:
+                        live_state["sl_pct"] = signal.get("stop_loss_pct") or 0
+                        live_state["tp_pct"] = signal.get("take_profit_pct") or 0
                     update_position(username, "IN_POSITION")
                     live_state["trade_history"].append({
                         "type": "BUY", "symbol": current_symbol,
                         "price": price, "timestamp": int(time.time() * 1000),
                         "order_id": str(order.get("orderId", "")), "pnl_pct": None,
                     })
-                    _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId','?')} @ ${price:,.2f}")
+                    sl_info = f" | SL {live_state['sl_pct']}% / TP {live_state['tp_pct']}%" if live_state.get("sl_pct") else ""
+                    _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId','?')} @ ${price:,.2f}{sl_info}")
                 except Exception as e:
                     _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
 
-            elif action == "SELL" and live_state["position"] == "IN_POSITION" and confidence >= 55:
+            # force_sell bypasses the confidence threshold
+            elif action == "SELL" and live_state["position"] == "IN_POSITION" and (force_sell or confidence >= 55):
                 try:
                     base_asset = position_symbol.replace("USDC", "").replace("USDT", "")
                     balances = await trader.get_balances()
@@ -961,6 +1059,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                         pnl_pct = (price - buy_p) / buy_p * 100 if buy_p else 0.0
                         live_state["position"] = "FLAT"
                         live_state["buy_price"] = None
+                        live_state["sl_pct"] = None
+                        live_state["tp_pct"] = None
                         update_position(username, "FLAT")
                         live_state["trade_history"].append({
                             "type": "SELL", "symbol": position_symbol,
@@ -1013,6 +1113,4 @@ def _log(state: dict, msg: str):
 
 
 def _interval_to_seconds(interval: str) -> int:
-    mapping = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-               "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400}
-    return mapping.get(interval, 14400)
+    return INTERVAL_MINUTES.get(interval, 240) * 60

@@ -316,12 +316,11 @@ async function startLive() {
     strategy_analysis: selectedSimForLive?.strategy_analysis || '',
     strategy_patterns: selectedSimForLive?.strategy_patterns || [],
   };
-  // Empty fields are OK if server has saved credentials
-  const hasSaved = document.getElementById('live-api-key').dataset.saved === '1';
-  if ((!body.api_key || !body.api_secret) && !hasSaved) {
-    alert('Bitte API Key und Secret eingeben.');
-    return;
-  }
+  const keyEl = document.getElementById('live-api-key');
+  const secEl = document.getElementById('live-api-secret');
+  const keyOk = body.api_key || keyEl.dataset.saved === '1';
+  const secOk = body.api_secret || secEl.dataset.saved === '1';
+  if (!keyOk || !secOk) { alert('Bitte API Key und Secret eingeben.'); return; }
 
   lastLiveLogLen = 0;
   document.getElementById('live-log-box').textContent = '';
@@ -843,15 +842,16 @@ async function loadSavedCredentials() {
     const keyEl = document.getElementById('live-api-key');
     const secEl = document.getElementById('live-api-secret');
     const hintEl = document.getElementById('live-key-hint');
-    if (creds.api_key) {
-      keyEl.value = creds.api_key;
+    if (creds.has_key) {
+      keyEl.placeholder = '••••••••••••••••';
       keyEl.dataset.saved = '1';
     }
-    if (creds.api_secret) {
-      secEl.value = creds.api_secret;
+    if (creds.has_secret) {
+      secEl.placeholder = '••••••••••••••••';
+      secEl.dataset.saved = '1';
     }
     if (hintEl) {
-      hintEl.textContent = creds.has_key ? `Gespeicherter Key: ${creds.key_hint}` : '';
+      hintEl.textContent = creds.has_key ? creds.key_hint : '';
     }
   } catch {}
 }

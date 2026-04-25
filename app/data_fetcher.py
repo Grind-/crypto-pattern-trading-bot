@@ -1,7 +1,10 @@
+import logging
+
 import httpx
 from typing import List, Dict
 
 BINANCE_BASE = "https://api.binance.com"
+logger = logging.getLogger(__name__)
 
 INTERVAL_MINUTES = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30,
@@ -10,7 +13,13 @@ INTERVAL_MINUTES = {
 
 async def fetch_klines(symbol: str, interval: str, days: int) -> List[Dict]:
     minutes = INTERVAL_MINUTES.get(interval, 240)
-    limit = min(int(days * 24 * 60 / minutes), 1000)
+    requested = int(days * 24 * 60 / minutes)
+    limit = min(requested, 1000)
+    if requested > 1000:
+        logger.warning(
+            "fetch_klines: %s %s %dd requests %d candles but Binance cap is 1000",
+            symbol, interval, days, requested,
+        )
 
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(

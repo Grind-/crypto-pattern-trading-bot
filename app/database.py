@@ -29,6 +29,7 @@ users = Table(
     "users", metadata,
     Column("username",          Text,    primary_key=True),
     Column("password_hash",     Text,    nullable=False),
+    Column("salt",              Text),   # per-user random salt; NULL = legacy global salt
     Column("role",              Text,    nullable=False, default="user"),
     Column("enabled",           Boolean, nullable=False, default=True),
     Column("created_at",        Text,    nullable=False),
@@ -91,15 +92,15 @@ simulation_details = Table(
 def init_db() -> None:
     os.makedirs("/app/data", exist_ok=True)
     metadata.create_all(engine)
-    _migrate_add_binance_keys()
+    _migrate_add_columns()
     _migrate_json_to_sqlite()
     _migrate_knowledge_to_tiered()
 
 
-def _migrate_add_binance_keys() -> None:
-    """Add binance_api_key/secret columns to users table if they don't exist."""
+def _migrate_add_columns() -> None:
+    """Add columns that were introduced after initial schema creation."""
     with engine.connect() as conn:
-        for col in ("binance_api_key", "binance_api_secret"):
+        for col in ("binance_api_key", "binance_api_secret", "salt"):
             try:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} TEXT"))
             except Exception:
