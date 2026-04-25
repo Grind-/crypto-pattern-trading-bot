@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Crypto Pattern AI</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .page-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .page-header a { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+    .page-header a:hover { color: var(--text); }
+    .page-title { font-size: 16px; font-weight: 700; color: var(--text); }
+    .page-body { max-width: 860px; margin: 0 auto; padding: 20px 16px; }
+    .user-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .user-table th { color: var(--text-muted); font-size: 11px; font-weight: 500;
+      padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+    .user-table td { padding: 10px 10px; border-bottom: 1px solid var(--border);
+      vertical-align: middle; }
+    .user-table tr:last-child td { border-bottom: none; }
+    .tag { display: inline-block; font-size: 11px; padding: 2px 8px;
+      border-radius: 20px; border: 1px solid; }
+    .tag-admin { color: var(--purple); border-color: var(--purple);
+      background: rgba(188,140,255,0.1); }
+    .tag-user { color: var(--blue); border-color: var(--blue);
+      background: rgba(88,166,255,0.1); }
+    .tag-disabled { color: var(--text-muted); border-color: var(--border);
+      background: transparent; }
+    .tag-platform { color: var(--green); border-color: var(--green);
+      background: rgba(63,185,80,0.1); }
+    .tag-apikey { color: var(--yellow); border-color: var(--yellow);
+      background: rgba(210,153,34,0.1); }
+    .act-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .modal-overlay { display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; width: 360px; max-width: 95vw; }
+    .modal h3 { margin-bottom: 16px; font-size: 15px; }
+    .modal .field { margin-bottom: 12px; }
+    .modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <a href="/">← Zurück</a>
+    <span class="page-title">Admin-Panel</span>
+  </div>
+
+  <div class="page-body">
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h2>Benutzer</h2>
+        <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ Neuer Benutzer</button>
+      </div>
+      <div class="table-wrap">
+        <table class="user-table">
+          <thead>
+            <tr>
+              <th>Benutzername</th>
+              <th>Rolle</th>
+              <th>Status</th>
+              <th>Claude</th>
+              <th>Erstellt</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody id="user-tbody">
+            <tr><td colspan="6" class="empty-state">Lade…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create user modal -->
+  <div class="modal-overlay" id="create-modal">
+    <div class="modal">
+      <h3>Neuen Benutzer anlegen</h3>
+      <div class="field">
+        <label>Benutzername</label>
+        <input id="new-username" type="text" placeholder="z.B. trader1" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Passwort</label>
+        <input id="new-password" type="password" placeholder="Mindestens 6 Zeichen" />
+      </div>
+      <div class="field">
+        <label>Rolle</label>
+        <select id="new-role">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Claude-Zugang</label>
+        <select id="new-claude-mode">
+          <option value="api_key">Eigener API-Key</option>
+          <option value="platform">Platform (Server-Subscription)</option>
+        </select>
+      </div>
+      <div id="create-error" style="color:var(--red);font-size:12px;display:none"></div>
+      <div class="modal-btns">
+        <button class="btn-tiny" onclick="closeCreateModal()">Abbrechen</button>
+        <button class="btn btn-primary btn-sm" onclick="createUser()">Anlegen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset password modal -->
+  <div class="modal-overlay" id="reset-modal">
+    <div class="modal">
+      <h3>Passwort zurücksetzen</h3>
+      <div id="reset-for" style="color:var(--text-muted);font-size:13px;margin-bottom:12px"></div>
+      <div class="field">
+        <label>Neues Passwort</label>
+        <input id="reset-password" type="password" placeholder="Mindestens 6 Zeichen" />
+      </div>
+      <div id="reset-error" style="color:var(--red);font-size:12px;display:none"></div>
+      <div class="modal-btns">
+        <button class="btn-tiny" onclick="closeResetModal()">Abbrechen</button>
+        <button class="btn btn-primary btn-sm" onclick="doReset()">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let _users = [];
+    let _resetTarget = null;
+
+    async function loadUsers() {
+      const r = await fetch('/api/admin/users').then(r => r.json());
+      _users = r.users || [];
+      renderUsers(_users);
+    }
+
+    function renderUsers(users) {
+      const tbody = document.getElementById('user-tbody');
+      if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Keine Benutzer</td></tr>';
+        return;
+      }
+      tbody.innerHTML = users.map(u => {
+        const roleTag = u.role === 'admin'
+          ? '<span class="tag tag-admin">Admin</span>'
+          : '<span class="tag tag-user">User</span>';
+        const statusTag = u.enabled
+          ? '<span class="tag tag-platform">Aktiv</span>'
+          : '<span class="tag tag-disabled">Gesperrt</span>';
+        const claudeTag = u.claude_mode === 'platform'
+          ? '<span class="tag tag-platform">Platform</span>'
+          : (u.has_api_key
+              ? '<span class="tag tag-apikey">API-Key ✓</span>'
+              : '<span class="tag tag-disabled">Kein Key</span>');
+        const date = u.created_at
+          ? new Date(u.created_at).toLocaleDateString('de-DE', {day:'2-digit',month:'short',year:'numeric'})
+          : '—';
+        const isAdmin = u.username === 'admin';
+
+        const actions = `<div class="act-row">
+          ${!isAdmin ? `
+            <button class="btn-tiny" onclick="toggleEnabled('${u.username}', ${!u.enabled})">
+              ${u.enabled ? 'Sperren' : 'Freischalten'}
+            </button>
+            <button class="btn-tiny" onclick="openResetModal('${u.username}')">PW ändern</button>
+            <button class="btn-tiny" onclick="togglePlatform('${u.username}', ${u.claude_mode !== 'platform'})">
+              ${u.claude_mode === 'platform' ? '→ API-Key' : '→ Platform'}
+            </button>
+            <button class="btn-tiny" style="color:var(--red)" onclick="deleteUser('${u.username}')">Löschen</button>
+          ` : '<span style="color:var(--text-muted);font-size:11px">—</span>'}
+        </div>`;
+
+        return `<tr>
+          <td style="font-weight:600">${u.username}</td>
+          <td>${roleTag}</td>
+          <td>${statusTag}</td>
+          <td>${claudeTag}</td>
+          <td style="color:var(--text-muted);font-size:11px">${date}</td>
+          <td>${actions}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function toggleEnabled(username, enable) {
+      await fetch(`/api/admin/users/${username}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: enable}),
+      });
+      loadUsers();
+    }
+
+    async function togglePlatform(username, usePlatform) {
+      await fetch(`/api/admin/users/${username}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({claude_mode: usePlatform ? 'platform' : 'api_key'}),
+      });
+      loadUsers();
+    }
+
+    async function deleteUser(username) {
+      if (!confirm(`Benutzer "${username}" wirklich löschen?`)) return;
+      await fetch(`/api/admin/users/${username}`, {method: 'DELETE'});
+      loadUsers();
+    }
+
+    function openCreateModal() {
+      document.getElementById('new-username').value = '';
+      document.getElementById('new-password').value = '';
+      document.getElementById('new-role').value = 'user';
+      document.getElementById('new-claude-mode').value = 'api_key';
+      document.getElementById('create-error').style.display = 'none';
+      document.getElementById('create-modal').classList.add('open');
+    }
+    function closeCreateModal() {
+      document.getElementById('create-modal').classList.remove('open');
+    }
+
+    async function createUser() {
+      const username = document.getElementById('new-username').value.trim();
+      const password = document.getElementById('new-password').value;
+      const role = document.getElementById('new-role').value;
+      const claude_mode = document.getElementById('new-claude-mode').value;
+      const errEl = document.getElementById('create-error');
+      errEl.style.display = 'none';
+      try {
+        const r = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username, password, role, claude_mode}),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          errEl.textContent = d.detail || 'Fehler';
+          errEl.style.display = 'block';
+          return;
+        }
+        closeCreateModal();
+        loadUsers();
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.style.display = 'block';
+      }
+    }
+
+    function openResetModal(username) {
+      _resetTarget = username;
+      document.getElementById('reset-for').textContent = `Benutzer: ${username}`;
+      document.getElementById('reset-password').value = '';
+      document.getElementById('reset-error').style.display = 'none';
+      document.getElementById('reset-modal').classList.add('open');
+    }
+    function closeResetModal() {
+      document.getElementById('reset-modal').classList.remove('open');
+      _resetTarget = null;
+    }
+
+    async function doReset() {
+      if (!_resetTarget) return;
+      const pw = document.getElementById('reset-password').value;
+      const errEl = document.getElementById('reset-error');
+      errEl.style.display = 'none';
+      try {
+        const r = await fetch(`/api/admin/users/${_resetTarget}`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({new_password: pw}),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          errEl.textContent = d.detail || 'Fehler';
+          errEl.style.display = 'block';
+          return;
+        }
+        closeResetModal();
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.style.display = 'block';
+      }
+    }
+
+    // Close modals on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>

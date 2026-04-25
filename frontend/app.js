@@ -871,6 +871,16 @@ async function initPage() {
   loadExtraSyms();
 }
 
+// Load user profile (show admin button, username in header)
+fetch('/api/user/profile').then(r => r.json()).then(data => {
+  const el = document.getElementById('header-user');
+  if (el) el.textContent = data.username;
+  if (data.role === 'admin') {
+    const btn = document.getElementById('btn-admin');
+    if (btn) btn.style.display = '';
+  }
+}).catch(() => {});
+
 // Load symbols on startup
 fetch('/api/symbols').then(r => r.json()).then(data => {
   const sel = document.getElementById('symbol');

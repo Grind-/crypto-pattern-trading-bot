@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import os
 import secrets
 import time
@@ -14,30 +13,49 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .data_fetcher import fetch_klines, fetch_latest_klines, get_available_symbols
 from .indicators import compute_indicators
-from .claude_analyst import analyze_with_claude, get_live_signal, scan_market
+from .claude_analyst import (analyze_with_claude, get_live_signal,
+                              scan_market, test_connection)
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import save_live_state, load_live_state, clear_live_state, update_position
-from .sim_store import save_simulation, load_simulations as _load_sims, load_simulation_detail
+from .sim_store import (save_simulation, load_simulations as _load_sims,
+                        load_simulation_detail)
+from .user_store import (init_users, list_users, get_user, authenticate,
+                         create_user, delete_user, set_enabled, reset_password,
+                         update_claude_config, set_platform_access,
+                         get_claude_api_key, uses_platform)
 
-# ── Auth config ───────────────────────────────────────────────────────────────
-_SALT = "cpa_salt_bioval_2026"
-_USERS = {
-    "admin": "700acb2e5e32e2cbdb1cc63418b0842ba87925541d9fe07a7193646bd563aa3a",
-}
-_SESSIONS: dict[str, float] = {}   # token → expiry timestamp
-_SESSION_TTL = 86400 * 7           # 7 days
+# ── Session store ─────────────────────────────────────────────────────────────
+_SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
+_SESSION_TTL = 86400 * 7
 
 PUBLIC_PATHS = {"/login", "/auth/login", "/auth/logout"}
 
 
-def _hash_pw(password: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), _SALT.encode(), 200000).hex()
+def _valid_session(token: str) -> Optional[str]:
+    entry = _SESSIONS.get(token)
+    if entry and time.time() < entry["expiry"]:
+        return entry["username"]
+    _SESSIONS.pop(token, None)
+    return None
 
 
-def _valid_session(token: str) -> bool:
-    exp = _SESSIONS.get(token)
-    return exp is not None and time.time() < exp
+def _get_current_user(request: Request) -> dict:
+    token = request.cookies.get("session", "")
+    username = _valid_session(token)
+    if not username:
+        raise HTTPException(401, "Not authenticated")
+    user = get_user(username)
+    if not user or not user.get("enabled"):
+        raise HTTPException(401, "Account disabled")
+    return {"username": username, **user}
+
+
+def _require_admin(request: Request) -> dict:
+    user = _get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin-Rechte erforderlich")
+    return user
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -45,8 +63,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if path in PUBLIC_PATHS or path.startswith("/static/"):
             return await call_next(request)
-        token = request.cookies.get("session")
-        if not _valid_session(token or ""):
+        token = request.cookies.get("session", "")
+        if not _valid_session(token):
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             return RedirectResponse("/login", status_code=302)
@@ -59,88 +77,103 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
 @app.on_event("startup")
-async def _auto_resume():
-    """Resume live trading after container restart if it was active."""
-    saved = load_live_state()
-    if not saved or not saved.get("was_running"):
-        return
-    req = LiveRequest(
-        api_key=saved["api_key"],
-        api_secret=saved["api_secret"],
-        symbol=saved["symbol"],
-        interval=saved["interval"],
-        trade_amount_usdt=saved["trade_amount"],
-        strategy_name=saved.get("strategy_name", ""),
-        strategy_analysis=saved.get("strategy_analysis", ""),
-        strategy_patterns=saved.get("strategy_patterns", []),
-    )
-    valid = await BinanceTrader(req.api_key, req.api_secret).validate_keys()
-    if not valid:
-        clear_live_state()
-        return
-    live_state.update({
-        "running": True,
-        "status": "active",
-        "position": saved.get("position", "FLAT"),
-        "symbol": req.symbol,
-        "interval": req.interval,
-        "trade_amount": req.trade_amount_usdt,
-        "signals": [],
-        "log": ["⟳ Live Trading nach Neustart wiederhergestellt"],
-        "api_key": req.api_key,
-        "api_secret": req.api_secret,
-        "next_check_ts": None,
-        "next_check_str": None,
-        "candle_count": 0,
-        "strategy_name": req.strategy_name,
-        "strategy_analysis": req.strategy_analysis,
-        "strategy_patterns": req.strategy_patterns,
-        "trade_history": saved.get("trade_history", []),
-        "live_candles": [],
-        "buy_price": saved.get("buy_price"),
-    })
-    asyncio.create_task(_live_loop(req))
+async def _startup():
+    init_users()
+    await _auto_resume_all()
 
-# ── Global state ──────────────────────────────────────────────────────────────
 
-sim_state: dict = {
-    "running": False,
-    "iteration": 0,
-    "max_iterations": 10,
-    "status": "idle",
-    "results": [],
-    "best_result": None,
-    "log": [],
-    "symbol": None,
-    "interval": None,
-    "candle_prices": [],  # just close prices for chart
-    "candle_timestamps": [],
-}
+async def _auto_resume_all():
+    """Resume live trading for any user who was active before restart."""
+    for username, user_data in list_users().items():
+        if not user_data.get("enabled"):
+            continue
+        saved = load_live_state(username)
+        if not saved or not saved.get("was_running"):
+            continue
+        req = LiveRequest(
+            api_key=saved["api_key"],
+            api_secret=saved["api_secret"],
+            symbol=saved["symbol"],
+            interval=saved["interval"],
+            trade_amount_usdt=saved["trade_amount"],
+            strategy_name=saved.get("strategy_name", ""),
+            strategy_analysis=saved.get("strategy_analysis", ""),
+            strategy_patterns=saved.get("strategy_patterns", []),
+        )
+        valid = await BinanceTrader(req.api_key, req.api_secret).validate_keys()
+        if not valid:
+            clear_live_state(username)
+            continue
+        api_key = get_claude_api_key(username) if not uses_platform(username) else None
+        state = _get_live_state(username)
+        state.update({
+            "running": True,
+            "status": "active",
+            "position": saved.get("position", "FLAT"),
+            "symbol": req.symbol,
+            "interval": req.interval,
+            "trade_amount": req.trade_amount_usdt,
+            "signals": [],
+            "log": ["⟳ Live Trading nach Neustart wiederhergestellt"],
+            "api_key": req.api_key,
+            "api_secret": req.api_secret,
+            "next_check_ts": None,
+            "next_check_str": None,
+            "candle_count": 0,
+            "strategy_name": req.strategy_name,
+            "strategy_analysis": req.strategy_analysis,
+            "strategy_patterns": req.strategy_patterns,
+            "trade_history": saved.get("trade_history", []),
+            "live_candles": [],
+            "buy_price": saved.get("buy_price"),
+        })
+        asyncio.create_task(_live_loop(req, username, api_key))
 
-live_state: dict = {
-    "running": False,
-    "status": "idle",
-    "position": "FLAT",
-    "symbol": None,
-    "interval": None,
-    "trade_amount": 0,
-    "signals": [],
-    "log": [],
-    "api_key": None,
-    "api_secret": None,
-    "next_check_ts": None,
-    "next_check_str": None,
-    "candle_count": 0,
-    "strategy_name": "",
-    "strategy_analysis": "",
-    "strategy_patterns": [],
-    "trade_history": [],
-    "live_candles": [],
-    "buy_price": None,
-}
+
+# ── Per-user state ────────────────────────────────────────────────────────────
+
+sim_states: dict[str, dict] = {}
+live_states: dict[str, dict] = {}
+
+
+def _default_sim_state() -> dict:
+    return {
+        "running": False, "iteration": 0, "max_iterations": 10,
+        "status": "idle", "results": [], "best_result": None, "log": [],
+        "symbol": None, "interval": None,
+        "candle_prices": [], "candle_timestamps": [],
+    }
+
+
+def _default_live_state() -> dict:
+    return {
+        "running": False, "status": "idle", "position": "FLAT",
+        "symbol": None, "interval": None, "trade_amount": 0,
+        "signals": [], "log": [], "api_key": None, "api_secret": None,
+        "next_check_ts": None, "next_check_str": None, "candle_count": 0,
+        "strategy_name": "", "strategy_analysis": "", "strategy_patterns": [],
+        "trade_history": [], "live_candles": [], "buy_price": None,
+    }
+
+
+def _get_sim_state(username: str) -> dict:
+    if username not in sim_states:
+        sim_states[username] = _default_sim_state()
+    return sim_states[username]
+
+
+def _get_live_state(username: str) -> dict:
+    if username not in live_states:
+        live_states[username] = _default_live_state()
+    return live_states[username]
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 
 class SimRequest(BaseModel):
     symbol: str = "BTCUSDC"
@@ -148,7 +181,7 @@ class SimRequest(BaseModel):
     days: int = 30
     initial_capital: float = 1000.0
     max_iterations: int = 10
-    fee_tier: str = "standard"   # standard | bnb | vip1 | vip2 | vip3 | vip4
+    fee_tier: str = "standard"
 
 
 class LiveRequest(BaseModel):
@@ -162,12 +195,7 @@ class LiveRequest(BaseModel):
     strategy_patterns: List[str] = []
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
+# ── Auth routes ────────────────────────────────────────────────────────────────
 
 @app.get("/login")
 async def login_page():
@@ -176,11 +204,11 @@ async def login_page():
 
 @app.post("/auth/login")
 async def do_login(req: LoginRequest, response: Response):
-    expected = _USERS.get(req.username)
-    if not expected or not secrets.compare_digest(_hash_pw(req.password), expected):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    user = authenticate(req.username, req.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
     token = secrets.token_hex(32)
-    _SESSIONS[token] = time.time() + _SESSION_TTL
+    _SESSIONS[token] = {"username": req.username, "expiry": time.time() + _SESSION_TTL}
     response.set_cookie("session", token, httponly=True, samesite="lax", max_age=_SESSION_TTL)
     return {"ok": True}
 
@@ -193,10 +221,138 @@ async def do_logout(request: Request, response: Response):
     return RedirectResponse("/login", status_code=302)
 
 
+# ── Page routes ────────────────────────────────────────────────────────────────
+
 @app.get("/")
 async def index():
     return FileResponse("frontend/index.html")
 
+
+@app.get("/admin")
+async def admin_page(request: Request):
+    _require_admin(request)
+    return FileResponse("frontend/admin.html")
+
+
+@app.get("/settings")
+async def settings_page():
+    return FileResponse("frontend/settings.html")
+
+
+# ── User profile + settings API ────────────────────────────────────────────────
+
+@app.get("/api/user/profile")
+async def get_profile(request: Request):
+    user = _get_current_user(request)
+    return {
+        "username": user["username"],
+        "role": user["role"],
+        "claude_mode": user.get("claude_mode", "api_key"),
+        "has_api_key": bool(user.get("claude_api_key")),
+    }
+
+
+@app.post("/api/user/claude-config")
+async def set_claude_config(body: dict, request: Request):
+    user = _get_current_user(request)
+    mode = body.get("mode", "api_key")
+    api_key = body.get("api_key", "").strip() or None
+    if mode == "platform" and user["role"] != "admin":
+        raise HTTPException(403, "Platform-Zugang nur durch Admin aktivierbar")
+    update_claude_config(user["username"], mode, api_key)
+    return {"ok": True}
+
+
+@app.post("/api/user/test-claude")
+async def test_claude(request: Request):
+    user = _get_current_user(request)
+    api_key = get_claude_api_key(user["username"])
+    ok = await test_connection(api_key=api_key)
+    return {"ok": ok}
+
+
+@app.post("/api/user/change-password")
+async def change_password(body: dict, request: Request):
+    user = _get_current_user(request)
+    current = body.get("current_password", "")
+    new_pw = body.get("new_password", "")
+    if not new_pw or len(new_pw) < 6:
+        raise HTTPException(400, "Neues Passwort zu kurz (min. 6 Zeichen)")
+    # Re-authenticate to verify current password
+    if not authenticate(user["username"], current):
+        raise HTTPException(400, "Aktuelles Passwort falsch")
+    reset_password(user["username"], new_pw)
+    return {"ok": True}
+
+
+# ── Admin API ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request):
+    _require_admin(request)
+    users = list_users()
+    safe = []
+    for uname, udata in users.items():
+        safe.append({
+            "username": uname,
+            "role": udata.get("role", "user"),
+            "enabled": udata.get("enabled", True),
+            "created_at": udata.get("created_at", ""),
+            "claude_mode": udata.get("claude_mode", "api_key"),
+            "has_api_key": bool(udata.get("claude_api_key")),
+        })
+    return {"users": safe}
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(body: dict, request: Request):
+    _require_admin(request)
+    username = (body.get("username") or "").strip().lower()
+    password = body.get("password", "")
+    role = body.get("role", "user")
+    claude_mode = body.get("claude_mode", "api_key")
+    if not username or not password:
+        raise HTTPException(400, "Username und Passwort erforderlich")
+    if len(password) < 6:
+        raise HTTPException(400, "Passwort zu kurz (min. 6 Zeichen)")
+    if role not in ("user", "admin"):
+        raise HTTPException(400, "Ungültige Rolle")
+    if not create_user(username, password, role=role, claude_mode=claude_mode):
+        raise HTTPException(409, f"User '{username}' existiert bereits")
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{username}")
+async def admin_delete_user(username: str, request: Request):
+    _require_admin(request)
+    if username == "admin":
+        raise HTTPException(400, "Admin-Account kann nicht gelöscht werden")
+    if not delete_user(username):
+        raise HTTPException(404, "User nicht gefunden")
+    return {"ok": True}
+
+
+@app.patch("/api/admin/users/{username}")
+async def admin_update_user(username: str, body: dict, request: Request):
+    _require_admin(request)
+    if "enabled" in body:
+        if not set_enabled(username, bool(body["enabled"])):
+            raise HTTPException(404, "User nicht gefunden")
+    if "new_password" in body:
+        if len(body["new_password"]) < 6:
+            raise HTTPException(400, "Passwort zu kurz")
+        if not reset_password(username, body["new_password"]):
+            raise HTTPException(404, "User nicht gefunden")
+    if "claude_mode" in body:
+        api_key = body.get("claude_api_key")
+        if not set_platform_access(username, body["claude_mode"] == "platform"):
+            raise HTTPException(404, "User nicht gefunden")
+        if api_key is not None:
+            update_claude_config(username, body["claude_mode"], api_key)
+    return {"ok": True}
+
+
+# ── Market scanner ─────────────────────────────────────────────────────────────
 
 SCAN_SYMBOLS = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
@@ -235,14 +391,16 @@ async def _fetch_scan_summaries(interval: str, symbols: list = None) -> list:
 
 
 @app.post("/api/scan/symbols")
-async def scan_symbols(body: dict):
+async def scan_symbols(body: dict, request: Request):
+    user = _get_current_user(request)
     interval = body.get("interval", "4h")
     extra = [s.strip().upper() for s in body.get("extra_symbols", []) if s.strip()]
     symbols = SCAN_SYMBOLS + [s for s in extra if s not in SCAN_SYMBOLS]
     summaries = await _fetch_scan_summaries(interval, symbols)
     if not summaries:
         raise HTTPException(503, "Keine Marktdaten verfügbar")
-    return await scan_market(summaries, interval)
+    api_key = get_claude_api_key(user["username"])
+    return await scan_market(summaries, interval, api_key=api_key)
 
 
 @app.get("/api/symbols")
@@ -250,60 +408,56 @@ async def symbols():
     try:
         syms = await get_available_symbols()
         return {"symbols": syms}
-    except Exception as e:
+    except Exception:
         return {"symbols": ["BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC"]}
 
 
+# ── Simulation routes ──────────────────────────────────────────────────────────
+
 @app.post("/api/simulate/start")
-async def start_sim(req: SimRequest, background_tasks: BackgroundTasks):
+async def start_sim(req: SimRequest, background_tasks: BackgroundTasks,
+                    request: Request):
+    user = _get_current_user(request)
+    username = user["username"]
+    sim_state = _get_sim_state(username)
     if sim_state["running"]:
         raise HTTPException(409, "Simulation already running")
+    api_key = get_claude_api_key(username)
+    if not uses_platform(username) and not api_key:
+        raise HTTPException(400, "Kein Claude API-Key konfiguriert. Bitte in Einstellungen hinterlegen.")
 
     sim_state.update({
-        "running": True,
-        "iteration": 0,
-        "max_iterations": req.max_iterations,
-        "status": "starting",
-        "results": [],
-        "best_result": None,
-        "log": [],
-        "symbol": req.symbol,
-        "interval": req.interval,
-        "candle_prices": [],
-        "candle_timestamps": [],
+        "running": True, "iteration": 0, "max_iterations": req.max_iterations,
+        "status": "starting", "results": [], "best_result": None, "log": [],
+        "symbol": req.symbol, "interval": req.interval,
+        "candle_prices": [], "candle_timestamps": [],
     })
     fee_pct = FEE_TIERS.get(req.fee_tier, 0.1)
-    background_tasks.add_task(_sim_loop, req, fee_pct)
+    background_tasks.add_task(_sim_loop, req, fee_pct, username, api_key)
     return {"ok": True}
 
 
 @app.post("/api/simulate/stop")
-async def stop_sim():
+async def stop_sim(request: Request):
+    user = _get_current_user(request)
+    sim_state = _get_sim_state(user["username"])
     sim_state["running"] = False
     sim_state["status"] = "stopped"
     return {"ok": True}
 
 
 @app.get("/api/simulate/status")
-async def sim_status():
-    return {k: v for k, v in sim_state.items() if k not in ("candle_prices", "candle_timestamps")}
-
-
-@app.get("/api/simulations")
-async def get_simulations():
-    return {"simulations": _load_sims()}
-
-
-@app.get("/api/simulations/{sim_id}")
-async def get_simulation_detail(sim_id: str):
-    detail = load_simulation_detail(sim_id)
-    if detail is None:
-        raise HTTPException(404, "Simulation not found")
-    return detail
+async def sim_status(request: Request):
+    user = _get_current_user(request)
+    sim_state = _get_sim_state(user["username"])
+    return {k: v for k, v in sim_state.items()
+            if k not in ("candle_prices", "candle_timestamps")}
 
 
 @app.get("/api/simulate/chart-data")
-async def sim_chart_data():
+async def sim_chart_data(request: Request):
+    user = _get_current_user(request)
+    sim_state = _get_sim_state(user["username"])
     return {
         "prices": sim_state["candle_prices"],
         "timestamps": sim_state["candle_timestamps"],
@@ -312,70 +466,93 @@ async def sim_chart_data():
     }
 
 
+@app.get("/api/simulations")
+async def get_simulations(request: Request):
+    user = _get_current_user(request)
+    return {"simulations": _load_sims(user["username"])}
+
+
+@app.get("/api/simulations/{sim_id}")
+async def get_simulation_detail(sim_id: str, request: Request):
+    user = _get_current_user(request)
+    detail = load_simulation_detail(user["username"], sim_id)
+    if detail is None:
+        raise HTTPException(404, "Simulation not found")
+    return detail
+
+
+# ── Live trading routes ────────────────────────────────────────────────────────
+
 @app.post("/api/live/start")
-async def start_live(req: LiveRequest, background_tasks: BackgroundTasks):
+async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
+                     request: Request):
+    user = _get_current_user(request)
+    username = user["username"]
+    live_state = _get_live_state(username)
     if live_state["running"]:
         raise HTTPException(409, "Live trading already running")
+
+    api_key = get_claude_api_key(username)
+    if not uses_platform(username) and not api_key:
+        raise HTTPException(400, "Kein Claude API-Key konfiguriert. Bitte in Einstellungen hinterlegen.")
 
     trader = BinanceTrader(req.api_key, req.api_secret)
     valid = await trader.validate_keys()
     if not valid:
-        raise HTTPException(400, "Invalid Binance API keys")
+        raise HTTPException(400, "Ungültige Binance API-Keys")
 
     strategy_note = f" | Strategie: {req.strategy_name}" if req.strategy_name else ""
     live_state.update({
-        "running": True,
-        "status": "active",
-        "position": "FLAT",
-        "symbol": req.symbol,
-        "interval": req.interval,
+        "running": True, "status": "active", "position": "FLAT",
+        "symbol": req.symbol, "interval": req.interval,
         "trade_amount": req.trade_amount_usdt,
         "signals": [],
         "log": [f"Live Trading gestartet: {req.symbol} {req.interval}, ${req.trade_amount_usdt} pro Trade{strategy_note}"],
-        "api_key": req.api_key,
-        "api_secret": req.api_secret,
-        "next_check_ts": None,
-        "next_check_str": None,
-        "candle_count": 0,
+        "api_key": req.api_key, "api_secret": req.api_secret,
+        "next_check_ts": None, "next_check_str": None, "candle_count": 0,
         "strategy_name": req.strategy_name,
         "strategy_analysis": req.strategy_analysis,
         "strategy_patterns": req.strategy_patterns,
-        "trade_history": [],
-        "live_candles": [],
-        "buy_price": None,
+        "trade_history": [], "live_candles": [], "buy_price": None,
     })
-    save_live_state({
+    save_live_state(username, {
         "was_running": True,
-        "api_key": req.api_key,
-        "api_secret": req.api_secret,
-        "symbol": req.symbol,
-        "interval": req.interval,
-        "trade_amount": req.trade_amount_usdt,
-        "position": "FLAT",
+        "api_key": req.api_key, "api_secret": req.api_secret,
+        "symbol": req.symbol, "interval": req.interval,
+        "trade_amount": req.trade_amount_usdt, "position": "FLAT",
         "strategy_name": req.strategy_name,
         "strategy_analysis": req.strategy_analysis,
         "strategy_patterns": req.strategy_patterns,
+        "trade_history": [], "buy_price": None,
     })
-    background_tasks.add_task(_live_loop, req)
+    background_tasks.add_task(_live_loop, req, username, api_key)
     return {"ok": True}
 
 
 @app.post("/api/live/stop")
-async def stop_live():
+async def stop_live(request: Request):
+    user = _get_current_user(request)
+    username = user["username"]
+    live_state = _get_live_state(username)
     live_state["running"] = False
     live_state["status"] = "stopped"
     live_state["log"].append("Live Trading gestoppt")
-    clear_live_state()
+    clear_live_state(username)
     return {"ok": True}
 
 
 @app.get("/api/live/status")
-async def live_status():
-    return {k: v for k, v in live_state.items() if k not in ("api_key", "api_secret", "live_candles")}
+async def live_status(request: Request):
+    user = _get_current_user(request)
+    live_state = _get_live_state(user["username"])
+    return {k: v for k, v in live_state.items()
+            if k not in ("api_key", "api_secret", "live_candles")}
 
 
 @app.get("/api/live/chart-data")
-async def live_chart_data():
+async def live_chart_data(request: Request):
+    user = _get_current_user(request)
+    live_state = _get_live_state(user["username"])
     return {
         "candles": live_state.get("live_candles", []),
         "trade_history": live_state.get("trade_history", []),
@@ -384,7 +561,9 @@ async def live_chart_data():
 
 # ── Background tasks ───────────────────────────────────────────────────────────
 
-async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
+async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
+                    api_key: Optional[str]):
+    sim_state = _get_sim_state(username)
     try:
         _log(sim_state, f"Fetching {req.days}d of {req.interval} data for {req.symbol}…")
         sim_state["status"] = "fetching"
@@ -411,10 +590,8 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
             _log(sim_state, "Asking Claude to analyze patterns and generate signals…")
 
             analysis = await analyze_with_claude(
-                symbol=req.symbol,
-                interval=req.interval,
-                candles=enriched,
-                feedback=feedback,
+                symbol=req.symbol, interval=req.interval,
+                candles=enriched, feedback=feedback, api_key=api_key,
             )
 
             strategy = analysis.get("strategy_name", f"Strategy {iteration + 1}")
@@ -424,24 +601,21 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
             _log(sim_state, f"Patterns: {', '.join(analysis.get('patterns_found', []))}")
 
             sim_result = run_simulation(
-                candles=enriched,
-                signals=signals,
-                initial_capital=req.initial_capital,
-                fee_pct=fee_pct,
+                candles=enriched, signals=signals,
+                initial_capital=req.initial_capital, fee_pct=fee_pct,
             )
 
             ret = sim_result["total_return_pct"]
-            _log(sim_state, f"Return: {ret:+.2f}% | Win rate: {sim_result['win_rate']:.1f}% | Trades: {sim_result['num_trades']} | Drawdown: {sim_result['max_drawdown']:.1f}% | Fees: ${sim_result['total_fees_usdt']:.2f} ({sim_result['fee_drag_pct']:.2f}% drag)")
+            _log(sim_state, f"Return: {ret:+.2f}% | Win rate: {sim_result['win_rate']:.1f}% | "
+                 f"Trades: {sim_result['num_trades']} | Drawdown: {sim_result['max_drawdown']:.1f}% | "
+                 f"Fees: ${sim_result['total_fees_usdt']:.2f} ({sim_result['fee_drag_pct']:.2f}% drag)")
 
             result = {
-                "iteration": iteration + 1,
-                "strategy_name": strategy,
+                "iteration": iteration + 1, "strategy_name": strategy,
                 "analysis": analysis.get("analysis", ""),
                 "patterns_found": analysis.get("patterns_found", []),
-                "signals": signals,
-                "confidence": analysis.get("confidence", 0),
-                **sim_result,
-                "profitable": ret > 0,
+                "signals": signals, "confidence": analysis.get("confidence", 0),
+                **sim_result, "profitable": ret > 0,
             }
             sim_state["results"].append(result)
 
@@ -472,10 +646,8 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
             entry = {
                 "id": sim_id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
-                "symbol": req.symbol,
-                "interval": req.interval,
-                "days": req.days,
-                "capital": req.initial_capital,
+                "symbol": req.symbol, "interval": req.interval,
+                "days": req.days, "capital": req.initial_capital,
                 "fee_tier": req.fee_tier,
                 "total_return_pct": br.get("total_return_pct", 0),
                 "win_rate": br.get("win_rate", 0),
@@ -490,17 +662,12 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
                 "iterations": sim_state.get("iteration", 0),
             }
             full_result = {
-                **br,
-                "id": sim_id,
-                "symbol": req.symbol,
-                "interval": req.interval,
-                "days": req.days,
-                "capital": req.initial_capital,
-                "fee_tier": req.fee_tier,
+                **br, "id": sim_id, "symbol": req.symbol, "interval": req.interval,
+                "days": req.days, "capital": req.initial_capital, "fee_tier": req.fee_tier,
                 "candle_prices": sim_state.get("candle_prices", []),
                 "candle_timestamps": sim_state.get("candle_timestamps", []),
             }
-            save_simulation(entry, full_result)
+            save_simulation(username, entry, full_result)
 
     except Exception as e:
         sim_state["status"] = "error"
@@ -509,13 +676,15 @@ async def _sim_loop(req: SimRequest, fee_pct: float = 0.1):
         sim_state["running"] = False
 
 
-async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: str, position_symbol: str) -> str:
-    """Run market scanner every cycle. Switch current_symbol only when FLAT."""
+async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: str,
+                                  position_symbol: str, username: str,
+                                  api_key: Optional[str]) -> str:
+    live_state = _get_live_state(username)
     try:
         summaries = await _fetch_scan_summaries(interval)
         if not summaries:
             return current_symbol
-        result = await scan_market(summaries, interval)
+        result = await scan_market(summaries, interval, api_key=api_key)
         best = result.get("best_symbol", "")
         rec = result.get("recommendation", "")
         if not best:
@@ -524,12 +693,11 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
             if best != current_symbol:
                 _log(live_state, f"🔄 Wechsel: {current_symbol} → {best} | {rec[:100]}")
                 live_state["symbol"] = best
-                update_position("FLAT")
+                update_position(username, "FLAT")
                 return best
             else:
                 _log(live_state, f"✓ Scanner bestätigt {current_symbol} als bestes Setup")
         else:
-            # IN_POSITION — can't switch, just inform
             if best != position_symbol:
                 _log(live_state, f"ℹ Scanner: {best} wäre jetzt besser — Wechsel nach Verkauf von {position_symbol}")
             else:
@@ -540,13 +708,12 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
         return current_symbol
 
 
-async def _live_loop(req: LiveRequest):
+async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str]):
+    live_state = _get_live_state(username)
     trader = BinanceTrader(req.api_key, req.api_secret)
     interval_seconds = _interval_to_seconds(req.interval)
     CLOSE_BUFFER = 10
 
-    # current_symbol can change between trades when FLAT
-    # position_symbol is locked once we buy (used for selling)
     current_symbol = req.symbol
     position_symbol = req.symbol
 
@@ -560,17 +727,14 @@ async def _live_loop(req: LiveRequest):
     def _fmt_wait(secs: float) -> str:
         h, rem = divmod(int(secs), 3600)
         m, s = divmod(rem, 60)
-        if h:
-            return f"{h}h {m}m {s}s"
-        if m:
-            return f"{m}m {s}s"
+        if h: return f"{h}h {m}m {s}s"
+        if m: return f"{m}m {s}s"
         return f"{s}s"
 
     try:
         first_run = True
         while live_state["running"]:
 
-            # ── Wait until next candle close ──────────────────────────────────
             next_close_ts = _next_close()
             wake_at = next_close_ts + CLOSE_BUFFER
             wait_secs = wake_at - time.time()
@@ -596,13 +760,12 @@ async def _live_loop(req: LiveRequest):
             live_state["candle_count"] += 1
             _log(live_state, f"\n── Kerze #{live_state['candle_count']} geschlossen ({_fmt_ts(next_close_ts)}) ──")
 
-            # ── Scan every cycle: switch if FLAT, inform if IN_POSITION ───────
             _log(live_state, "🔍 Marktcheck…")
             current_symbol = await _scan_and_maybe_switch(
-                req.interval, current_symbol, live_state["position"], position_symbol
+                req.interval, current_symbol, live_state["position"],
+                position_symbol, username, api_key,
             )
 
-            # Use position_symbol when holding, current_symbol when flat
             active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
 
             _log(live_state, f"Lade {active_symbol} {req.interval} Daten…")
@@ -610,19 +773,19 @@ async def _live_loop(req: LiveRequest):
             enriched = compute_indicators(candles)
             price = candles[-1]["close"] if candles else 0
             _log(live_state, f"Schlusskurs: ${price:,.2f}")
-            # Store candles for live chart
-            live_state["live_candles"] = [{"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]]
+            live_state["live_candles"] = [
+                {"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]
+            ]
 
             _log(live_state, "Frage Claude nach Signal…")
             signal = await get_live_signal(
-                symbol=active_symbol,
-                interval=req.interval,
-                candles=enriched,
-                current_position=live_state["position"],
+                symbol=active_symbol, interval=req.interval,
+                candles=enriched, current_position=live_state["position"],
                 signal_history=live_state["signals"][-10:],
                 strategy_name=req.strategy_name,
                 strategy_analysis=req.strategy_analysis,
                 strategy_patterns=req.strategy_patterns,
+                api_key=api_key,
             )
 
             action = signal.get("action", "HOLD")
@@ -631,13 +794,11 @@ async def _live_loop(req: LiveRequest):
             _log(live_state, f"Signal: {action} | Konfidenz: {confidence}% | {reason}")
 
             live_state["signals"].append({
-                "action": action, "confidence": confidence,
-                "reason": reason, "price": price,
-                "symbol": active_symbol,
+                "action": action, "confidence": confidence, "reason": reason,
+                "price": price, "symbol": active_symbol,
                 "timestamp": candles[-1]["timestamp"] if candles else 0,
             })
 
-            # ── Execute trades ────────────────────────────────────────────────
             if action == "BUY" and live_state["position"] == "FLAT" and confidence >= 60:
                 try:
                     order = await trader.place_market_order(
@@ -648,13 +809,13 @@ async def _live_loop(req: LiveRequest):
                     live_state["position"] = "IN_POSITION"
                     live_state["symbol"] = current_symbol
                     live_state["buy_price"] = price
-                    update_position("IN_POSITION")
+                    update_position(username, "IN_POSITION")
                     live_state["trade_history"].append({
                         "type": "BUY", "symbol": current_symbol,
                         "price": price, "timestamp": int(time.time() * 1000),
                         "order_id": str(order.get("orderId", "")), "pnl_pct": None,
                     })
-                    _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f}")
+                    _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId','?')} @ ${price:,.2f}")
                 except Exception as e:
                     _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
 
@@ -671,15 +832,15 @@ async def _live_loop(req: LiveRequest):
                         pnl_pct = (price - buy_p) / buy_p * 100 if buy_p else 0.0
                         live_state["position"] = "FLAT"
                         live_state["buy_price"] = None
-                        update_position("FLAT")
+                        update_position(username, "FLAT")
                         live_state["trade_history"].append({
                             "type": "SELL", "symbol": position_symbol,
                             "price": price, "timestamp": int(time.time() * 1000),
-                            "order_id": str(order.get("orderId", "")), "pnl_pct": round(pnl_pct, 3),
+                            "order_id": str(order.get("orderId", "")),
+                            "pnl_pct": round(pnl_pct, 3),
                         })
-                        _log(live_state, f"✅ VERKAUF {position_symbol} — Order {order.get('orderId', '?')} @ ${price:,.2f} | P&L: {pnl_pct:+.2f}%")
-                        # Persist updated trade history
-                        _save_live_trade_history()
+                        _log(live_state, f"✅ VERKAUF {position_symbol} — Order {order.get('orderId','?')} @ ${price:,.2f} | P&L: {pnl_pct:+.2f}%")
+                        _persist_trade_history(username, live_state)
                     else:
                         _log(live_state, f"⚠ Kein {base_asset}-Guthaben zum Verkaufen")
                 except Exception as e:
@@ -698,7 +859,7 @@ async def _live_loop(req: LiveRequest):
     except Exception as e:
         live_state["status"] = "error"
         _log(live_state, f"FEHLER: {e}")
-        clear_live_state()
+        clear_live_state(username)
     finally:
         live_state["running"] = False
         live_state["next_check_ts"] = None
@@ -708,12 +869,12 @@ async def _live_loop(req: LiveRequest):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _save_live_trade_history():
-    saved = load_live_state()
+def _persist_trade_history(username: str, live_state: dict) -> None:
+    saved = load_live_state(username)
     if saved:
         saved["trade_history"] = live_state.get("trade_history", [])
         saved["buy_price"] = live_state.get("buy_price")
-        save_live_state(saved)
+        save_live_state(username, saved)
 
 
 def _log(state: dict, msg: str):
