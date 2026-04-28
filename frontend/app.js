@@ -546,7 +546,7 @@ async function pollLive() {
   const capRow = document.getElementById('live-capital-row');
   const capVal = document.getElementById('live-capital-value');
   const capMeta = document.getElementById('live-capital-meta');
-  if (capRow && capVal && state.running && state.current_capital > 0) {
+  if (capRow && capVal && state.running) {
     capRow.style.display = 'block';
     const initial = state.trade_amount || state.current_capital;
     const current = state.current_capital;
@@ -1213,6 +1213,7 @@ async function initPage() {
       }
 
       livePolling = setInterval(pollLive, 5000);
+      pollLive();
     }
   } catch (e) {}
 

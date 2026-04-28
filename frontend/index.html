@@ -250,7 +250,7 @@
             <button class="topup-toggle-btn" id="topup-toggle-btn" onclick="toggleTopup()" title="Kapital aufstocken">＋</button>
           </div>
           <div id="topup-row" class="topup-row" style="display:none">
-            <input id="topup-amount" type="number" min="1" step="1" placeholder="Betrag in USDC" class="topup-input" />
+            <input id="topup-amount" type="number" min="1" step="1" placeholder="Betrag in USDC" class="topup-input" onkeydown="if(event.key==='Enter')submitTopup()" />
             <button class="topup-btn" onclick="submitTopup()">Aufstocken</button>
             <span id="topup-result" class="topup-result"></span>
           </div>
@@ -411,6 +411,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>
