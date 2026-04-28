@@ -488,8 +488,9 @@ async def synthesize_learnings(
     username: str,
     api_key: Optional[str] = None,
     oauth_token: str = "",
-) -> None:
-    """Update user's knowledge base after a simulation. Fire-and-forget — never raises."""
+) -> tuple[bool, str]:
+    """Update user's knowledge base after a simulation.
+    Returns (success, message) — never raises."""
     profitable = sim_entry.get("profitable", False)
     return_pct = sim_entry.get("total_return_pct", 0)
     win_rate   = sim_entry.get("win_rate", 0)
@@ -512,16 +513,15 @@ async def synthesize_learnings(
             "profitable": profitable,
         })
         update_user_stats(username, symbol, return_pct, profitable)
-    except Exception:
-        pass
+    except Exception as e:
+        return False, f"Sim-Log Fehler: {e}"
 
-    try:
-        current  = get_user_sym_patterns(username, symbol, interval)
-        cur_json = json.dumps(current, indent=2) if current else "{}"
-        sc       = current.get("session_count", 0)
-        ps       = current.get("profitable_sessions", 0)
+    current  = get_user_sym_patterns(username, symbol, interval)
+    cur_json = json.dumps(current, indent=2) if current else "{}"
+    sc       = current.get("session_count", 0)
+    ps       = current.get("profitable_sessions", 0)
 
-        prompt = f"""You are a quantitative trading knowledge curator. Update the pattern library for {symbol} {interval}.
+    prompt = f"""You are a quantitative trading knowledge curator. Update the pattern library for {symbol} {interval}.
 
 COMPLETED SIMULATION:
 - Result: {"✅ PROFITABLE" if profitable else "❌ NOT PROFITABLE"}
@@ -551,12 +551,29 @@ Respond with ONLY raw JSON (no markdown):
   "last_updated": "{datetime.now(timezone.utc).date().isoformat()}"
 }}"""
 
-        result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
-        if isinstance(result, dict) and "session_count" in result:
-            result["last_updated"] = datetime.now(timezone.utc).isoformat()
-            update_user_patterns(username, symbol, interval, result)
-    except Exception:
-        pass
+    for attempt in range(2):
+        try:
+            result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+            if isinstance(result, dict) and "session_count" in result:
+                result["last_updated"] = datetime.now(timezone.utc).isoformat()
+                update_user_patterns(username, symbol, interval, result)
+                total = result["session_count"]
+                wins  = result.get("profitable_sessions", 0)
+                wp    = len(result.get("winning_patterns", []))
+                lp    = len(result.get("losing_patterns", []))
+                return True, (
+                    f"Wissensbasis aktualisiert — {symbol} {interval}: "
+                    f"{total} Sessions ({wins} profitabel), "
+                    f"{wp} Gewinnmuster, {lp} Verlustmuster"
+                )
+            return False, "Claude-Antwort hatte unerwartetes Format — Wissensbasis nicht aktualisiert"
+        except Exception as e:
+            if attempt == 0:
+                await asyncio.sleep(5)
+                continue
+            return False, f"Claude-Fehler nach 2 Versuchen: {e}"
+
+    return False, "Unbekannter Fehler"
 
 
 async def distill_and_promote_rules(

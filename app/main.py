@@ -927,11 +927,16 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
         }
         save_simulation(username, entry, full_result)
 
-        asyncio.create_task(
-            synthesize_learnings(req.symbol, req.interval, entry,
-                                 username=username,
-                                 api_key=api_key, oauth_token=oauth_token)
+        _log(sim_state, "🧠 Aktualisiere Wissensbasis…")
+        kb_ok, kb_msg = await synthesize_learnings(
+            req.symbol, req.interval, entry,
+            username=username,
+            api_key=api_key, oauth_token=oauth_token,
         )
+        if kb_ok:
+            _log(sim_state, f"✅ {kb_msg}")
+        else:
+            _log(sim_state, f"⚠ Wissensbasis-Update fehlgeschlagen: {kb_msg}")
 
     except Exception as e:
         sim_state["status"] = "error"
