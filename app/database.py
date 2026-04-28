@@ -58,6 +58,7 @@ live_states = Table(
     Column("current_capital",    Float),  # dynamic: grows/shrinks with each trade
     Column("position_qty",       Float),  # exact crypto qty bought by the bot (not full wallet)
     Column("compounding_mode",   Text),   # "fixed" | "compound" | "compound_wins"
+    Column("analysis_weight",    Integer, default=70),
     Column("updated_at",         Text),
 )
 
@@ -108,7 +109,7 @@ def _migrate_add_columns() -> None:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} TEXT"))
             except Exception:
                 pass  # column already exists
-        for live_col in ("current_capital REAL", "position_qty REAL", "compounding_mode TEXT"):
+        for live_col in ("current_capital REAL", "position_qty REAL", "compounding_mode TEXT", "analysis_weight INTEGER"):
             try:
                 conn.execute(text(f"ALTER TABLE live_states ADD COLUMN {live_col}"))
             except Exception:

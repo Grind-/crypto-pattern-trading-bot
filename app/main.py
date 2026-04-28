@@ -182,7 +182,7 @@ async def _auto_resume_all():
             interval=saved["interval"],
             trade_amount_usdt=saved["trade_amount"],
             compounding_mode=saved.get("compounding_mode", "compound"),
-            analysis_weight=saved.get("analysis_weight", 70),
+            analysis_weight=int(saved.get("analysis_weight") or 70),
         )
         trader = BinanceTrader(bkey, bsec)
         valid = await trader.validate_keys()
@@ -243,6 +243,7 @@ async def _auto_resume_all():
             "tp_pct": (snapshot or saved).get("tp_pct"),
             "_session_token": session_token,
             "_username": username,
+            "_is_resume": True,
             "last_regime": None,
             "last_risk": None,
             "last_news_score": None,
@@ -1133,7 +1134,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             live_state["current_capital"] = actual_capital
             live_state["sl_pct"]          = None
             live_state["tp_pct"]          = None
-            update_position(username, "IN_POSITION")
+            update_position(username, "IN_POSITION", symbol=symbol)
             live_state["trade_history"].append({
                 "type": "BUY", "symbol": symbol,
                 "price": buy_price, "timestamp": int(time.time() * 1000),
@@ -1220,99 +1221,101 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
 
     try:
         # ── Startup ──────────────────────────────────────────────────────────────
+        is_resume = live_state.pop("_is_resume", False)
         _log(live_state, "🔍 Startup: prüfe Guthaben…")
         try:
             balances = await trader.get_balances()
             usdc_available = balances.get("USDC", 0.0)
 
-            # ── Resume: symbol already known from saved state ─────────────────
+            # ── Reconcile IN_POSITION against actual holdings (always) ────────
             if current_symbol and live_state.get("position") == "IN_POSITION":
                 base_asset = current_symbol.replace("USDC", "").replace("USDT", "")
                 crypto_held = balances.get(base_asset, 0.0)
                 if crypto_held > 0:
                     live_state["position_qty"] = crypto_held
                     position_symbol = current_symbol
-                    _log(live_state, f"✓ Wiederaufnahme: {crypto_held:.6f} {base_asset} vorhanden")
+                    _log(live_state, f"✓ {crypto_held:.6f} {base_asset} vorhanden — bleibe IN_POSITION")
                 else:
                     _log(live_state, f"⚠ Zustand-Desync: IN_POSITION aber kein {base_asset} — setze auf FLAT")
                     live_state["position"] = "FLAT"
                     live_state["position_qty"] = 0
                     update_position(username, "FLAT")
-                    current_symbol = ""  # trigger fresh scan below
+                    if not is_resume:
+                        current_symbol = ""  # trigger fresh scan below on fresh start only
 
-            # ── Fresh start or desync: agent picks symbol, smart capital logic ─
-            if not current_symbol or live_state.get("position", "FLAT") == "FLAT":
-                _log(live_state, "🤖 Agent sucht bestes Symbol…")
-                chosen = await _scan_and_maybe_switch(
-                    req.interval, "", "FLAT", "",
-                    username, api_key, oauth_token,
-                )
-                current_symbol = chosen
-                position_symbol = chosen
-                live_state["symbol"] = chosen
-                base_asset = chosen.replace("USDC", "").replace("USDT", "")
-                crypto_held = balances.get(base_asset, 0.0)
-                target = live_state.get("current_capital") or req.trade_amount_usdt
+            if is_resume:
+                # Resume: do NOT scan or buy — wait for next candle close
+                pos = live_state.get("position", "FLAT")
+                sym_info = f"{current_symbol} " if current_symbol else ""
+                _log(live_state, f"✓ Wiederaufnahme: {sym_info}{pos} — warte auf nächste Kerze")
+            else:
+                # ── Fresh start: agent picks symbol and buys ──────────────────
+                if not current_symbol or live_state.get("position", "FLAT") == "FLAT":
+                    _log(live_state, "🤖 Agent sucht bestes Symbol…")
+                    chosen = await _scan_and_maybe_switch(
+                        req.interval, "", "FLAT", "",
+                        username, api_key, oauth_token,
+                    )
+                    current_symbol = chosen
+                    position_symbol = chosen
+                    live_state["symbol"] = chosen
+                    base_asset = chosen.replace("USDC", "").replace("USDT", "")
+                    crypto_held = balances.get(base_asset, 0.0)
+                    target = live_state.get("current_capital") or req.trade_amount_usdt
 
-                # Get price for crypto-value calculation
-                try:
-                    crypto_price = await trader.get_price(chosen) if crypto_held > 0 else 0.0
-                except Exception:
-                    crypto_price = 0.0
-                crypto_value = crypto_held * crypto_price
+                    try:
+                        crypto_price = await trader.get_price(chosen) if crypto_held > 0 else 0.0
+                    except Exception:
+                        crypto_price = 0.0
+                    crypto_value = crypto_held * crypto_price
 
-                if usdc_available >= target:
-                    # Enough USDC → full buy
-                    _log(live_state, f"💰 {usdc_available:.2f} USDC — kaufe {chosen}")
-                    await _do_buy(chosen, target)
+                    if usdc_available >= target:
+                        _log(live_state, f"💰 {usdc_available:.2f} USDC — kaufe {chosen}")
+                        await _do_buy(chosen, target)
 
-                elif crypto_held > 0:
-                    need_usdc = max(0.0, target - crypto_value)
-                    if need_usdc < 10.0:
-                        # Already have enough crypto → set IN_POSITION
-                        _log(live_state, f"✓ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) — setze IN_POSITION")
-                        live_state.update({
-                            "position": "IN_POSITION", "position_qty": crypto_held,
-                            "buy_price": crypto_price or live_state.get("buy_price"),
-                            "current_capital": crypto_value, "symbol": chosen,
-                        })
-                        update_position(username, "IN_POSITION")
+                    elif crypto_held > 0:
+                        need_usdc = max(0.0, target - crypto_value)
+                        if need_usdc < 10.0:
+                            _log(live_state, f"✓ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) — setze IN_POSITION")
+                            live_state.update({
+                                "position": "IN_POSITION", "position_qty": crypto_held,
+                                "buy_price": crypto_price or live_state.get("buy_price"),
+                                "current_capital": crypto_value, "symbol": chosen,
+                            })
+                            update_position(username, "IN_POSITION", symbol=chosen)
+                        elif usdc_available >= 10.0:
+                            buy_usdc = min(need_usdc, round(usdc_available * 0.995, 2))
+                            _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) + kaufe ${buy_usdc:.2f} nach")
+                            live_state.update({
+                                "position": "IN_POSITION", "position_qty": crypto_held,
+                                "buy_price": crypto_price or live_state.get("buy_price"),
+                                "current_capital": crypto_value, "symbol": chosen,
+                            })
+                            update_position(username, "IN_POSITION", symbol=chosen)
+                            try:
+                                order = await trader.place_market_order(chosen, "BUY", quote_quantity=buy_usdc)
+                                extra_qty = float(order.get("executedQty", 0))
+                                if extra_qty > 0:
+                                    live_state["position_qty"] += extra_qty
+                                    live_state["current_capital"] += buy_usdc
+                                    _log(live_state, f"✅ Aufgestockt +{extra_qty:.6f} | Gesamt: {live_state['position_qty']:.6f} {base_asset}")
+                            except Exception as e:
+                                _log(live_state, f"⚠ Aufstocken fehlgeschlagen: {e} — behalte bestehende Position")
+                        else:
+                            _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}), kein USDC — setze IN_POSITION")
+                            live_state.update({
+                                "position": "IN_POSITION", "position_qty": crypto_held,
+                                "buy_price": crypto_price or live_state.get("buy_price"),
+                                "current_capital": crypto_value, "symbol": chosen,
+                            })
+                            update_position(username, "IN_POSITION", symbol=chosen)
+
                     elif usdc_available >= 10.0:
-                        # Have some crypto + enough USDC to top up → set IN_POSITION + buy more
-                        buy_usdc = min(need_usdc, round(usdc_available * 0.995, 2))
-                        _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) + kaufe ${buy_usdc:.2f} nach")
-                        live_state.update({
-                            "position": "IN_POSITION", "position_qty": crypto_held,
-                            "buy_price": crypto_price or live_state.get("buy_price"),
-                            "current_capital": crypto_value, "symbol": chosen,
-                        })
-                        update_position(username, "IN_POSITION")
-                        try:
-                            order = await trader.place_market_order(chosen, "BUY", quote_quantity=buy_usdc)
-                            extra_qty = float(order.get("executedQty", 0))
-                            if extra_qty > 0:
-                                live_state["position_qty"] += extra_qty
-                                live_state["current_capital"] += buy_usdc
-                                _log(live_state, f"✅ Aufgestockt +{extra_qty:.6f} | Gesamt: {live_state['position_qty']:.6f} {base_asset}")
-                        except Exception as e:
-                            _log(live_state, f"⚠ Aufstocken fehlgeschlagen: {e} — behalte bestehende Position")
+                        _log(live_state, f"💰 {usdc_available:.2f} USDC (< Ziel ${target:.2f}) — kaufe soviel wie möglich")
+                        await _do_buy(chosen, target)
+
                     else:
-                        # No USDC to add → use existing crypto as position
-                        _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}), kein USDC — setze IN_POSITION")
-                        live_state.update({
-                            "position": "IN_POSITION", "position_qty": crypto_held,
-                            "buy_price": crypto_price or live_state.get("buy_price"),
-                            "current_capital": crypto_value, "symbol": chosen,
-                        })
-                        update_position(username, "IN_POSITION")
-
-                elif usdc_available >= 10.0:
-                    # No crypto, buy as much as possible with available USDC
-                    _log(live_state, f"💰 {usdc_available:.2f} USDC (< Ziel ${target:.2f}) — kaufe soviel wie möglich")
-                    await _do_buy(chosen, target)  # _do_buy caps at actual usdc_available
-
-                else:
-                    _log(live_state, f"⚠ Kein {base_asset} und weniger als $10 USDC — warte auf Einzahlung.")
+                        _log(live_state, f"⚠ Kein {base_asset} und weniger als $10 USDC — warte auf Einzahlung.")
 
         except Exception as e:
             _log(live_state, f"⚠ Startup-Check fehlgeschlagen: {e}")
@@ -1661,6 +1664,9 @@ def _persist_trade_history(username: str, live_state: dict) -> None:
         saved["current_capital"] = live_state.get("current_capital")
         saved["position_qty"] = live_state.get("position_qty")
         saved["compounding_mode"] = live_state.get("compounding_mode")
+        saved["position"] = live_state.get("position", "FLAT")
+        saved["symbol"] = live_state.get("symbol") or saved.get("symbol", "")
+        saved["analysis_weight"] = live_state.get("analysis_weight", 70)
         save_live_state(username, saved)
 
 
