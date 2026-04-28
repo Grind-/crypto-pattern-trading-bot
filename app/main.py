@@ -21,11 +21,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 logger = logging.getLogger(__name__)
 from .indicators import compute_indicators
 from .claude_analyst import (analyze_with_claude, get_live_signal,
+                              get_regime,
                               scan_market, test_connection,
                               synthesize_learnings,
                               distill_and_promote_rules,
                               promote_symbol_patterns_via_claude)
 from .news_analyst import run_news_cycle, get_news_intelligence
+from .risk_agent import calculate_risk_params
+from .news_analyst import get_news_score_for_symbol
 from .simulator import run_simulation, FEE_TIERS
 from .binance_trader import BinanceTrader
 from .state_store import (save_live_state, load_live_state, clear_live_state,
@@ -231,6 +234,9 @@ async def _auto_resume_all():
             "sl_pct": None,
             "tp_pct": None,
             "_session_token": session_token,
+            "last_regime": None,
+            "last_risk": None,
+            "last_news_score": None,
         })
         update_position(username, reconciled_position)
         asyncio.create_task(_live_loop(req, username, api_key, oauth_token, session_token))
@@ -261,6 +267,7 @@ def _default_live_state() -> dict:
         "analysis_weight": 70,
         "trade_history": [], "live_candles": [], "buy_price": None,
         "sl_pct": None, "tp_pct": None,
+        "last_regime": None, "last_risk": None, "last_news_score": None,
     }
 
 
@@ -751,6 +758,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "position_qty": 0, "compounding_mode": req.compounding_mode, "position": "FLAT",
         "analysis_weight": req.analysis_weight,
         "trade_history": [], "buy_price": None,
+        "last_regime": None, "last_risk": None, "last_news_score": None,
     })
     background_tasks.add_task(_live_loop, req, username, api_key, oauth_token, session_token)
     return {"ok": True}
@@ -1299,6 +1307,49 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 {"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]
             ]
 
+            # ── Multi-TF: fetch 4h candles for regime ────────────────────────────
+            if req.interval != "4h":
+                try:
+                    raw4h = await fetch_latest_klines(active_symbol, "4h", limit=100)
+                    candles_4h = compute_indicators(raw4h)
+                except Exception:
+                    candles_4h = enriched
+            else:
+                candles_4h = enriched
+
+            async def _get_1h_candles(sym, interval, enriched_primary):
+                if interval == "1h":
+                    return enriched_primary
+                try:
+                    raw = await fetch_latest_klines(sym, "1h", limit=100)
+                    return compute_indicators(raw)
+                except Exception:
+                    return enriched_primary
+
+            # ── Agent 1: Regime ──────────────────────────────────────────────────
+            try:
+                from .news_fetcher import _fetch_fear_greed
+                fng_data = await _fetch_fear_greed()
+                candles_1h = await _get_1h_candles(active_symbol, req.interval, enriched)
+                regime_result = await get_regime(
+                    symbol=active_symbol, interval=req.interval,
+                    candles_1h=candles_1h, candles_4h=candles_4h,
+                    fear_greed=fng_data, api_key=api_key, oauth_token=oauth_token,
+                )
+            except Exception as e:
+                logger.warning(f"Regime Agent error [{username}]: {e}")
+                regime_result = {"regime": "RANGING", "strength": 50,
+                                 "recommended_strategy": "mean_revert",
+                                 "signal_weight_technical": 70, "signal_weight_news": 30}
+            live_state["last_regime"] = regime_result
+            _log(live_state, f"Regime: {regime_result['regime']} ({regime_result['strength']}/100) | {regime_result['recommended_strategy']}")
+
+            # ── Agent 3: News Score ──────────────────────────────────────────────
+            news_score = get_news_score_for_symbol(active_symbol)
+            live_state["last_news_score"] = news_score
+            if news_score.get("veto"):
+                _log(live_state, f"⚠ News-Veto aktiv für {active_symbol} (Score {news_score['sentiment_score']}/100)")
+
             # ── Stop-Loss / Take-Profit ──────────────────────────────────────────
             force_sell = False
             force_sell_reason = ""
@@ -1327,6 +1378,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     signal_history=live_state["signals"][-10:],
                     analysis_weight=req.analysis_weight,
                     api_key=api_key, oauth_token=oauth_token,
+                    regime=regime_result,
+                    news_score=news_score,
                 )
                 action     = signal.get("action", "HOLD")
                 confidence = signal.get("confidence", 0)
@@ -1341,23 +1394,79 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             if len(live_state["signals"]) > 500:
                 live_state["signals"] = live_state["signals"][-500:]
 
-            # ── Execute signal ───────────────────────────────────────────────────
-            if action == "BUY" and live_state["position"] == "FLAT" and confidence >= 60:
-                capital = live_state.get("current_capital") or req.trade_amount_usdt
-                bought = await _do_buy(current_symbol, capital)
-                if bought and not force_sell:
-                    live_state["sl_pct"] = signal.get("stop_loss_pct") or 0
-                    live_state["tp_pct"] = signal.get("take_profit_pct") or 0
-                    if live_state.get("sl_pct") or live_state.get("tp_pct"):
-                        _log(live_state, f"SL: {live_state['sl_pct']}% / TP: {live_state['tp_pct']}%")
+            # ── Voting matrix ────────────────────────────────────────────────────
+            if not force_sell:
+                regime_str = regime_result.get("regime", "RANGING")
+                news_sent  = news_score.get("sentiment_score", 50)
+                news_veto  = news_score.get("veto", False)
+                news_w     = regime_result.get("signal_weight_news", 30) / 100.0
+                vote = 1.0 if action == "BUY" else (-1.0 if action == "SELL" else 0.0)
+                news_mod = (news_sent / 100.0) * news_w
+                regime_boost = {"BULL_TREND": 0.3, "RANGING": 0.0, "BEAR_TREND": -0.3, "HIGH_VOLATILITY": -0.5}.get(regime_str, 0.0)
+                total_score = vote + news_mod + regime_boost
+                _log(live_state, f"Vote: Signal={vote:+.1f} News={news_mod:+.2f} Regime={regime_boost:+.1f} → {total_score:+.2f}")
 
-            elif action == "SELL" and live_state["position"] == "IN_POSITION" and (force_sell or confidence >= 55):
+                if regime_str == "HIGH_VOLATILITY" and action == "BUY":
+                    action = "HOLD"
+                    _log(live_state, "🚫 BUY blockiert: HIGH_VOLATILITY")
+                if news_veto and action == "BUY":
+                    action = "HOLD"
+                    _log(live_state, f"🚫 BUY blockiert: News-Veto")
+                if action == "BUY" and total_score < 1.3:
+                    action = "HOLD"
+                    _log(live_state, f"→ HOLD: Score {total_score:.2f} < 1.3")
+                if action == "SELL" and live_state["position"] == "IN_POSITION" and total_score > -0.8:
+                    if not force_sell:
+                        action = "HOLD"
+                        _log(live_state, f"→ HOLD: SELL Score {total_score:.2f} > -0.8")
+
+            # ── Agent 4: Risk sizing ─────────────────────────────────────────────
+            risk_result = None
+            if action == "BUY" and live_state["position"] == "FLAT":
+                regime_str = regime_result.get("regime", "RANGING")
+                news_sent  = news_score.get("sentiment_score", 50)
+                vote = 1.0 if action == "BUY" else (-1.0 if action == "SELL" else 0.0)
+                news_w     = regime_result.get("signal_weight_news", 30) / 100.0
+                news_mod = (news_sent / 100.0) * news_w
+                regime_boost = {"BULL_TREND": 0.3, "RANGING": 0.0, "BEAR_TREND": -0.3, "HIGH_VOLATILITY": -0.5}.get(regime_str, 0.0)
+                total_score = vote + news_mod + regime_boost
+                green = sum([
+                    vote > 0,
+                    news_sent >= 50,
+                    regime_str not in ("BEAR_TREND", "HIGH_VOLATILITY"),
+                    total_score >= 1.3,
+                ])
+                capital = live_state.get("current_capital") or req.trade_amount_usdt
+                risk_result = calculate_risk_params(enriched, capital, regime_str, green)
+                live_state["last_risk"] = risk_result
+                _log(live_state, f"Risk: {risk_result['position_size_pct']}% Kapital | SL {risk_result['stop_loss_pct']:.2f}% | TP {risk_result['take_profit_pct']:.2f}%")
+                if risk_result["blocked"]:
+                    action = "HOLD"
+                    _log(live_state, f"🚫 Risk Agent blockiert ({green}/4 Signale grün)")
+
+            # ── Execute signal ───────────────────────────────────────────────────
+            if action == "BUY" and live_state["position"] == "FLAT" and confidence >= 0:
+                capital = live_state.get("current_capital") or req.trade_amount_usdt
+                if risk_result and not risk_result["blocked"]:
+                    sized_capital = round(capital * risk_result["position_size_pct"] / 100.0, 2)
+                else:
+                    sized_capital = capital
+                if sized_capital >= 10.0:
+                    bought = await _do_buy(current_symbol, sized_capital)
+                    if bought and risk_result:
+                        live_state["sl_pct"] = risk_result["stop_loss_pct"]
+                        live_state["tp_pct"] = risk_result["take_profit_pct"]
+                        _log(live_state, f"SL: {live_state['sl_pct']:.2f}% / TP: {live_state['tp_pct']:.2f}% (ATR-basiert)")
+                else:
+                    _log(live_state, f"⚠ sized_capital {sized_capital:.2f} < $10 — kein Kauf")
+
+            elif action == "SELL" and live_state["position"] == "IN_POSITION" and (force_sell or confidence >= 0):
                 await _do_sell(force=force_sell, force_reason=force_sell_reason)
 
             elif action == "HOLD":
                 _log(live_state, f"→ HALTEN (Konfidenz: {confidence}%, Position: {live_state['position']})")
             else:
-                _log(live_state, f"→ {action} ignoriert (Konfidenz {confidence}% unter Schwellwert oder falsche Position)")
+                _log(live_state, f"→ {action} ignoriert (Position: {live_state['position']})")
 
             next2 = _next_close()
             live_state["next_check_ts"] = next2 + CLOSE_BUFFER

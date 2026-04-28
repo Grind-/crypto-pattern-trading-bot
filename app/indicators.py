@@ -58,8 +58,41 @@ def compute_indicators(candles: List[Dict]) -> List[Dict]:
     rsi_range = (rsi_max - rsi_min).replace(0, np.nan)
     df["stoch_rsi"] = (rsi - rsi_min) / rsi_range
 
+    df["adx"] = _adx(df["high"], df["low"], df["close"], 14)
+    bull_div, bear_div = _rsi_divergence(df["close"], df["rsi"], 10)
+    df["rsi_bull_div"] = bull_div
+    df["rsi_bear_div"] = bear_div
+
     df = df.where(pd.notna(df), None)
     return df.to_dict("records")
+
+
+def _adx(highs, lows, closes, period=14):
+    tr1 = highs - lows
+    tr2 = (highs - closes.shift(1)).abs()
+    tr3 = (lows - closes.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    plus_dm = (highs - highs.shift(1)).clip(lower=0)
+    minus_dm = (lows.shift(1) - lows).clip(lower=0)
+    mask = plus_dm >= minus_dm
+    plus_dm = plus_dm.where(mask, 0.0)
+    minus_dm = minus_dm.where(~mask, 0.0)
+    tr_s = tr.ewm(com=period - 1, adjust=False).mean()
+    pdm_s = plus_dm.ewm(com=period - 1, adjust=False).mean()
+    mdm_s = minus_dm.ewm(com=period - 1, adjust=False).mean()
+    pdi = 100 * pdm_s / tr_s.replace(0, float('nan'))
+    mdi = 100 * mdm_s / tr_s.replace(0, float('nan'))
+    dx = (abs(pdi - mdi) / (pdi + mdi).replace(0, float('nan'))) * 100
+    return dx.ewm(com=period - 1, adjust=False).mean()
+
+
+def _rsi_divergence(closes, rsi, lookback=10):
+    bull = pd.Series(False, index=closes.index)
+    bear = pd.Series(False, index=closes.index)
+    for i in range(lookback, len(closes)):
+        bull.iloc[i] = closes.iloc[i] < closes.iloc[i - lookback] and rsi.iloc[i] > rsi.iloc[i - lookback]
+        bear.iloc[i] = closes.iloc[i] > closes.iloc[i - lookback] and rsi.iloc[i] < rsi.iloc[i - lookback]
+    return bull, bear
 
 
 def _rsi(prices: pd.Series, period: int = 14) -> pd.Series:

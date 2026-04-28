@@ -440,6 +440,44 @@ async function pollLive() {
     document.getElementById('live-next-str').textContent = state.next_check_str || '';
   }
 
+  // Regime badge
+  const regime = state.last_regime;
+  const rb = document.getElementById('live-regime-badge');
+  if (rb) {
+    if (regime?.regime) {
+      const colors = {BULL_TREND:'#3fb950',BEAR_TREND:'#f85149',RANGING:'#d29922',HIGH_VOLATILITY:'#e3b341'};
+      const c = colors[regime.regime] || '#8b949e';
+      rb.textContent = regime.regime.replace('_',' ');
+      rb.style.cssText = `display:inline-block;color:${c};border-color:${c};background:${c}22`;
+    } else { rb.style.display = 'none'; }
+  }
+
+  // News score badge
+  const ns = state.last_news_score;
+  const nb = document.getElementById('live-news-score-badge');
+  if (nb) {
+    if (ns?.sentiment_score != null) {
+      const c = ns.sentiment_score >= 60 ? '#3fb950' : ns.sentiment_score <= 30 ? '#f85149' : '#d29922';
+      nb.textContent = `News ${ns.sentiment_score}/100${ns.veto ? ' 🚫' : ''}`;
+      nb.style.cssText = `display:inline-block;color:${c};border-color:${c};background:${c}22;font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid`;
+    } else { nb.style.display = 'none'; }
+  }
+
+  // Agent panel
+  const rk = state.last_risk;
+  const panel = document.getElementById('live-agent-panel');
+  if (panel) {
+    if (regime || ns || rk) {
+      panel.style.display = 'block';
+      document.getElementById('live-regime-text').textContent =
+        regime ? `Regime: ${regime.regime} (${regime.strength}/100)` : '';
+      document.getElementById('live-news-text').textContent =
+        ns ? `News: ${ns.sentiment_score}/100` : '';
+      document.getElementById('live-risk-text').textContent =
+        rk ? `Risk: ${rk.position_size_pct}% pos, SL ${rk.stop_loss_pct?.toFixed(2)}%, TP ${rk.take_profit_pct?.toFixed(2)}%` : '';
+    }
+  }
+
   const log = state.log || [];
   if (log.length > lastLiveLogLen) {
     const box = document.getElementById('live-log-box');

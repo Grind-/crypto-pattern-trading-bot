@@ -175,6 +175,13 @@ def promote_rules_to_core(rules: list) -> None:
     _save(_CORE_PATTERNS, core)
 
 
+def append_live_regime_log(username: str, entry: dict) -> None:
+    path = f"{USERS_DIR}/{username}/live_regime_log.json"
+    log = _load(path, {"entries": []})
+    log["entries"] = ([entry] + log["entries"])[:200]
+    _save(path, log)
+
+
 def write_merged_symbol_to_core(symbol: str, interval: str, data: dict) -> None:
     """Write Claude-merged patterns into core. Called from admin promote endpoint."""
     core = load_core()

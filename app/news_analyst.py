@@ -232,13 +232,14 @@ async def run_news_cycle() -> dict:
         return get_news_intelligence()
 
     try:
-        from .news_fetcher import _fetch_fear_greed, _all_headlines
+        from .news_fetcher import _fetch_fear_greed, _all_headlines, fetch_whale_headlines
 
         # Phase 1: fast structured data
-        fng, headlines, trending = await asyncio.gather(
+        fng, headlines, trending, whale = await asyncio.gather(
             _fetch_fear_greed(),
             _all_headlines(),
             _fetch_coingecko_trending(),
+            fetch_whale_headlines(),
             return_exceptions=True,
         )
 
@@ -261,6 +262,13 @@ async def run_news_cycle() -> dict:
 
         research_text = _fmt_research(research)
 
+        whale_headlines = whale if isinstance(whale, list) else []
+        whale_text = (
+            "\n".join(f"• {h}" for h in whale_headlines[:10])
+            if whale_headlines
+            else "No major whale transactions detected."
+        )
+
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         pairs_list = ", ".join(_KNOWN_PAIRS)
 
@@ -274,6 +282,9 @@ AVAILABLE BINANCE USDC PAIRS: {pairs_list}
 
 RSS FEED HEADLINES:
 {headlines_text}
+
+── ON-CHAIN DATA ──
+{whale_text}
 
 ── INTERNET RESEARCH ────────────────────────────
 {research_text}
@@ -318,6 +329,11 @@ Respond with ONLY raw JSON:
       "flows_into_decision": true
     }}
   ],
+  "market_sentiment_score": 55,
+  "symbol_scores": {{
+    "BTCUSDC": {{"sentiment_score": 72, "signal_modifier": 5, "veto": false, "reasoning": "..."}},
+    "SOLUSDC": {{"sentiment_score": 30, "signal_modifier": -10, "veto": false, "reasoning": "..."}}
+  }},
   "warnings": ["warning1", "warning2"],
   "key_headlines": ["most relevant headline 1", "most relevant headline 2", "most relevant headline 3"],
   "analysis": "2-3 sentence synthesis of market conditions based on all sources"
@@ -410,3 +426,19 @@ def get_news_context_for_trading(symbol: str) -> str:
         lines.append("Headlines: " + " | ".join(headlines[:3]))
 
     return "\n".join(lines)
+
+
+def get_news_score_for_symbol(symbol: str) -> dict:
+    """Return per-symbol sentiment score from cached news intelligence. No network I/O."""
+    intel = get_news_intelligence()
+    if not intel or not intel.get("symbol_scores"):
+        return {"sentiment_score": 50, "signal_modifier": 0, "veto": False}
+    scores = intel.get("symbol_scores", {})
+    score = scores.get(symbol.upper(), scores.get(symbol, {}))
+    if not score:
+        return {"sentiment_score": 50, "signal_modifier": 0, "veto": False}
+    return {
+        "sentiment_score": int(score.get("sentiment_score", 50)),
+        "signal_modifier": int(score.get("signal_modifier", 0)),
+        "veto": bool(score.get("veto", False)),
+    }

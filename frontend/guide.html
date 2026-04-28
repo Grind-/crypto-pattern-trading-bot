@@ -145,6 +145,8 @@
     <a class="nav-link" href="#sim-historie">Vergangene Simulationen</a>
     <div class="nav-group-label">Marktscanner</div>
     <a class="nav-link" href="#scanner">Scanner nutzen</a>
+    <div class="nav-group-label">Architektur</div>
+    <a class="nav-link" href="#agenten">4-Agenten-Architektur</a>
     <div class="nav-group-label">Hinweise</div>
     <a class="nav-link" href="#risiken">Risiken &amp; Grenzen</a>
     <a class="nav-link" href="#tipps">Tipps</a>
@@ -739,6 +741,111 @@
 
       <div class="callout callout-blue">
         <strong>Automatisch im Live-Betrieb:</strong> Der Bot führt bei jedem Kerzenschluss automatisch einen internen Markt-Scan durch. Du musst den Scanner nicht manuell bedienen — er dient zur Information und manuellen Orientierung.
+      </div>
+    </div>
+
+    <!-- 4-AGENTEN-ARCHITEKTUR -->
+    <hr class="section-divider" />
+    <div class="section" id="agenten">
+      <h2><span class="section-icon ic-purple">🤖</span>4-Agenten-Architektur</h2>
+      <p class="section-desc">
+        Der Bot verwendet vier spezialisierte Agenten, die bei jedem Kerzenschluss zusammenarbeiten und ihre Ergebnisse in einer Abstimmungsmatrix zusammenführen, bevor eine Order ausgeführt wird.
+      </p>
+
+      <h3>Die vier Agenten im Überblick</h3>
+      <table class="tbl">
+        <thead><tr><th>Agent</th><th>Aufgabe</th><th>Ausgabe</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">Regime Agent (1)</td>
+            <td>Klassifiziert das aktuelle Marktregime anhand von ADX, Multi-Timeframe EMA, Fear &amp; Greed und Preisstruktur.</td>
+            <td><code>BULL_TREND</code>, <code>BEAR_TREND</code>, <code>RANGING</code> oder <code>HIGH_VOLATILITY</code> mit Stärkewert 0–100</td>
+          </tr>
+          <tr>
+            <td class="tn">Signal Agent (2)</td>
+            <td>Analysiert technische Indikatoren (RSI, MACD, BB, ADX, RSI-Divergenz) und gibt ein Trading-Signal.</td>
+            <td><code>BUY</code>, <code>SELL</code> oder <code>HOLD</code> mit Konfidenz 0–100 %</td>
+          </tr>
+          <tr>
+            <td class="tn">News Agent (3)</td>
+            <td>Läuft stündlich im Hintergrund, analysiert RSS-Feeds, Google News, Reddit und On-Chain-Whale-Daten. Liefert symbolspezifische Sentiment-Scores aus dem Cache — kein Netzwerkaufruf im Live-Loop.</td>
+            <td>Sentiment-Score 0–100, Signal-Modifier, Veto-Flag</td>
+          </tr>
+          <tr>
+            <td class="tn">Risk Agent (4)</td>
+            <td>Berechnet ATR-basierte Stop-Loss- und Take-Profit-Level sowie die optimale Positionsgröße basierend auf Regime und Signalstärke.</td>
+            <td>SL %, TP %, Positionsgröße 0–100 %, blockiert-Flag</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Abstimmungsmatrix (Voting Matrix)</h3>
+      <p>Nach dem Signal des Trading Agent (Agent 2) berechnet das System einen Gesamt-Score aus drei Komponenten:</p>
+      <table class="tbl">
+        <thead><tr><th>Komponente</th><th>Wert</th><th>Beschreibung</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">Signal-Vote</td>
+            <td>+1.0 / -1.0 / 0.0</td>
+            <td>BUY = +1, SELL = -1, HOLD = 0</td>
+          </tr>
+          <tr>
+            <td class="tn">News-Modifier</td>
+            <td>0.0 – 0.30</td>
+            <td>Sentiment-Score × News-Gewicht (Standard 30 %)</td>
+          </tr>
+          <tr>
+            <td class="tn">Regime-Boost</td>
+            <td>−0.5 bis +0.3</td>
+            <td>BULL_TREND +0.3 | RANGING 0 | BEAR_TREND −0.3 | HIGH_VOLATILITY −0.5</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Wann wird ein BUY blockiert?</h3>
+      <ul>
+        <li><strong>HIGH_VOLATILITY-Regime:</strong> Jedes BUY-Signal wird automatisch zu HOLD — unabhängig vom Score.</li>
+        <li><strong>News-Veto:</strong> Wenn der News Agent für das Symbol ein Veto setzt (Sentiment &lt; 20 oder kritische Warnung), wird BUY blockiert.</li>
+        <li><strong>Score &lt; 1.3:</strong> Wenn der Gesamt-Score unter 1.3 liegt, wird BUY zu HOLD.</li>
+        <li><strong>Risk Agent blockiert:</strong> Wenn weniger als 2 von 4 Signalen grün sind oder die ATR-basierte SL &gt; 5 % liegt, setzt der Risk Agent die Positionsgröße auf 0 und blockiert den Trade.</li>
+      </ul>
+
+      <h3>Wann wird ein SELL blockiert?</h3>
+      <p>SELL-Signale ohne <code>force_sell</code> werden blockiert, wenn der Gesamt-Score über −0.8 liegt (d.h. das Marktbild ist nicht klar genug bearish). Force-Sell durch Stop-Loss oder Take-Profit überspringt die gesamte Matrix.</p>
+
+      <h3>Positionsgrößen-Staffelung (Risk Agent)</h3>
+      <table class="tbl">
+        <thead><tr><th>Bedingung</th><th>Positionsgröße</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>4 grüne Signale + BULL_TREND</td>
+            <td><span class="badge-inline b-green">100 %</span></td>
+          </tr>
+          <tr>
+            <td>3 oder 4 grüne Signale (nicht BULL_TREND)</td>
+            <td><span class="badge-inline b-green">66 %</span></td>
+          </tr>
+          <tr>
+            <td>2 grüne Signale</td>
+            <td><span class="badge-inline b-yellow">33 %</span></td>
+          </tr>
+          <tr>
+            <td>0–1 grüne Signale oder HIGH_VOLATILITY oder SL &gt; 5 %</td>
+            <td><span class="badge-inline b-red">0 % (blockiert)</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>ATR-basierte Stop-Loss / Take-Profit</h3>
+      <p>Der Risk Agent berechnet SL und TP dynamisch aus dem Average True Range (ATR) des aktuellen Symbols:</p>
+      <ul>
+        <li><strong>Stop-Loss:</strong> 1.5 × ATR / Einstandspreis × 100 %</li>
+        <li><strong>Take-Profit:</strong> 2.5 × ATR / Einstandspreis × 100 %</li>
+        <li>Wenn kein ATR vorhanden ist, wird als Fallback 1.5 % des Einstandspreises verwendet.</li>
+      </ul>
+
+      <div class="callout callout-blue">
+        <strong>Anzeige im Status-Panel:</strong> Solange der Bot läuft, zeigt das Agent-Panel unter dem Countdown das aktuelle Regime (farbcodiert), den News-Score und die letzte Risk-Kalkulation an.
       </div>
     </div>
 

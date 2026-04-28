@@ -251,6 +251,8 @@
           <span id="live-status-text">Idle</span>
           <span id="live-symbol-badge" class="badge" style="background:rgba(88,166,255,0.15);border-color:var(--blue);color:var(--blue)"></span>
           <span id="live-position-badge" class="badge"></span>
+          <span id="live-regime-badge" class="badge regime-badge" style="display:none"></span>
+          <span id="live-news-score-badge" class="badge" style="display:none"></span>
           <button class="btn-tiny" id="btn-live-scan" onclick="runLiveScan()" style="margin-left:auto">🔍 Jetzt scannen</button>
         </div>
         <div id="live-basis-row" style="font-size:12px;padding:6px 0 2px;border-top:1px solid var(--border);margin-top:8px">
@@ -263,6 +265,12 @@
           <div class="countdown-label">Nächste Analyse</div>
           <div class="countdown-time" id="live-countdown">—</div>
           <div class="countdown-sub" id="live-next-str">—</div>
+        </div>
+        <div id="live-agent-panel" style="display:none;font-size:11px;padding:6px 0;
+          border-top:1px solid var(--border);margin-top:6px;color:var(--text-muted)">
+          <span id="live-regime-text"></span> &nbsp;|&nbsp;
+          <span id="live-news-text"></span> &nbsp;|&nbsp;
+          <span id="live-risk-text"></span>
         </div>
         <div id="live-log-box" class="log-box"></div>
       </div>

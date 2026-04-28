@@ -44,6 +44,12 @@ TRADING_AGENT_SYSTEM = (
     "Always respond with valid raw JSON only — no markdown, no code fences."
 )
 
+REGIME_AGENT_SYSTEM = (
+    "You are a market regime classifier (Regime Agent). "
+    "Detect the current market mode using ADX, multi-timeframe EMA, Fear & Greed, and price action. "
+    "Always respond with valid raw JSON only — no markdown, no code fences."
+)
+
 
 def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
     step = max(1, len(candles) // max_rows)
@@ -68,6 +74,62 @@ def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
             f"{fmt(vol,'5.2f')} | {fmt(ch4,'+.2f')}"
         )
     return "\n".join(rows)
+
+
+# ── Regime Agent ──────────────────────────────────────────────────────────────
+
+async def get_regime(
+    symbol: str, interval: str,
+    candles_1h: List[Dict], candles_4h: List[Dict],
+    fear_greed: Optional[Dict] = None,
+    api_key: Optional[str] = None, oauth_token: str = "",
+) -> Dict:
+    """Regime Agent — classify market mode. Never raises; returns fallback on any error."""
+    _FALLBACK = {
+        "regime": "RANGING", "strength": 50,
+        "recommended_strategy": "mean_revert",
+        "signal_weight_technical": 70, "signal_weight_news": 30,
+    }
+    try:
+        c1h = candles_1h[-1] if candles_1h else {}
+        c4h = candles_4h[-1] if candles_4h else {}
+
+        ema_1h = "bullish" if (c1h.get("ema12") or 0) > (c1h.get("ema26") or 0) else "bearish"
+        ema_4h = "bullish" if (c4h.get("ema12") or 0) > (c4h.get("ema26") or 0) else "bearish"
+
+        fng_text = ""
+        if isinstance(fear_greed, dict):
+            fng_text = f"Fear & Greed: {fear_greed.get('value', '?')}/100 ({fear_greed.get('label', '?')})"
+
+        def _f(v):
+            return f"{v:.4f}" if v is not None else "N/A"
+
+        prompt = (
+            f"Classify the market regime for {symbol} ({interval}).\n\n"
+            f"1h last candle: close={_f(c1h.get('close'))}, adx={_f(c1h.get('adx'))}, "
+            f"ema12={_f(c1h.get('ema12'))}, ema26={_f(c1h.get('ema26'))}, "
+            f"rsi={_f(c1h.get('rsi'))}, atr={_f(c1h.get('atr'))}, "
+            f"rsi_bull_div={c1h.get('rsi_bull_div', False)}, rsi_bear_div={c1h.get('rsi_bear_div', False)}\n"
+            f"4h last candle: close={_f(c4h.get('close'))}, ema12={_f(c4h.get('ema12'))}, "
+            f"ema26={_f(c4h.get('ema26'))}, adx={_f(c4h.get('adx'))}\n\n"
+            f"ADX interpretation: <25=no-trend, 25-50=trending, >50=strong\n"
+            f"1h EMA: {ema_1h} (ema12 {'>' if ema_1h == 'bullish' else '<'} ema26)\n"
+            f"4h EMA: {ema_4h} (ema12 {'>' if ema_4h == 'bullish' else '<'} ema26)\n"
+            f"{fng_text}\n\n"
+            'Respond ONLY with raw JSON:\n'
+            '{"regime":"BULL_TREND|BEAR_TREND|RANGING|HIGH_VOLATILITY",'
+            '"strength":0-100,"recommended_strategy":"trend_follow|mean_revert|stay_flat",'
+            '"signal_weight_technical":70,"signal_weight_news":30}'
+        )
+        result = await _call_claude(
+            prompt, api_key=api_key, oauth_token=oauth_token,
+            timeout=45, system=REGIME_AGENT_SYSTEM,
+        )
+        if not isinstance(result, dict) or "regime" not in result:
+            return _FALLBACK
+        return result
+    except Exception:
+        return _FALLBACK
 
 
 # ── Transport ─────────────────────────────────────────────────────────────────
@@ -230,6 +292,8 @@ async def get_live_signal(
     analysis_weight: int = 70,
     api_key: Optional[str] = None,
     oauth_token: str = "",
+    regime: Optional[Dict] = None,
+    news_score: Optional[Dict] = None,
 ) -> Dict:
     analysis_weight = max(0, min(100, int(analysis_weight)))
 
@@ -276,6 +340,31 @@ async def get_live_signal(
         )
     strategy_block = f"\n{mode_instruction}\n\n"
 
+    regime_block = ""
+    if regime:
+        thresholds = {
+            "BULL_TREND": "BUY≥55%, SELL≥65%",
+            "RANGING": "BUY≥65%, SELL≥60%",
+            "BEAR_TREND": "BUY≥75%, SELL≥55%",
+            "HIGH_VOLATILITY": "No new BUY",
+        }
+        regime_block = (
+            f"MARKT-REGIME: {regime.get('regime')} "
+            f"(Stärke {regime.get('strength')}/100) | "
+            f"Strategie: {regime.get('recommended_strategy')} | "
+            f"Schwellen: {thresholds.get(regime.get('regime', 'RANGING'), 'BUY≥60%,SELL≥60%')}\n\n"
+        )
+
+    news_extra = ""
+    if news_score:
+        sc = news_score.get("sentiment_score", 50)
+        mod = news_score.get("signal_modifier", 0)
+        veto = news_score.get("veto", False)
+        news_extra = f"NEWS SENTIMENT: {sc}/100 (Threshold-Modifier: {mod:+d}%)"
+        if veto:
+            news_extra += " | *** VETO: Kein BUY ***"
+        news_extra += "\n\n"
+
     history_block = ""
     if signal_history:
         history_block = "EIGENE SIGNAL-HISTORIE DIESER SESSION (jüngste zuletzt):\n"
@@ -290,11 +379,20 @@ async def get_live_signal(
     prompt = f"""You are a live cryptocurrency trading AI. Respond with valid raw JSON only.
 
 Analyze {symbol} {interval} data and give ONE trading signal.
-{knowledge_block}{news_block}{strategy_block}{history_block}CURRENT PRICE: ${current_price:.2f}
+{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}CURRENT PRICE: ${current_price:.2f}
 CURRENT POSITION: {current_position} (IN_POSITION = only SELL or HOLD; FLAT = only BUY or HOLD)
 
 RECENT DATA (last {len(candles)} candles):
 {data_str}
+
+INDICATOR GUIDE:
+- RSI <30 = oversold (buy opportunity) | RSI >70 = overbought (sell opportunity)
+- MACD positive + rising = bullish momentum | negative + falling = bearish
+- bb_pct ~0 = price near lower band (oversold) | ~1 = near upper band (overbought)
+- vol_x >1.5 = high volume (confirms move) | <0.5 = weak/fake move
+- rsi_bull_div=True → bullische Divergenz (starkes BUY-Muster)
+- rsi_bear_div=True → bärische Divergenz (starkes SELL-Muster)
+- adx: <25=kein Trend, 25-50=Trend, >50=starker Trend
 
 Respond with ONLY raw JSON:
 {{

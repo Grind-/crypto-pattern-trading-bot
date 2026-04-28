@@ -14,6 +14,9 @@ import httpx
 _CACHE: dict = {}
 _TTL = 900  # 15 minutes
 
+_WHALE_ALERT_URL = "https://api.whale-alert.io/v1/transactions?api_key=demo&min_value=1000000&limit=20"
+_MESSARI_RSS_URL = "https://messari.io/rss"
+
 _SYMBOL_KEYWORDS: dict[str, list[str]] = {
     "BTC":  ["Bitcoin", "BTC"],
     "ETH":  ["Ethereum", "ETH"],
@@ -38,6 +41,7 @@ _RSS_FEEDS = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://decrypt.co/feed",
     "https://cryptopotato.com/feed/",
+    "https://messari.io/rss",
 ]
 
 
@@ -61,6 +65,32 @@ def _base(symbol: str) -> str:
 
 
 # ── Fetchers ──────────────────────────────────────────────────────────────────
+
+async def _fetch_whale_alert() -> list:
+    cached = _cached("whale")
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(_WHALE_ALERT_URL)
+            r.raise_for_status()
+        txns = r.json().get("transactions", [])
+        result = []
+        for tx in txns:
+            try:
+                headline = (
+                    f"🐋 {tx['blockchain']} {tx['amount']:.0f} {tx['symbol']}"
+                    f" (~${tx['amount_usd']/1e6:.1f}M)"
+                    f" — {tx['from']['owner_type']} → {tx['to']['owner_type']}"
+                )
+                result.append({"headline": headline, **tx})
+            except Exception:
+                continue
+        _set_cache("whale", result)
+        return result
+    except Exception:
+        return []
+
 
 async def _fetch_fear_greed() -> Optional[dict]:
     cached = _cached("fng")
@@ -172,3 +202,8 @@ async def fetch_fear_greed() -> Optional[dict]:
 
 async def fetch_all_headlines() -> list[str]:
     return await _all_headlines()
+
+
+async def fetch_whale_headlines() -> list[str]:
+    txns = await _fetch_whale_alert()
+    return [t["headline"] for t in txns if isinstance(t, dict) and "headline" in t]
