@@ -434,6 +434,55 @@ async function stopLive() {
   document.getElementById('btn-live-start').disabled = false;
   document.getElementById('btn-live-stop').disabled = true;
   document.getElementById('live-countdown-box').style.display = 'none';
+  // hide topup row on stop
+  const tr = document.getElementById('topup-row');
+  if (tr) tr.style.display = 'none';
+}
+
+function toggleTopup() {
+  const row = document.getElementById('topup-row');
+  const btn = document.getElementById('topup-toggle-btn');
+  const open = row.style.display === 'none';
+  row.style.display = open ? 'flex' : 'none';
+  btn.classList.toggle('topup-toggle-btn--open', open);
+  if (open) {
+    document.getElementById('topup-amount').focus();
+    document.getElementById('topup-result').textContent = '';
+  }
+}
+
+async function submitTopup() {
+  const input = document.getElementById('topup-amount');
+  const result = document.getElementById('topup-result');
+  const amount = parseFloat(input.value);
+  if (!amount || amount < 1) {
+    result.textContent = 'Mindestbetrag $1';
+    result.style.color = 'var(--red)';
+    return;
+  }
+  result.textContent = '…';
+  result.style.color = 'var(--text-muted)';
+  try {
+    const res = await fetch('/api/live/topup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      result.textContent = `✓ Neues Kapital: $${data.new_capital.toFixed(2)}`;
+      result.style.color = 'var(--green)';
+      input.value = '';
+      setTimeout(() => toggleTopup(), 2000);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      result.textContent = err.detail || 'Fehler';
+      result.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    result.textContent = 'Netzwerkfehler';
+    result.style.color = 'var(--red)';
+  }
 }
 
 let liveNextCheckTs = null;

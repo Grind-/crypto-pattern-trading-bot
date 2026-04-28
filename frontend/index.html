@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=5" />
+  <link rel="stylesheet" href="/static/style.css?v=6" />
 </head>
 <body>
   <header>
@@ -237,11 +237,21 @@
           </div>
         </div>
 
-        <!-- Capital widget -->
+        <!-- Capital widget + topup -->
         <div id="live-capital-row" class="live-capital-widget" style="display:none">
-          <div class="live-capital-label">Kapital</div>
-          <div id="live-capital-value" class="live-capital-amount">—</div>
-          <div id="live-capital-meta" class="live-capital-meta"></div>
+          <div class="live-capital-top">
+            <div>
+              <div class="live-capital-label">Kapital</div>
+              <div id="live-capital-value" class="live-capital-amount">—</div>
+              <div id="live-capital-meta" class="live-capital-meta"></div>
+            </div>
+            <button class="topup-toggle-btn" id="topup-toggle-btn" onclick="toggleTopup()" title="Kapital aufstocken">＋</button>
+          </div>
+          <div id="topup-row" class="topup-row" style="display:none">
+            <input id="topup-amount" type="number" min="1" step="1" placeholder="Betrag in USDC" class="topup-input" />
+            <button class="topup-btn" onclick="submitTopup()">Aufstocken</button>
+            <span id="topup-result" class="topup-result"></span>
+          </div>
         </div>
 
         <!-- Countdown to next candle -->

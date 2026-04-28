@@ -377,6 +377,12 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
   margin: 10px 0;
   border: 1px solid var(--border);
 }
+.live-capital-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
 .live-capital-label {
   font-size: 10px;
   text-transform: uppercase;
@@ -394,6 +400,65 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+/* Topup toggle button */
+.topup-toggle-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: border-color .15s, color .15s, transform .15s;
+  padding: 0;
+}
+.topup-toggle-btn:hover { border-color: var(--blue); color: var(--blue); }
+.topup-toggle-btn--open { transform: rotate(45deg); border-color: var(--red); color: var(--red); }
+
+/* Topup inline row */
+.topup-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.topup-input {
+  width: 140px !important;
+  flex: none !important;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+.topup-btn {
+  background: var(--green);
+  color: #0d1117;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity .15s;
+}
+.topup-btn:hover { opacity: 0.85; }
+.topup-result {
+  font-size: 12px;
+  flex: 1;
+}
+@media (max-width: 400px) {
+  .topup-input { width: 100% !important; }
+  .topup-btn { width: 100%; }
 }
 
 .live-basis-row {

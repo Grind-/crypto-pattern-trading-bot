@@ -333,6 +333,10 @@ class LiveRequest(BaseModel):
     analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
 
 
+class TopupRequest(BaseModel):
+    amount: float
+
+
 # ── Auth routes ────────────────────────────────────────────────────────────────
 
 @app.get("/login")
@@ -800,6 +804,56 @@ async def stop_live(request: Request):
     live_state["log"].append("Live Trading gestoppt")
     deactivate_live_state(username)
     return {"ok": True}
+
+
+@app.post("/api/live/topup")
+async def topup_live(req: TopupRequest, request: Request):
+    user = _get_current_user(request)
+    username = user["username"]
+    live_state = _get_live_state(username)
+
+    if not live_state.get("running"):
+        raise HTTPException(400, "Live Trading nicht aktiv")
+    if req.amount < 1.0:
+        raise HTTPException(400, "Mindestbetrag $1")
+
+    old_capital = live_state.get("current_capital") or 0.0
+    new_capital = round(old_capital + req.amount, 2)
+    live_state["current_capital"] = new_capital
+    live_state["trade_amount"] = new_capital  # update base for compounding
+
+    position = live_state.get("position", "FLAT")
+    symbol = live_state.get("symbol", "")
+
+    if position == "FLAT":
+        _log(live_state, f"💰 Kapital aufgestockt: ${old_capital:.2f} + ${req.amount:.2f} → ${new_capital:.2f} — wird beim nächsten Signal eingesetzt")
+    elif position == "IN_POSITION" and symbol:
+        _log(live_state, f"💰 Kapital aufgestockt: ${old_capital:.2f} + ${req.amount:.2f} → ${new_capital:.2f} — kaufe {symbol} nach…")
+        bkey = live_state.get("api_key", "")
+        bsec = live_state.get("api_secret", "")
+        try:
+            trader = BinanceTrader(bkey, bsec)
+            balances = await trader.get_balances()
+            usdc_available = balances.get("USDC", 0.0)
+            buy_amount = min(req.amount, round(usdc_available * 0.995, 2))
+            if buy_amount >= 10.0:
+                order = await trader.place_market_order(symbol=symbol, side="BUY", quote_quantity=buy_amount)
+                bought_qty = float(order.get("executedQty") or 0)
+                buy_price = float(order.get("fills", [{}])[0].get("price") or 0) or float(order.get("cummulativeQuoteQty") or buy_amount) / bought_qty if bought_qty else 0
+                if bought_qty > 0:
+                    live_state["position_qty"] = (live_state.get("position_qty") or 0) + bought_qty
+                    _log(live_state, f"✅ Nachkauf {symbol}: +{bought_qty:.6f} @ ${buy_price:,.4f} mit ${buy_amount:.2f} USDC")
+                else:
+                    _log(live_state, f"⚠ Nachkauf ergab 0 Menge — USDC {usdc_available:.2f} verfügbar")
+            else:
+                _log(live_state, f"⚠ Zu wenig USDC für Nachkauf ({usdc_available:.2f} verfügbar, Minimum $10) — Kapital erhöht, kein Kauf")
+        except Exception as e:
+            _log(live_state, f"⚠ Nachkauf fehlgeschlagen: {e} — Kapital trotzdem erhöht")
+    else:
+        _log(live_state, f"💰 Kapital aufgestockt: ${old_capital:.2f} + ${req.amount:.2f} → ${new_capital:.2f}")
+
+    _persist_trade_history(username, live_state)
+    return {"ok": True, "new_capital": new_capital}
 
 
 @app.get("/api/live/credentials")
