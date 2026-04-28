@@ -1056,45 +1056,56 @@ function switchTab(name) {
   if (sec) sec.classList.add('active');
 }
 
+function _showApiKeyFields(focus = true) {
+  const fields = document.getElementById('api-key-fields');
+  if (fields) {
+    fields.style.display = 'block';
+    if (focus) document.getElementById('live-api-key')?.focus();
+  }
+}
+
+function _hideApiKeyFields() {
+  const fields = document.getElementById('api-key-fields');
+  if (fields) fields.style.display = 'none';
+}
+
 async function loadSavedCredentials() {
   try {
     const creds = await fetch('/api/live/credentials').then(r => r.json());
     const keyEl = document.getElementById('live-api-key');
     const secEl = document.getElementById('live-api-secret');
-    const hintEl = document.getElementById('live-key-hint');
     const statusEl = document.getElementById('binance-key-status');
-    if (creds.has_key) {
-      keyEl.placeholder = '••••••••••••••••';
-      keyEl.dataset.saved = '1';
-    }
-    if (creds.has_secret) {
-      secEl.placeholder = '••••••••••••••••';
-      secEl.dataset.saved = '1';
-    }
-    if (hintEl) {
-      hintEl.textContent = creds.has_key ? creds.key_hint : '';
-    }
+
+    if (creds.has_key) { keyEl.placeholder = '••••••••••••••••'; keyEl.dataset.saved = '1'; }
+    if (creds.has_secret) { secEl.placeholder = '••••••••••••••••'; secEl.dataset.saved = '1'; }
+
     if (statusEl) {
       if (creds.has_key && creds.has_secret) {
+        _hideApiKeyFields();
         const masked = _buildMaskedKey(creds.key_hint || '');
         const hint   = (creds.key_hint || '').replace(/"/g, '');
-        statusEl.innerHTML = `<div class="apikey-status-pill">
-          <span class="apikey-ok-mark">✓</span>
-          <span class="apikey-masked-text" id="apikey-display" data-hint="${hint}">${masked}</span>
-          <button class="apikey-eye-btn" id="apikey-eye-btn" aria-label="API Key anzeigen"
-                  aria-pressed="false" onclick="toggleApiKeyReveal()" type="button">
-            <svg class="eye-icon eye-open" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-            </svg>
-            <svg class="eye-icon eye-closed" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none">
-              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </button>
+        statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="apikey-status-pill">
+            <span class="apikey-ok-mark">✓</span>
+            <span class="apikey-masked-text" id="apikey-display" data-hint="${hint}">${masked}</span>
+            <button class="apikey-eye-btn" id="apikey-eye-btn" aria-label="API Key anzeigen"
+                    aria-pressed="false" onclick="toggleApiKeyReveal()" type="button">
+              <svg class="eye-icon eye-open" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+              </svg>
+              <svg class="eye-icon eye-closed" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="_showApiKeyFields(true)" type="button"
+                  style="font-size:11px;padding:4px 10px">✎ Keys ändern</button>
         </div>`;
       } else {
-        statusEl.innerHTML = `<span style="background:rgba(255,165,0,0.12);border:1px solid #f0a500;color:#f0a500;padding:3px 10px;border-radius:12px">⚠ Kein Binance API Key gespeichert</span>`;
+        _showApiKeyFields(false);
+        statusEl.innerHTML = `<span style="background:rgba(255,165,0,0.12);border:1px solid #f0a500;color:#f0a500;padding:3px 10px;border-radius:12px;font-size:12px">⚠ Kein Binance API Key gespeichert</span>`;
       }
     }
   } catch {}

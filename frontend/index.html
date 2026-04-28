@@ -165,17 +165,19 @@
       <h2>Konfiguration</h2>
       <div id="binance-key-status" style="margin-bottom:12px;font-size:0.85em"></div>
       <div class="form-grid">
-        <div class="field full">
-          <label>API Key <span id="live-key-hint" style="font-size:0.75em;color:var(--muted);margin-left:6px;font-weight:400"></span></label>
-          <input id="live-api-key" type="password" placeholder="Binance API Key" />
-        </div>
-        <div class="field full">
-          <label>API Secret</label>
-          <input id="live-api-secret" type="password" placeholder="Binance API Secret" />
-        </div>
-        <div class="field full">
-          <button class="btn btn-secondary btn-sm" id="btn-validate-keys" onclick="validateBinanceKeys()" type="button">Keys testen</button>
-          <span id="binance-validate-result" style="font-size:0.85em;margin-left:10px"></span>
+        <div class="field full" id="api-key-fields">
+          <div class="field">
+            <label>API Key</label>
+            <input id="live-api-key" type="password" placeholder="Binance API Key" />
+          </div>
+          <div class="field" style="margin-top:8px">
+            <label>API Secret</label>
+            <input id="live-api-secret" type="password" placeholder="Binance API Secret" />
+          </div>
+          <div style="margin-top:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-validate-keys" onclick="validateBinanceKeys()" type="button">Keys testen</button>
+            <span id="binance-validate-result" style="font-size:0.85em;margin-left:10px"></span>
+          </div>
         </div>
         <div class="field">
           <label>Intervall</label>
