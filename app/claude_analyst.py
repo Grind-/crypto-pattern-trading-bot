@@ -576,6 +576,98 @@ Respond with ONLY raw JSON (no markdown):
     return False, "Unbekannter Fehler"
 
 
+async def synthesize_community_patterns(
+    symbol: str,
+    interval: str,
+    api_key: Optional[str] = None,
+    oauth_token: str = "",
+) -> tuple[bool, str]:
+    """Build community knowledge from all users' data for symbol+interval.
+    Returns (success, message) — never raises."""
+    from .knowledge_store import (get_all_user_data_for_symbol,
+                                   save_community_patterns, MIN_USERS_FOR_COMMUNITY)
+
+    user_data = get_all_user_data_for_symbol(symbol, interval)
+    if len(user_data) < MIN_USERS_FOR_COMMUNITY:
+        return False, f"Community-Update übersprungen: nur {len(user_data)} User mit Daten (Minimum {MIN_USERS_FOR_COMMUNITY})"
+
+    n = len(user_data)
+    total_sessions  = sum(u["sim_sessions"] for u in user_data)
+    total_profitable = sum(u["sim_profitable"] for u in user_data)
+    live_total      = sum(u["live_trades"] for u in user_data)
+
+    user_lines = []
+    for u in user_data:
+        line = (
+            f"  Trader (anonym): {u['sim_sessions']} Sim-Sessions, "
+            f"avg Return {u['avg_return_pct']:+.1f}%, "
+            f"avg Win-Rate {u['avg_win_rate']:.0f}%"
+        )
+        if u["winning_patterns"]:
+            line += f"\n    ✓ Patterns: {', '.join(u['winning_patterns'][:3])}"
+        if u["losing_patterns"]:
+            line += f"\n    ✗ Vermeiden: {', '.join(u['losing_patterns'][:2])}"
+        if u["live_avg_pnl"] is not None:
+            line += f"\n    Live-Trades: {u['live_trades']} ({u['live_profitable']} profitabel, avg {u['live_avg_pnl']:+.2f}%)"
+        if u["market_notes"]:
+            line += f"\n    Notiz: {u['market_notes'][:120]}"
+        user_lines.append(line)
+
+    prompt = f"""You are a quantitative trading research analyst. Synthesize anonymized trading data from {n} independent traders for {symbol} {interval} into community consensus patterns.
+
+TRADER DATA (anonymized — {n} traders, {total_sessions} simulation sessions, {live_total} live trades):
+{chr(10).join(user_lines)}
+
+TASK: Find patterns that appear confirmed by MULTIPLE traders independently.
+- consensus_patterns: Strategies/conditions that multiple traders found profitable
+- consensus_avoid: Conditions that multiple traders found unprofitable or risky
+- community_notes: 1-2 sentences summarizing the overall community edge for this symbol/interval
+
+Rules:
+- Only include a pattern in consensus_patterns if confirmed by ≥2 traders
+- Keep descriptions ≤ 100 chars
+- Max 5 consensus_patterns, max 3 consensus_avoid
+- contributing_traders reflects how many traders confirmed each pattern
+
+Respond ONLY with raw JSON:
+{{
+  "contributing_users": {n},
+  "total_sessions": {total_sessions},
+  "profitable_sessions": {total_profitable},
+  "consensus_patterns": [
+    {{"description": "...", "contributing_traders": 2, "avg_return_pct": 0.0}}
+  ],
+  "consensus_avoid": [
+    {{"description": "...", "contributing_traders": 2}}
+  ],
+  "community_notes": "..."
+}}"""
+
+    for attempt in range(2):
+        try:
+            result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+            if isinstance(result, dict) and "contributing_users" in result:
+                result["contributing_users"] = n
+                result["total_sessions"]     = total_sessions
+                result["profitable_sessions"] = total_profitable
+                save_community_patterns(symbol, interval, result)
+                cp = len(result.get("consensus_patterns", []))
+                ca = len(result.get("consensus_avoid", []))
+                return True, (
+                    f"Community-Wissensbasis aktualisiert — {symbol} {interval}: "
+                    f"{n} Trader, {total_sessions} Sessions, "
+                    f"{cp} Konsens-Muster, {ca} Vermeiden-Muster"
+                )
+            return False, "Community-Synthese: unerwartetes Antwortformat"
+        except Exception as e:
+            if attempt == 0:
+                await asyncio.sleep(5)
+                continue
+            return False, f"Community-Synthese fehlgeschlagen nach 2 Versuchen: {e}"
+
+    return False, "Unbekannter Fehler bei Community-Synthese"
+
+
 async def distill_and_promote_rules(
     api_key: Optional[str] = None,
     oauth_token: str = "",

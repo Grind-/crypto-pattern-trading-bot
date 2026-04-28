@@ -6,7 +6,8 @@
   <title>Bedienungsanleitung — Crypto Pattern AI</title>
   <link rel="stylesheet" href="/static/style.css" />
   <style>
-    :root { --sidebar-w: 220px; }
+    :root { --sidebar-w: 240px; }
+    html { scroll-behavior: smooth; }
     body { background: var(--bg); }
     .doc-layout { display: flex; min-height: 100vh; }
 
@@ -24,8 +25,14 @@
       font-size: 10px; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.1em; color: var(--text-muted); padding: 10px 16px 3px;
     }
+    .nl-icon {
+      display: inline-block; width: 18px; text-align: center;
+      font-size: 11px; margin-right: 6px; flex-shrink: 0;
+      vertical-align: middle; line-height: 1;
+    }
     .nav-link {
-      display: block; padding: 5px 16px; font-size: 12px;
+      display: flex; align-items: center;
+      padding: 5px 16px; font-size: 12px;
       color: var(--text-muted); text-decoration: none;
       border-left: 2px solid transparent; transition: color .1s, border-color .1s;
     }
@@ -112,45 +119,200 @@
     .b-blue   { background: rgba(88,166,255,0.15); color: var(--blue); }
     .b-purple { background: rgba(188,140,255,0.15);color: var(--purple); }
 
+    /* ── Hamburger button ─────────────────────────────────────────── */
+    .guide-burger {
+      display: none; position: fixed; top: 14px; left: 14px; z-index: 1001;
+      width: 36px; height: 36px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 8px;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 5px; cursor: pointer; padding: 0;
+      transition: border-color .15s, color .15s; color: var(--text-muted);
+    }
+    .guide-burger span {
+      display: block; width: 16px; height: 1.5px;
+      background: currentColor; border-radius: 2px;
+      transition: transform .2s, opacity .2s;
+    }
+    .guide-burger:hover { border-color: var(--blue); color: var(--blue); }
+    .guide-burger.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+    .guide-burger.open span:nth-child(2) { opacity: 0; }
+    .guide-burger.open span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+
+    /* ── Overlay ──────────────────────────────────────────────────── */
+    .guide-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.55); z-index: 999;
+      opacity: 0; transition: opacity .25s;
+    }
+    .guide-overlay.visible { display: block; opacity: 1; }
+    body.sidebar-open { overflow: hidden; }
+
+    /* ── Mobile overrides ─────────────────────────────────────────── */
     @media (max-width: 700px) {
-      .sidebar { display: none; }
-      .doc-content { padding: 0 16px 60px; }
+      .guide-burger { display: flex; }
+      .sidebar {
+        display: flex; flex-direction: column;
+        position: fixed; top: 0; left: 0;
+        width: 280px; height: 100vh; z-index: 1000;
+        transform: translateX(-100%);
+        transition: transform .25s cubic-bezier(.4,0,.2,1);
+        box-shadow: 4px 0 24px rgba(0,0,0,.6);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .doc-content { padding: 56px 16px 60px; }
       .info-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── Agent Diagram ────────────────────────────────────────────── */
+    .agent-diagram {
+      margin: 24px 0 32px; display: flex; flex-direction: column;
+      gap: 0; font-family: inherit; user-select: none;
+    }
+    .ad-row { display: flex; justify-content: center; gap: 12px; }
+    .ad-connectors { width: 100%; height: 40px; flex-shrink: 0; }
+    .ad-connectors svg { width: 100%; height: 100%; display: block; }
+    .ad-connectors--bottom { height: 32px; }
+
+    .ad-row--sources { gap: 200px; }
+    .ad-source {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 18px; width: 180px; text-align: center;
+    }
+    .ad-source-icon { font-size: 20px; line-height: 1; }
+    .ad-source-label { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.5; }
+    .ad-source-label small {
+      font-size: 10px; color: var(--text-muted); font-weight: 400;
+      display: block; margin-top: 2px;
+    }
+
+    .ad-row--agents { gap: 10px; }
+    .ad-agent {
+      position: relative; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 12px 12px; width: 170px;
+      display: flex; flex-direction: column; gap: 6px; transition: border-color .2s;
+    }
+    .ad-agent:hover { border-color: #00d4ff; }
+    .ad-agent--trading { border-top: 2px solid #58a6ff; }
+    .ad-agent--regime  { border-top: 2px solid #bc8cff; }
+    .ad-agent--news    { border-top: 2px solid #d29922; }
+    .ad-agent--risk    { border-top: 2px solid #f85149; }
+    .ad-agent-badge {
+      position: absolute; top: -10px; right: 10px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--surface2); border: 1px solid var(--border);
+      font-size: 10px; font-weight: 700; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ad-agent-name { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.3; }
+    .ad-agent-sub  { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
+    .ad-agent-output { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+    .ad-pill { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; white-space: nowrap; }
+    .ad-pill--buy   { background: rgba(0,255,136,.12); color: #00ff88; }
+    .ad-pill--sell  { background: rgba(255,68,68,.12);  color: #ff4444; }
+    .ad-pill--hold  { background: rgba(139,148,158,.12);color: #8b949e; }
+    .ad-pill--bull  { background: rgba(0,255,136,.12);  color: #00ff88; }
+    .ad-pill--bear  { background: rgba(255,68,68,.12);  color: #ff4444; }
+    .ad-pill--range { background: rgba(210,153,34,.12); color: #d29922; }
+    .ad-pill--vol   { background: rgba(255,68,68,.08);  color: #f85149; }
+    .ad-pill--score { background: rgba(88,166,255,.12); color: #58a6ff; }
+    .ad-pill--veto  { background: rgba(255,68,68,.12);  color: #ff4444; }
+    .ad-pill--sl    { background: rgba(255,68,68,.10);  color: #f85149; }
+    .ad-pill--tp    { background: rgba(0,255,136,.10);  color: #00ff88; }
+    .ad-pill--pos   { background: rgba(88,166,255,.10); color: #58a6ff; }
+
+    .ad-row--matrix { justify-content: center; }
+    .ad-matrix {
+      background: var(--surface); border: 1px solid #00d4ff;
+      border-radius: 14px; padding: 16px 24px; width: 460px;
+      text-align: center; box-shadow: 0 0 20px rgba(0,212,255,.08);
+    }
+    .ad-matrix-title {
+      font-size: 13px; font-weight: 700; color: #00d4ff;
+      letter-spacing: .05em; text-transform: uppercase; margin-bottom: 8px;
+    }
+    .ad-matrix-formula {
+      font-size: 11px; color: var(--text-muted);
+      font-family: 'SF Mono','Fira Code',monospace;
+      background: var(--surface2); border-radius: 6px;
+      padding: 6px 10px; margin-bottom: 10px; line-height: 1.6;
+    }
+    .ad-matrix-thresholds { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .ad-threshold { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 10px; }
+    .ad-threshold--buy  { background: rgba(0,255,136,.12); color: #00ff88; }
+    .ad-threshold--hold { background: rgba(139,148,158,.12);color: #8b949e; }
+    .ad-threshold--sell { background: rgba(255,68,68,.12);  color: #ff4444; }
+
+    .ad-row--output { gap: 16px; justify-content: center; }
+    .ad-output {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 4px; border-radius: 12px; padding: 12px 20px;
+      width: 130px; border: 1px solid var(--border);
+    }
+    .ad-output--buy  { border-color: #00ff88; background: rgba(0,255,136,.05); }
+    .ad-output--hold { border-color: var(--border); background: var(--surface); }
+    .ad-output--sell { border-color: #ff4444; background: rgba(255,68,68,.05); }
+    .ad-output-arrow { font-size: 20px; line-height: 1; }
+    .ad-output--buy  .ad-output-arrow { color: #00ff88; }
+    .ad-output--hold .ad-output-arrow { color: #8b949e; }
+    .ad-output--sell .ad-output-arrow { color: #ff4444; }
+    .ad-output-label { font-size: 13px; font-weight: 800; letter-spacing: .06em; }
+    .ad-output--buy  .ad-output-label { color: #00ff88; }
+    .ad-output--hold .ad-output-label { color: #8b949e; }
+    .ad-output--sell .ad-output-label { color: #ff4444; }
+    .ad-output-sub { font-size: 10px; color: var(--text-muted); text-align: center; }
+
+    @media (max-width: 700px) {
+      .ad-row--sources { gap: 12px; flex-direction: column; align-items: center; }
+      .ad-source { width: 100%; max-width: 320px; }
+      .ad-connectors { display: none; }
+      .ad-row--agents { flex-direction: column; align-items: center; }
+      .ad-agent { width: 100%; max-width: 320px; }
+      .ad-matrix { width: 100%; max-width: 320px; }
+      .ad-row--output { flex-wrap: wrap; }
+      .ad-output { width: 90px; padding: 10px 8px; }
     }
   </style>
 </head>
 <body>
 <div class="doc-layout">
 
+  <!-- Hamburger trigger (mobile) -->
+  <button class="guide-burger" aria-label="Navigation öffnen" aria-expanded="false" aria-controls="guide-sidebar">
+    <span></span><span></span><span></span>
+  </button>
+
+  <!-- Overlay (mobile) -->
+  <div class="guide-overlay" id="guide-overlay" aria-hidden="true"></div>
+
   <!-- Sidebar -->
-  <nav class="sidebar">
+  <nav class="sidebar" id="guide-sidebar" aria-label="Inhaltsverzeichnis">
     <div class="sidebar-header">
       <a href="/">← Zurück zur App</a>
       <div class="sidebar-title">Bedienungsanleitung</div>
     </div>
     <div class="nav-group-label">Einstieg</div>
-    <a class="nav-link" href="#start">Was ist Crypto Pattern AI?</a>
-    <a class="nav-link" href="#login">Anmelden &amp; Einstellungen</a>
-    <a class="nav-link" href="#claude">Claude-Zugang einrichten</a>
+    <a class="nav-link" href="#start"><span class="nl-icon" aria-hidden="true">👤</span>Übersicht</a>
+    <a class="nav-link" href="#login"><span class="nl-icon" aria-hidden="true">🔐</span>Anmelden &amp; Einstellungen</a>
+    <a class="nav-link" href="#claude"><span class="nl-icon" aria-hidden="true">◯</span>Claude-Zugang</a>
     <div class="nav-group-label">Live Trading</div>
-    <a class="nav-link" href="#live-vorbereitung">Vorbereitung</a>
-    <a class="nav-link" href="#live-binance">Binance API-Key</a>
-    <a class="nav-link" href="#live-start">Live Trading starten</a>
-    <a class="nav-link" href="#live-lesen">Status verstehen</a>
-    <a class="nav-link" href="#live-stopp">Stoppen</a>
-    <a class="nav-link" href="#trade-historie">Trade-Historie</a>
+    <a class="nav-link" href="#live-vorbereitung"><span class="nl-icon" aria-hidden="true">📋</span>Vorbereitung</a>
+    <a class="nav-link" href="#live-binance"><span class="nl-icon" aria-hidden="true">🔑</span>Binance API-Key</a>
+    <a class="nav-link" href="#live-start"><span class="nl-icon" aria-hidden="true">▶</span>Live Trading starten</a>
+    <a class="nav-link" href="#live-lesen"><span class="nl-icon" aria-hidden="true">📈</span>Status verstehen</a>
+    <a class="nav-link" href="#live-stopp"><span class="nl-icon" aria-hidden="true">■</span>Stoppen</a>
+    <a class="nav-link" href="#trade-historie"><span class="nl-icon" aria-hidden="true">🗒</span>Trade-Historie</a>
     <div class="nav-group-label">Simulation</div>
-    <a class="nav-link" href="#sim-was">Was ist eine Simulation?</a>
-    <a class="nav-link" href="#sim-start">Simulation starten</a>
-    <a class="nav-link" href="#sim-lesen">Ergebnisse verstehen</a>
-    <a class="nav-link" href="#sim-historie">Vergangene Simulationen</a>
-    <div class="nav-group-label">Marktscanner</div>
-    <a class="nav-link" href="#scanner">Scanner nutzen</a>
-    <div class="nav-group-label">Architektur</div>
-    <a class="nav-link" href="#agenten">4-Agenten-Architektur</a>
-    <div class="nav-group-label">Hinweise</div>
-    <a class="nav-link" href="#risiken">Risiken &amp; Grenzen</a>
-    <a class="nav-link" href="#tipps">Tipps</a>
+    <a class="nav-link" href="#sim-was"><span class="nl-icon" aria-hidden="true">🔬</span>Was ist eine Simulation?</a>
+    <a class="nav-link" href="#sim-start"><span class="nl-icon" aria-hidden="true">▷</span>Simulation starten</a>
+    <a class="nav-link" href="#sim-lesen"><span class="nl-icon" aria-hidden="true">📊</span>Ergebnisse verstehen</a>
+    <a class="nav-link" href="#sim-historie"><span class="nl-icon" aria-hidden="true">🗂</span>Vergangene Simulationen</a>
+    <div class="nav-group-label">Referenz</div>
+    <a class="nav-link" href="#agenten"><span class="nl-icon" aria-hidden="true">🤖</span>4-Agenten-Architektur</a>
+    <a class="nav-link" href="#agent-setup"><span class="nl-icon" aria-hidden="true">⚙</span>Agent-Setup</a>
+    <a class="nav-link" href="#risiken"><span class="nl-icon" aria-hidden="true">⚠</span>Risiken &amp; Grenzen</a>
+    <a class="nav-link" href="#tipps"><span class="nl-icon" aria-hidden="true">💡</span>Tipps</a>
   </nav>
 
   <!-- Content -->
@@ -328,6 +490,10 @@
       <div class="callout callout-yellow">
         <strong>Sicherheit:</strong> Lege eine IP-Whitelist auf Binance fest (die IP des Servers). Das verhindert Missbrauch, wenn der Key jemals kompromittiert werden sollte.
       </div>
+
+      <h3>API-Key-Anzeige im Live-Tab</h3>
+      <p>Nach dem Speichern zeigt der Live-Tab deinen API-Key <strong>maskiert</strong> an — z.B. <code>ABCD••••••••••••••••WXYZ</code>. Nur die ersten und letzten vier Zeichen sind sichtbar, der Rest ist verborgen.</p>
+      <p>Mit einem Klick auf das <strong>Augen-Symbol 👁</strong> neben dem Key kannst du ihn vollständig anzeigen. Ein weiterer Klick maskiert ihn wieder. Beim Wechsel in einen anderen Tab wird der Key automatisch wieder maskiert.</p>
     </div>
 
     <!-- LIVE TRADING STARTEN -->
@@ -763,51 +929,6 @@
       </div>
     </div>
 
-    <!-- SCANNER -->
-    <hr class="section-divider" />
-    <div class="section" id="scanner">
-      <h2><span class="section-icon ic-purple">🔍</span>Marktscanner nutzen</h2>
-      <p class="section-desc">
-        Der Marktscanner analysiert bis zu 10 USDC-Paare gleichzeitig und gibt eine Empfehlung, welches Paar aktuell das beste Handelspotenzial hat.
-        Er ist im Live-Trading-Tab oben zu finden und kann auch unabhängig vom Bot genutzt werden.
-      </p>
-
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">Intervall wählen</div>
-            <div class="step-desc">Wähle das Zeitfenster für die Analyse (<code>1h</code>, <code>4h</code>, <code>1d</code>).</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">Eigene Paare hinzufügen (optional)</div>
-            <div class="step-desc">Trage in die drei freien Felder eigene Paare ein (z.B. <code>SUIUSDC</code>), die zusätzlich gescannt werden sollen.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-body">
-            <div class="step-title">Markt scannen</div>
-            <div class="step-desc">Klicke auf <strong>Markt scannen</strong>. Claude analysiert alle Paare und nennt das empfohlene Symbol mit Begründung.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">4</div>
-          <div class="step-body">
-            <div class="step-title">Intervall übernehmen (optional)</div>
-            <div class="step-desc">Klicke bei einem Paar auf <strong>★ Intervall übernehmen</strong>, um das Scanner-Intervall direkt für das Live Trading zu übernehmen. Das eigentliche Symbol wählt der Agent beim Start selbst.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="callout callout-blue">
-        <strong>Automatisch im Live-Betrieb:</strong> Der Bot führt bei jedem Kerzenschluss automatisch einen internen Markt-Scan durch. Du musst den Scanner nicht manuell bedienen — er dient zur Information und manuellen Orientierung.
-      </div>
-    </div>
-
     <!-- 4-AGENTEN-ARCHITEKTUR -->
     <hr class="section-divider" />
     <div class="section" id="agenten">
@@ -913,6 +1034,193 @@
       </div>
     </div>
 
+    <!-- AGENT SETUP DIAGRAM -->
+    <hr class="section-divider" />
+    <div class="section" id="agent-setup">
+      <h2><span class="section-icon ic-purple">⚙</span>Agent-Setup — Wie die Agenten zusammenarbeiten</h2>
+      <p class="section-desc">
+        Die folgende Übersicht zeigt, wie die vier spezialisierten Agenten Daten liefern,
+        wie ihre Ausgaben in der Voting Matrix zusammengeführt werden und welches Signal daraus entsteht.
+      </p>
+
+      <div class="agent-diagram" role="img" aria-label="Datenfluss der vier Agenten zur Voting Matrix">
+
+        <!-- Row 1: Data sources -->
+        <div class="ad-row ad-row--sources">
+          <div class="ad-source">
+            <span class="ad-source-icon">📈</span>
+            <span class="ad-source-label">Marktdaten<br><small>OHLCV · RSI · MACD · BB · ADX</small></span>
+          </div>
+          <div class="ad-source">
+            <span class="ad-source-icon">📰</span>
+            <span class="ad-source-label">News &amp; Sentiment<br><small>RSS · Reddit · Fear &amp; Greed</small></span>
+          </div>
+        </div>
+
+        <!-- Connectors: sources → agents -->
+        <div class="ad-connectors ad-connectors--top">
+          <svg viewBox="0 0 760 40" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#30363d"/>
+              </marker>
+            </defs>
+            <line x1="190" y1="0" x2="95"  y2="40" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+            <line x1="190" y1="0" x2="285" y2="40" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+            <line x1="190" y1="0" x2="665" y2="40" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+            <line x1="570" y1="0" x2="475" y2="40" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+          </svg>
+        </div>
+
+        <!-- Row 2: The four agents -->
+        <div class="ad-row ad-row--agents">
+          <div class="ad-agent ad-agent--trading">
+            <div class="ad-agent-badge">2</div>
+            <div class="ad-agent-name">Trading Agent</div>
+            <div class="ad-agent-sub">RSI · MACD · BB · ADX · Divergenz</div>
+            <div class="ad-agent-output">
+              <span class="ad-pill ad-pill--buy">BUY</span>
+              <span class="ad-pill ad-pill--hold">HOLD</span>
+              <span class="ad-pill ad-pill--sell">SELL</span>
+            </div>
+          </div>
+          <div class="ad-agent ad-agent--regime">
+            <div class="ad-agent-badge">1</div>
+            <div class="ad-agent-name">Regime Agent</div>
+            <div class="ad-agent-sub">ADX · EMA · Fear &amp; Greed · Preisstruktur</div>
+            <div class="ad-agent-output">
+              <span class="ad-pill ad-pill--bull">BULL</span>
+              <span class="ad-pill ad-pill--bear">BEAR</span>
+              <span class="ad-pill ad-pill--range">RANGE</span>
+              <span class="ad-pill ad-pill--vol">HIGH_VOL</span>
+            </div>
+          </div>
+          <div class="ad-agent ad-agent--news">
+            <div class="ad-agent-badge">3</div>
+            <div class="ad-agent-name">News Agent</div>
+            <div class="ad-agent-sub">Stündlich · RSS · Reddit · On-Chain</div>
+            <div class="ad-agent-output">
+              <span class="ad-pill ad-pill--score">Score 0–100</span>
+              <span class="ad-pill ad-pill--veto">🚫 Veto</span>
+            </div>
+          </div>
+          <div class="ad-agent ad-agent--risk">
+            <div class="ad-agent-badge">4</div>
+            <div class="ad-agent-name">Risk Agent</div>
+            <div class="ad-agent-sub">ATR · Signalstärke · Regime</div>
+            <div class="ad-agent-output">
+              <span class="ad-pill ad-pill--sl">SL %</span>
+              <span class="ad-pill ad-pill--tp">TP %</span>
+              <span class="ad-pill ad-pill--pos">Pos-Größe</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connectors: agents → voting matrix -->
+        <div class="ad-connectors ad-connectors--mid">
+          <svg viewBox="0 0 760 40" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="arr2" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#00d4ff" opacity="0.6"/>
+              </marker>
+            </defs>
+            <line x1="95"  y1="0" x2="380" y2="40" stroke="#00d4ff" stroke-width="1.5" opacity="0.5" marker-end="url(#arr2)"/>
+            <line x1="285" y1="0" x2="380" y2="40" stroke="#00d4ff" stroke-width="1.5" opacity="0.5" marker-end="url(#arr2)"/>
+            <line x1="475" y1="0" x2="380" y2="40" stroke="#00d4ff" stroke-width="1.5" opacity="0.5" marker-end="url(#arr2)"/>
+            <line x1="665" y1="0" x2="380" y2="40" stroke="#00d4ff" stroke-width="1.5" opacity="0.5" marker-end="url(#arr2)"/>
+          </svg>
+        </div>
+
+        <!-- Row 3: Voting Matrix -->
+        <div class="ad-row ad-row--matrix">
+          <div class="ad-matrix">
+            <div class="ad-matrix-title">Voting Matrix</div>
+            <div class="ad-matrix-formula">Signal-Vote &nbsp;+&nbsp; News-Modifier &nbsp;+&nbsp; Regime-Boost</div>
+            <div class="ad-matrix-thresholds">
+              <span class="ad-threshold ad-threshold--buy">Score ≥ 1.3 → BUY</span>
+              <span class="ad-threshold ad-threshold--hold">−0.8 … 1.3 → HOLD</span>
+              <span class="ad-threshold ad-threshold--sell">Score ≤ −0.8 → SELL</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connectors: matrix → outputs -->
+        <div class="ad-connectors ad-connectors--bottom">
+          <svg viewBox="0 0 760 32" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="arr3g" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#00ff88"/>
+              </marker>
+              <marker id="arr3y" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#8b949e"/>
+              </marker>
+              <marker id="arr3r" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#ff4444"/>
+              </marker>
+            </defs>
+            <line x1="380" y1="0" x2="143" y2="32" stroke="#00ff88" stroke-width="1.5" opacity="0.5" marker-end="url(#arr3g)"/>
+            <line x1="380" y1="0" x2="380" y2="32" stroke="#8b949e" stroke-width="1.5" opacity="0.5" marker-end="url(#arr3y)"/>
+            <line x1="380" y1="0" x2="617" y2="32" stroke="#ff4444" stroke-width="1.5" opacity="0.5" marker-end="url(#arr3r)"/>
+          </svg>
+        </div>
+
+        <!-- Row 4: Output signals -->
+        <div class="ad-row ad-row--output">
+          <div class="ad-output ad-output--buy">
+            <span class="ad-output-arrow">▲</span>
+            <span class="ad-output-label">BUY</span>
+            <span class="ad-output-sub">Order ausführen</span>
+          </div>
+          <div class="ad-output ad-output--hold">
+            <span class="ad-output-arrow">—</span>
+            <span class="ad-output-label">HOLD</span>
+            <span class="ad-output-sub">Keine Order</span>
+          </div>
+          <div class="ad-output ad-output--sell">
+            <span class="ad-output-arrow">▼</span>
+            <span class="ad-output-label">SELL</span>
+            <span class="ad-output-sub">Order ausführen</span>
+          </div>
+        </div>
+
+      </div><!-- /.agent-diagram -->
+
+      <h3>Was macht welcher Agent?</h3>
+      <table class="tbl">
+        <thead><tr><th>#</th><th>Agent</th><th>Läuft</th><th>Ausgabe</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="badge-inline b-purple">1</span></td>
+            <td><strong>Regime Agent</strong></td>
+            <td>Vor jedem Signal</td>
+            <td>Marktmodus: BULL_TREND · BEAR_TREND · RANGING · HIGH_VOLATILITY</td>
+          </tr>
+          <tr>
+            <td><span class="badge-inline b-blue">2</span></td>
+            <td><strong>Trading Agent</strong></td>
+            <td>Pro Zyklus</td>
+            <td>BUY / HOLD / SELL + Konfidenz (0–100 %)</td>
+          </tr>
+          <tr>
+            <td><span class="badge-inline b-yellow">3</span></td>
+            <td><strong>News Agent</strong></td>
+            <td>Stündlich</td>
+            <td>Sentiment-Score 0–100, optionales BUY-Veto</td>
+          </tr>
+          <tr>
+            <td><span class="badge-inline b-red">4</span></td>
+            <td><strong>Risk Agent</strong></td>
+            <td>Bei BUY-Signal</td>
+            <td>ATR-basiertes SL %, TP % und Positionsgröße</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-blue">
+        <strong>Reihenfolge ist entscheidend:</strong> Der Regime Agent läuft immer zuerst und setzt die Schwellwerte für alle nachfolgenden Votes. HIGH_VOLATILITY blockiert neue BUY-Orders vollständig, unabhängig von Trading Agent oder News Agent.
+      </div>
+    </div>
+
     <!-- RISIKEN -->
     <hr class="section-divider" />
     <div class="section" id="risiken">
@@ -951,6 +1259,7 @@
 </div>
 
 <script>
+  // ── Scrollspy ────────────────────────────────────────────────────
   const links = document.querySelectorAll('.nav-link');
   const sections = [...links]
     .map(l => document.querySelector(l.getAttribute('href')))
@@ -961,12 +1270,65 @@
       if (e.isIntersecting) {
         links.forEach(l => l.classList.remove('active'));
         const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
-        if (active) active.classList.add('active');
+        if (active) {
+          active.classList.add('active');
+          active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
       }
     });
   }, { rootMargin: '-5% 0px -80% 0px' });
 
   sections.forEach(s => io.observe(s));
+
+  // ── Mobile drawer ─────────────────────────────────────────────────
+  (function () {
+    const burger  = document.querySelector('.guide-burger');
+    const sidebar = document.getElementById('guide-sidebar');
+    const overlay = document.getElementById('guide-overlay');
+    if (!burger || !sidebar || !overlay) return;
+
+    function openDrawer() {
+      burger.classList.add('open');
+      burger.setAttribute('aria-expanded', 'true');
+      sidebar.classList.add('open');
+      overlay.classList.add('visible');
+      document.body.classList.add('sidebar-open');
+    }
+    function closeDrawer() {
+      burger.classList.remove('open');
+      burger.setAttribute('aria-expanded', 'false');
+      sidebar.classList.remove('open');
+      overlay.classList.remove('visible');
+      document.body.classList.remove('sidebar-open');
+    }
+
+    burger.addEventListener('click', () =>
+      sidebar.classList.contains('open') ? closeDrawer() : openDrawer()
+    );
+    overlay.addEventListener('click', closeDrawer);
+
+    sidebar.querySelectorAll('.nav-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        const href = link.getAttribute('href');
+        if (!href || !href.startsWith('#')) return;
+        if (window.getComputedStyle(sidebar).position === 'fixed') {
+          e.preventDefault();
+          closeDrawer();
+          setTimeout(() => {
+            const target = document.querySelector(href);
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 270);
+        }
+      });
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && sidebar.classList.contains('open')) {
+        closeDrawer();
+        burger.focus();
+      }
+    });
+  })();
 </script>
 </body>
 </html>

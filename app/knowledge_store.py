@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 KNOWLEDGE_DIR  = "/app/knowledge"
 CORE_DIR       = f"{KNOWLEDGE_DIR}/core"
 USERS_DIR      = f"{KNOWLEDGE_DIR}/users"
+COMMUNITY_DIR  = f"{KNOWLEDGE_DIR}/community"
 _CORE_PATTERNS = f"{CORE_DIR}/patterns.json"
 
 MAX_SIM_LOG      = 100
@@ -28,6 +29,7 @@ MAX_WINNING      = 10
 MAX_LOSING       = 6
 MAX_GLOBAL_RULES = 8
 MAX_TRADE_LOG    = 10_000
+MIN_USERS_FOR_COMMUNITY = 2
 
 
 # ── I/O helpers ───────────────────────────────────────────────────────────────
@@ -85,6 +87,40 @@ def _user_trade_log_path(username: str, symbol: str) -> str:
 
 def _user_live_state_snapshot_path(username: str, symbol: str) -> str:
     return f"{_user_dir(username)}/live_state_{symbol}.json"
+
+
+def _community_path(symbol: str, interval: str) -> str:
+    return f"{COMMUNITY_DIR}/{symbol}_{interval}.json"
+
+
+def _user_settings_path(username: str) -> str:
+    return f"{_user_dir(username)}/settings.json"
+
+
+_SETTINGS_DEFAULTS: dict = {
+    "live_interval": "4h",
+    "live_amount": 50,
+    "live_compounding_mode": "compound",
+    "live_analysis_weight": 30,
+    "sim_symbol": "BTCUSDC",
+    "sim_interval": "4h",
+    "sim_days": 30,
+    "sim_capital": 1000,
+    "sim_fee_tier": "standard",
+    "sim_compounding_mode": "compound",
+    "sim_analysis_weight": 30,
+}
+
+
+def load_user_settings(username: str) -> dict:
+    saved = _load(_user_settings_path(username), {})
+    return {**_SETTINGS_DEFAULTS, **saved}
+
+
+def save_user_settings(username: str, settings: dict) -> None:
+    allowed = set(_SETTINGS_DEFAULTS.keys())
+    clean = {k: v for k, v in settings.items() if k in allowed}
+    _save(_user_settings_path(username), clean)
 
 
 def load_user_patterns(username: str) -> dict:
@@ -244,6 +280,75 @@ def load_live_state_snapshot(username: str, symbol: str) -> dict | None:
         return None
 
 
+def get_all_user_data_for_symbol(symbol: str, interval: str) -> list[dict]:
+    """Aggregate sim logs + live trade performance per user for a given symbol/interval.
+    Returns list of per-user summaries with enough data for community synthesis."""
+    results = []
+    try:
+        for uname in os.listdir(USERS_DIR):
+            # Sim history for this symbol+interval
+            sim_path = _user_sim_log_path(uname)
+            sim_log  = _load(sim_path, {"entries": []})
+            sessions = [
+                e for e in sim_log.get("entries", [])
+                if e.get("symbol") == symbol and e.get("interval") == interval
+            ]
+            if not sessions:
+                continue
+
+            # Live trade P&L for this symbol (SELL entries only, where pnl_pct is set)
+            trade_path = _user_trade_log_path(uname, symbol)
+            trade_log  = _load(trade_path, {"entries": []})
+            live_sells = [
+                e for e in trade_log.get("entries", [])
+                if e.get("type") == "SELL" and e.get("pnl_pct") is not None
+            ]
+            live_count      = len(live_sells)
+            live_profitable = sum(1 for t in live_sells if t["pnl_pct"] > 0)
+            live_avg_pnl    = (
+                sum(t["pnl_pct"] for t in live_sells) / live_count
+                if live_count > 0 else None
+            )
+
+            # Pattern summary from user's patterns.json
+            user_patterns = get_user_sym_patterns(uname, symbol, interval)
+            winning = [p.get("description", "") for p in user_patterns.get("winning_patterns", [])[:5]]
+            losing  = [p.get("description", "") for p in user_patterns.get("losing_patterns", [])[:3]]
+
+            returns      = [e.get("return_pct", 0) for e in sessions]
+            win_rates    = [e.get("win_rate", 0) for e in sessions]
+            n_sessions   = len(sessions)
+            n_profitable = sum(1 for e in sessions if e.get("profitable"))
+            avg_return   = sum(returns) / n_sessions if n_sessions else 0
+            avg_win_rate = sum(win_rates) / n_sessions if n_sessions else 0
+
+            results.append({
+                "username":       uname,
+                "sim_sessions":   n_sessions,
+                "sim_profitable": n_profitable,
+                "avg_return_pct": round(avg_return, 2),
+                "avg_win_rate":   round(avg_win_rate, 1),
+                "winning_patterns": winning,
+                "losing_patterns":  losing,
+                "live_trades":    live_count,
+                "live_profitable": live_profitable,
+                "live_avg_pnl":   round(live_avg_pnl, 3) if live_avg_pnl is not None else None,
+                "market_notes":   user_patterns.get("market_notes", ""),
+            })
+    except Exception:
+        pass
+    return results
+
+
+def load_community_patterns(symbol: str, interval: str) -> dict:
+    return _load(_community_path(symbol, interval), {})
+
+
+def save_community_patterns(symbol: str, interval: str, data: dict) -> None:
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save(_community_path(symbol, interval), data)
+
+
 def append_live_regime_log(username: str, entry: dict) -> None:
     path = f"{USERS_DIR}/{username}/live_regime_log.json"
     log = _load(path, {"entries": []})
@@ -286,7 +391,28 @@ def get_knowledge_context(symbol: str, interval: str, username: str = "") -> str
         if notes:
             lines.append(f"  NOTE: {notes}")
 
-    # Core promoted symbol patterns (community-verified)
+    # Community patterns (cross-user consensus, anonymised)
+    community = load_community_patterns(symbol, interval)
+    n_users   = community.get("contributing_users", 0)
+    if n_users >= MIN_USERS_FOR_COMMUNITY:
+        total_s = community.get("total_sessions", 0)
+        prof_s  = community.get("profitable_sessions", 0)
+        lines.append(
+            f"══ COMMUNITY PATTERNS: {symbol} {interval} — "
+            f"{n_users} Trader · {total_s} Sessions · {prof_s}/{total_s} profitabel ══"
+        )
+        for p in community.get("consensus_patterns", [])[:4]:
+            r   = p.get("avg_return_pct", 0)
+            cnt = p.get("user_count", 0)
+            lines.append(f"  ✓ {p['description']}  → avg {r:+.1f}% (bestätigt von {cnt} Tradern)")
+        for p in community.get("consensus_avoid", [])[:3]:
+            cnt = p.get("user_count", 0)
+            lines.append(f"  ✗ {p['description']}  (gemieden von {cnt} Tradern)")
+        comm_note = community.get("community_notes", "")
+        if comm_note:
+            lines.append(f"  COMMUNITY NOTE: {comm_note}")
+
+    # Core promoted symbol patterns (admin-curated)
     csc = core_sp.get("session_count", 0)
     if csc > 0:
         lines.append(f"══ CORE PATTERNS: {symbol} {interval} — {csc} sessions promoted ══")

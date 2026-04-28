@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=4" />
 </head>
 <body>
   <header>
@@ -36,7 +36,7 @@
       <div class="form-grid">
         <div class="field">
           <label>Symbol</label>
-          <select id="symbol">
+          <select id="symbol" onchange="saveUserSettings()">
             <option>BTCUSDC</option>
             <option>ETHUSDC</option>
             <option>BNBUSDC</option>
@@ -46,7 +46,7 @@
         </div>
         <div class="field">
           <label>Intervall</label>
-          <select id="interval">
+          <select id="interval" onchange="saveUserSettings()">
             <option value="1h">1 Stunde</option>
             <option value="4h" selected>4 Stunden</option>
             <option value="1d">1 Tag</option>
@@ -54,15 +54,15 @@
         </div>
         <div class="field">
           <label>Zeitraum (Tage)</label>
-          <input id="days" type="number" value="30" min="7" max="90" />
+          <input id="days" type="number" value="30" min="7" max="90" onchange="saveUserSettings()" />
         </div>
         <div class="field">
           <label>Startkapital (USDC)</label>
-          <input id="capital" type="number" value="1000" min="100" />
+          <input id="capital" type="number" value="1000" min="100" onchange="saveUserSettings()" />
         </div>
         <div class="field">
           <label>Binance Gebühren</label>
-          <select id="fee-tier">
+          <select id="fee-tier" onchange="saveUserSettings()">
             <option value="standard">Standard 0.10%</option>
             <option value="bnb">BNB Rabatt 0.075%</option>
             <option value="vip1">VIP 1 — 0.09%</option>
@@ -73,7 +73,7 @@
         </div>
         <div class="field">
           <label>Compounding-Modus</label>
-          <select id="compounding-mode">
+          <select id="compounding-mode" onchange="saveUserSettings()">
             <option value="compound">Volles Compounding (Gewinne &amp; Verluste)</option>
             <option value="fixed">Fixes Volumen (immer Startbetrag)</option>
             <option value="compound_wins">Nur Gewinne compounding (Verluste zurücksetzen)</option>
@@ -84,7 +84,7 @@
           <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
             <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Wissensbasis</span>
             <input id="sim-analysis-weight" type="range" min="0" max="100" value="30" step="10"
-              oninput="updateSimWeightLabel(this.value)"
+              oninput="updateSimWeightLabel(this.value)" onchange="saveUserSettings()"
               style="flex:1;accent-color:var(--blue)" />
             <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Markt</span>
           </div>
@@ -161,29 +161,6 @@
   <!-- ══ LIVE TRADING TAB ══════════════════════════════════════════════════ -->
   <section id="tab-live" class="tab-content active">
 
-    <!-- Setup: Scanner + Config -->
-    <div class="live-section-label">Setup</div>
-
-    <div class="card" id="scanner-card">
-      <h2>Marktscanner</h2>
-      <div class="sim-picker-row" style="margin-bottom:10px">
-        <label>Intervall:</label>
-        <select id="scan-interval">
-          <option value="1h">1h</option>
-          <option value="4h" selected>4h</option>
-          <option value="1d">1d</option>
-        </select>
-        <button class="btn btn-primary btn-sm" id="btn-scan" onclick="runScanner()">Markt scannen</button>
-      </div>
-      <div class="sim-picker-row" style="margin-bottom:10px;gap:6px">
-        <label style="white-space:nowrap">+ Eigene Paare:</label>
-        <input id="extra-sym-1" class="extra-sym-input" type="text" placeholder="z.B. SUIUSDC" maxlength="20" oninput="saveExtraSyms()" />
-        <input id="extra-sym-2" class="extra-sym-input" type="text" placeholder="z.B. WIFUSDC" maxlength="20" oninput="saveExtraSyms()" />
-        <input id="extra-sym-3" class="extra-sym-input" type="text" placeholder="z.B. PEPEUSDC" maxlength="20" oninput="saveExtraSyms()" />
-      </div>
-      <div id="scanner-result" class="empty-state">Top 10 USDC-Paare + eigene scannen und bestes empfehlen.</div>
-    </div>
-
     <div class="card">
       <h2>Konfiguration</h2>
       <div id="binance-key-status" style="margin-bottom:12px;font-size:0.85em"></div>
@@ -202,7 +179,7 @@
         </div>
         <div class="field">
           <label>Intervall</label>
-          <select id="live-interval">
+          <select id="live-interval" onchange="saveUserSettings()">
             <option value="1h">1h</option>
             <option value="4h" selected>4h</option>
             <option value="1d">1d</option>
@@ -210,11 +187,11 @@
         </div>
         <div class="field">
           <label>Trade-Betrag (USDC)</label>
-          <input id="live-amount" type="number" value="50" min="10" />
+          <input id="live-amount" type="number" value="50" min="10" onchange="saveUserSettings()" />
         </div>
         <div class="field">
           <label>Compounding-Modus</label>
-          <select id="live-compounding-mode">
+          <select id="live-compounding-mode" onchange="saveUserSettings()">
             <option value="compound">Volles Compounding (Gewinne &amp; Verluste)</option>
             <option value="fixed">Fixes Volumen (immer Startbetrag)</option>
             <option value="compound_wins">Nur Gewinne compounding (Verluste zurücksetzen)</option>
@@ -225,7 +202,7 @@
           <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
             <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Wissensbasis</span>
             <input id="live-analysis-weight" type="range" min="0" max="100" value="30" step="10"
-              oninput="updateWeightLabel(this.value)"
+              oninput="updateWeightLabel(this.value)" onchange="saveUserSettings()"
               style="flex:1;accent-color:var(--blue)" />
             <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Markt</span>
           </div>
@@ -253,7 +230,6 @@
           <span id="live-position-badge" class="badge"></span>
           <span id="live-regime-badge" class="badge regime-badge" style="display:none"></span>
           <span id="live-news-score-badge" class="badge" style="display:none"></span>
-          <button class="btn-tiny" id="btn-live-scan" onclick="runLiveScan()" style="margin-left:auto">🔍 Jetzt scannen</button>
         </div>
         <div id="live-basis-row" style="font-size:12px;padding:6px 0 2px;border-top:1px solid var(--border);margin-top:8px">
           <span style="color:var(--text-muted)">Entscheidungsgrundlage: </span><span id="live-basis-name"></span>
@@ -273,6 +249,58 @@
           <span id="live-risk-text"></span>
         </div>
         <div id="live-log-box" class="log-box"></div>
+      </div>
+
+      <!-- Decision Transparency Card -->
+      <div class="card" id="live-decision-card" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h2 style="margin:0">Letzte Entscheidung</h2>
+          <span id="dec-meta" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+
+        <!-- Final action badge row -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <span id="dec-final-badge" class="badge" style="font-size:14px;padding:5px 12px;font-weight:700"></span>
+          <span id="dec-raw-override" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+
+        <!-- Agent rows -->
+        <div class="dec-agents">
+          <div class="dec-agent-row">
+            <span class="dec-agent-label">Signal-Agent</span>
+            <span id="dec-signal-badge" class="badge dec-signal-badge"></span>
+            <span id="dec-confidence" style="font-size:11px;color:var(--text-muted);margin-left:4px"></span>
+            <span id="dec-reason" style="font-size:11px;color:var(--text-muted);margin-left:8px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          </div>
+          <div class="dec-agent-row">
+            <span class="dec-agent-label">Regime-Agent</span>
+            <span id="dec-regime-badge" class="badge regime-badge"></span>
+            <span id="dec-regime-detail" style="font-size:11px;color:var(--text-muted);margin-left:6px"></span>
+          </div>
+          <div class="dec-agent-row">
+            <span class="dec-agent-label">News-Agent</span>
+            <span id="dec-news-badge" class="badge"></span>
+            <span id="dec-news-detail" style="font-size:11px;color:var(--text-muted);margin-left:6px"></span>
+          </div>
+        </div>
+
+        <!-- Voting matrix -->
+        <div id="dec-voting-section" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Voting-Matrix</div>
+          <div class="dec-vote-rows" id="dec-vote-rows"></div>
+        </div>
+
+        <!-- Overrides -->
+        <div id="dec-overrides-section" style="display:none;margin-top:10px;padding:8px 10px;background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.25);border-radius:6px">
+          <div style="font-size:11px;font-weight:600;color:#f85149;margin-bottom:4px">Überstimmungen</div>
+          <ul id="dec-overrides-list" style="margin:0;padding-left:16px;font-size:11px;color:var(--text-muted)"></ul>
+        </div>
+
+        <!-- Risk agent -->
+        <div id="dec-risk-section" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Risk-Agent</div>
+          <div id="dec-risk-detail" style="font-size:12px"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -350,6 +378,7 @@
 
         <div style="font-size:11px;color:var(--text-muted)">Quellen: <span id="news-sources"></span></div>
       </div>
+
     </div>
   </section>
 

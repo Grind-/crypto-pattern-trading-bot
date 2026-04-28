@@ -3,12 +3,64 @@
 // ── Tab navigation ────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (btn.dataset.tab !== 'live') {
+      const eyeBtn = document.getElementById('apikey-eye-btn');
+      if (eyeBtn && eyeBtn.getAttribute('aria-pressed') === 'true') {
+        toggleApiKeyReveal();
+      }
+      _revealedApiKey = null;
+    }
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
   });
 });
+
+// ── API Key reveal state ──────────────────────────────────────────────────────
+let _revealedApiKey = null;
+
+function _buildMaskedKey(hint) {
+  if (hint && hint.includes('...')) return hint.replace('...', '••••••••••••••••');
+  if (hint && hint.length >= 8) return hint.slice(0, 4) + '••••••••••••••••' + hint.slice(-4);
+  return '••••••••••••••••••••••••';
+}
+
+async function toggleApiKeyReveal() {
+  const displayEl = document.getElementById('apikey-display');
+  const eyeBtn    = document.getElementById('apikey-eye-btn');
+  if (!displayEl || !eyeBtn) return;
+  const eyeOpen   = eyeBtn.querySelector('.eye-open');
+  const eyeClosed = eyeBtn.querySelector('.eye-closed');
+  const isRevealed = eyeBtn.getAttribute('aria-pressed') === 'true';
+  if (isRevealed) {
+    _revealedApiKey = null;
+    displayEl.textContent = _buildMaskedKey(displayEl.dataset.hint || '');
+    eyeBtn.setAttribute('aria-pressed', 'false');
+    eyeBtn.setAttribute('aria-label', 'API Key anzeigen');
+    if (eyeOpen)   eyeOpen.style.display  = '';
+    if (eyeClosed) eyeClosed.style.display = 'none';
+  } else {
+    if (!_revealedApiKey) {
+      const inputVal = document.getElementById('live-api-key')?.value.trim();
+      if (inputVal) {
+        _revealedApiKey = inputVal;
+      } else {
+        try {
+          const data = await fetch('/api/live/credentials/reveal').then(r => r.json());
+          _revealedApiKey = data.api_key || null;
+        } catch { _revealedApiKey = null; }
+      }
+    }
+    if (_revealedApiKey) {
+      displayEl.textContent = _revealedApiKey;
+      eyeBtn.setAttribute('aria-pressed', 'true');
+      eyeBtn.setAttribute('aria-label', 'API Key verbergen');
+      if (eyeOpen)   eyeOpen.style.display  = 'none';
+      if (eyeClosed) eyeClosed.style.display = '';
+    }
+  }
+}
 
 // ── Chart instances ───────────────────────────────────────────────────────────
 let priceChart = null;
@@ -501,6 +553,8 @@ async function pollLive() {
     lastLiveLogLen = log.length;
   }
 
+  renderLastDecision(state.last_decision);
+
   if (chartData) {
     updateLiveChart(chartData);
     if (state.symbol && _currentUsername) {
@@ -523,6 +577,125 @@ async function pollLive() {
     document.getElementById('live-countdown-box').style.display = 'none';
     document.getElementById('btn-live-start').disabled = false;
     document.getElementById('btn-live-stop').disabled = true;
+  }
+}
+
+function renderLastDecision(d) {
+  const card = document.getElementById('live-decision-card');
+  if (!card) return;
+  if (!d) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  // Meta line
+  const ts = d.ts ? new Date(d.ts).toLocaleString('de-DE', {hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
+  document.getElementById('dec-meta').textContent =
+    `Kerze #${d.candle_num} · ${d.symbol} · $${(d.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4})} · ${ts}`;
+
+  // Final action badge
+  const finalBadge = document.getElementById('dec-final-badge');
+  const actionColors = {BUY:'#3fb950', SELL:'#f85149', HOLD:'#d29922'};
+  const actionIcons = {BUY:'▲ KAUF', SELL:'▼ VERKAUF', HOLD:'◆ HALTEN'};
+  const fc = actionColors[d.final_action] || '#8b949e';
+  finalBadge.textContent = actionIcons[d.final_action] || d.final_action;
+  finalBadge.style.cssText = `font-size:14px;padding:5px 12px;font-weight:700;color:${fc};border-color:${fc};background:${fc}22;border:1px solid;border-radius:6px`;
+
+  // Override note
+  const rawOverride = document.getElementById('dec-raw-override');
+  if (d.raw_action && d.raw_action !== d.final_action) {
+    rawOverride.textContent = `Signal war ${d.raw_action} → überstimmt`;
+    rawOverride.style.color = 'var(--text-muted)';
+  } else {
+    rawOverride.textContent = '';
+  }
+
+  // Signal agent row
+  const sigBadge = document.getElementById('dec-signal-badge');
+  const sc = actionColors[d.raw_action] || '#8b949e';
+  sigBadge.textContent = d.raw_action || '—';
+  sigBadge.style.cssText = `color:${sc};border-color:${sc};background:${sc}22;font-size:11px;padding:2px 7px;border-radius:4px;border:1px solid`;
+  document.getElementById('dec-confidence').textContent = d.confidence != null ? `${d.confidence}% Konfidenz` : '';
+  const reasonEl = document.getElementById('dec-reason');
+  reasonEl.textContent = d.reason || '';
+  reasonEl.title = d.reason || '';
+
+  // Regime agent row
+  const regBadge = document.getElementById('dec-regime-badge');
+  const regColors = {BULL_TREND:'#3fb950',BEAR_TREND:'#f85149',RANGING:'#d29922',HIGH_VOLATILITY:'#e3b341'};
+  const rc = regColors[d.regime?.type] || '#8b949e';
+  regBadge.textContent = (d.regime?.type||'').replace('_',' ');
+  regBadge.style.cssText = `color:${rc};border-color:${rc};background:${rc}22;font-size:11px;padding:2px 7px;border-radius:4px;border:1px solid`;
+  document.getElementById('dec-regime-detail').textContent =
+    d.regime ? `${d.regime.strength}/100 · ${(d.regime.strategy||'').replace(/_/g,' ')}` : '';
+
+  // News agent row
+  const newsBadge = document.getElementById('dec-news-badge');
+  const ns = d.news?.score ?? 50;
+  const nc = ns >= 60 ? '#3fb950' : ns <= 30 ? '#f85149' : '#d29922';
+  newsBadge.textContent = `${ns}/100${d.news?.veto ? ' 🚫' : ''}`;
+  newsBadge.style.cssText = `color:${nc};border-color:${nc};background:${nc}22;font-size:11px;padding:2px 7px;border-radius:4px;border:1px solid`;
+  document.getElementById('dec-news-detail').textContent = d.news?.veto ? 'Veto aktiv — kein Kauf möglich' : 'kein Veto';
+
+  // Voting matrix bars
+  const voteSection = document.getElementById('dec-voting-section');
+  const voteRows = document.getElementById('dec-vote-rows');
+  if (d.voting && !d.force_sell) {
+    voteSection.style.display = 'block';
+    const { vote, news_mod, regime_boost, total_score } = d.voting;
+    const maxAbs = 2.0;
+    const pct = v => Math.round(Math.abs(v) / maxAbs * 100);
+    const sign = v => v >= 0 ? '+' : '';
+    const barColor = v => v > 0 ? '#3fb950' : v < 0 ? '#f85149' : '#8b949e';
+    const rows = [
+      { label: 'Signal-Vote', val: vote },
+      { label: 'News-Einfluss', val: news_mod },
+      { label: 'Regime-Boost', val: regime_boost },
+    ];
+    const threshBuy = 1.3;
+    const totalPct = pct(total_score);
+    const totalColor = total_score >= threshBuy ? '#3fb950' : total_score <= -0.8 ? '#f85149' : '#d29922';
+    voteRows.innerHTML = rows.map(r => `
+      <div class="dec-vote-row">
+        <span class="dec-vote-label">${r.label}</span>
+        <span class="dec-vote-val" style="color:${barColor(r.val)}">${sign(r.val)}${r.val.toFixed(2)}</span>
+        <div class="dec-vote-bar-wrap">
+          <div class="dec-vote-bar" style="width:${pct(r.val)}%;background:${barColor(r.val)}"></div>
+        </div>
+      </div>`).join('') + `
+      <div class="dec-vote-row dec-vote-total">
+        <span class="dec-vote-label" style="font-weight:600">Gesamt-Score</span>
+        <span class="dec-vote-val" style="color:${totalColor};font-weight:700">${sign(total_score)}${total_score.toFixed(2)}</span>
+        <div class="dec-vote-bar-wrap">
+          <div class="dec-vote-bar" style="width:${totalPct}%;background:${totalColor}"></div>
+          <div class="dec-vote-threshold" style="left:${Math.round(threshBuy/maxAbs*100)}%" title="Kauf-Schwellenwert 1.3"></div>
+        </div>
+      </div>`;
+  } else {
+    voteSection.style.display = 'none';
+  }
+
+  // Overrides
+  const overSec = document.getElementById('dec-overrides-section');
+  const overList = document.getElementById('dec-overrides-list');
+  if (d.overrides?.length) {
+    overSec.style.display = 'block';
+    overList.innerHTML = d.overrides.map(o => `<li>${o}</li>`).join('');
+  } else {
+    overSec.style.display = 'none';
+  }
+
+  // Risk agent
+  const riskSec = document.getElementById('dec-risk-section');
+  const riskDet = document.getElementById('dec-risk-detail');
+  if (d.risk) {
+    riskSec.style.display = 'block';
+    const greenDots = Array.from({length:4}, (_,i) => i < (d.risk.green_signals||0) ? '🟢' : '⚪').join(' ');
+    const blockedHtml = d.risk.blocked ? '<span style="color:#f85149;font-weight:600"> — blockiert</span>' : '';
+    riskDet.innerHTML = `<span style="color:var(--text-muted)">Positionsgröße:</span> <strong>${d.risk.position_size_pct}%</strong> &nbsp;
+      <span style="color:var(--text-muted)">SL:</span> <strong style="color:#f85149">${d.risk.stop_loss_pct?.toFixed(2)}%</strong> &nbsp;
+      <span style="color:var(--text-muted)">TP:</span> <strong style="color:#3fb950">${d.risk.take_profit_pct?.toFixed(2)}%</strong> &nbsp;
+      <span style="font-size:11px">${greenDots} ${d.risk.green_signals}/4 Signale grün</span>${blockedHtml}`;
+  } else {
+    riskSec.style.display = 'none';
   }
 }
 
@@ -636,88 +809,6 @@ function loadExtraSyms() {
       if (el) el.value = s;
     });
   } catch (e) {}
-}
-
-async function runLiveScan() {
-  const interval = document.getElementById('live-interval')?.value
-    || document.getElementById('scan-interval').value;
-  const extra_symbols = getExtraSyms();
-  const btn = document.getElementById('btn-live-scan');
-  btn.disabled = true;
-  btn.textContent = '⏳ Scanne…';
-  try {
-    const r = await fetch('/api/scan/symbols', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({interval, extra_symbols}),
-    });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-    const data = await r.json();
-    // Show result in the scanner card (scroll up to it) and also log to live log
-    const box = document.getElementById('live-log-box');
-    const best = data.best_symbol || '?';
-    const rec = data.recommendation || '';
-    box.textContent += `\n🔍 Scanner: bestes Paar = ${best}\n${rec.slice(0, 200)}\n`;
-    box.scrollTop = box.scrollHeight;
-    // Also update full scanner result card
-    renderScanResult(data, interval);
-  } catch (e) {
-    const box = document.getElementById('live-log-box');
-    box.textContent += `\n⚠ Scanner-Fehler: ${e.message}\n`;
-    box.scrollTop = box.scrollHeight;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🔍 Jetzt scannen';
-  }
-}
-
-async function runScanner() {
-  const interval = document.getElementById('scan-interval').value;
-  const extra_symbols = getExtraSyms();
-  const btn = document.getElementById('btn-scan');
-  const el = document.getElementById('scanner-result');
-  btn.disabled = true;
-  const total = 10 + extra_symbols.length;
-  btn.textContent = '⏳ Scanne…';
-  el.innerHTML = `<div class="empty-state">Claude analysiert ${total} USDC-Paare…</div>`;
-  try {
-    const r = await fetch('/api/scan/symbols', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({interval, extra_symbols}),
-    });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-    renderScanResult(await r.json(), interval);
-  } catch (e) {
-    el.innerHTML = `<div class="empty-state" style="color:var(--red)">Fehler: ${e.message}</div>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Markt scannen';
-  }
-}
-
-function renderScanResult(data, interval) {
-  const el = document.getElementById('scanner-result');
-  const ranking = data.ranking || [];
-  const best = data.best_symbol || '';
-  let html = '';
-  if (data.recommendation) {
-    html += `<div class="analysis-box" style="margin-bottom:12px">${data.recommendation}</div>`;
-  }
-  html += ranking.map((r, i) => {
-    const isBest = r.symbol === best;
-    const scoreColor = r.score >= 70 ? '#3fb950' : r.score >= 50 ? '#d29922' : '#8b949e';
-    return `<div class="scanner-row${isBest ? ' scanner-best' : ''}">
-      <span class="scanner-rank">${i + 1}.</span>
-      <span class="scanner-sym">${r.symbol}</span>
-      <span class="scanner-score" style="color:${scoreColor}">${r.score}/100</span>
-      <span class="scanner-reason">${r.reason}</span>
-      <button class="${isBest ? 'btn-use-sim' : 'btn-tiny'}" onclick="useSym('${r.symbol}','${interval}')">
-        ${isBest ? '★ Intervall übernehmen' : 'Intervall'}
-      </button>
-    </div>`;
-  }).join('');
-  el.innerHTML = html || '<div class="empty-state">Keine Ergebnisse.</div>';
 }
 
 async function logout() {
@@ -922,7 +1013,23 @@ async function loadSavedCredentials() {
     }
     if (statusEl) {
       if (creds.has_key && creds.has_secret) {
-        statusEl.innerHTML = `<span style="background:rgba(63,185,80,0.15);border:1px solid var(--green,#3fb950);color:var(--green,#3fb950);padding:3px 10px;border-radius:12px">✓ Binance API Key gespeichert (${creds.key_hint})</span>`;
+        const masked = _buildMaskedKey(creds.key_hint || '');
+        const hint   = (creds.key_hint || '').replace(/"/g, '');
+        statusEl.innerHTML = `<div class="apikey-status-pill">
+          <span class="apikey-ok-mark">✓</span>
+          <span class="apikey-masked-text" id="apikey-display" data-hint="${hint}">${masked}</span>
+          <button class="apikey-eye-btn" id="apikey-eye-btn" aria-label="API Key anzeigen"
+                  aria-pressed="false" onclick="toggleApiKeyReveal()" type="button">
+            <svg class="eye-icon eye-open" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+            </svg>
+            <svg class="eye-icon eye-closed" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>`;
       } else {
         statusEl.innerHTML = `<span style="background:rgba(255,165,0,0.12);border:1px solid #f0a500;color:#f0a500;padding:3px 10px;border-radius:12px">⚠ Kein Binance API Key gespeichert</span>`;
       }
@@ -930,8 +1037,58 @@ async function loadSavedCredentials() {
   } catch {}
 }
 
+// ── User settings persist ────────────────────────────────────────────────────
+let _saveSettingsTimer = null;
+
+function saveUserSettings() {
+  clearTimeout(_saveSettingsTimer);
+  _saveSettingsTimer = setTimeout(async () => {
+    const s = {
+      live_interval:         document.getElementById('live-interval')?.value,
+      live_amount:           parseFloat(document.getElementById('live-amount')?.value) || 50,
+      live_compounding_mode: document.getElementById('live-compounding-mode')?.value,
+      live_analysis_weight:  parseInt(document.getElementById('live-analysis-weight')?.value) || 30,
+      sim_symbol:            document.getElementById('symbol')?.value,
+      sim_interval:          document.getElementById('interval')?.value,
+      sim_days:              parseInt(document.getElementById('days')?.value) || 30,
+      sim_capital:           parseFloat(document.getElementById('capital')?.value) || 1000,
+      sim_fee_tier:          document.getElementById('fee-tier')?.value,
+      sim_compounding_mode:  document.getElementById('compounding-mode')?.value,
+      sim_analysis_weight:   parseInt(document.getElementById('sim-analysis-weight')?.value) || 30,
+    };
+    try {
+      await fetch('/api/user/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(s),
+      });
+    } catch {}
+  }, 500);
+}
+
+async function loadUserSettings() {
+  try {
+    const s = await fetch('/api/user/settings').then(r => r.json());
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+    set('live-interval',          s.live_interval);
+    set('live-amount',            s.live_amount);
+    set('live-compounding-mode',  s.live_compounding_mode);
+    set('live-analysis-weight',   s.live_analysis_weight);
+    if (s.live_analysis_weight != null) updateWeightLabel(s.live_analysis_weight);
+    set('symbol',                 s.sim_symbol);
+    set('interval',               s.sim_interval);
+    set('days',                   s.sim_days);
+    set('capital',                s.sim_capital);
+    set('fee-tier',               s.sim_fee_tier);
+    set('compounding-mode',       s.sim_compounding_mode);
+    set('sim-analysis-weight',    s.sim_analysis_weight);
+    if (s.sim_analysis_weight != null) updateSimWeightLabel(s.sim_analysis_weight);
+  } catch {}
+}
+
 async function initPage() {
   loadSavedCredentials();
+  loadUserSettings();
   try {
     const state = await fetch('/api/live/status').then(r => r.json());
     if (state.running) {

@@ -24,6 +24,7 @@ from .claude_analyst import (analyze_with_claude, get_live_signal,
                               get_regime,
                               scan_market, test_connection,
                               synthesize_learnings,
+                              synthesize_community_patterns,
                               distill_and_promote_rules,
                               promote_symbol_patterns_via_claude)
 from .news_analyst import run_news_cycle, get_news_intelligence
@@ -43,7 +44,8 @@ from .user_store import (init_users, list_users, get_user, authenticate,
                          uses_platform, uses_subscription,
                          save_binance_keys, get_binance_keys)
 from .knowledge_store import (append_trade_log, load_trade_log,
-                               save_live_state_snapshot, load_live_state_snapshot)
+                               save_live_state_snapshot, load_live_state_snapshot,
+                               load_user_settings, save_user_settings)
 
 def _floor_to_step(qty: float, step: float) -> float:
     """Floor qty to the nearest multiple of step (avoids LOT_SIZE filter errors)."""
@@ -401,6 +403,19 @@ async def get_profile(request: Request):
         "has_api_key": bool(user.get("claude_api_key")),
         "has_oauth_token": bool(user.get("claude_oauth_token")),
     }
+
+
+@app.get("/api/user/settings")
+async def get_user_settings(request: Request):
+    user = _get_current_user(request)
+    return load_user_settings(user["username"])
+
+
+@app.post("/api/user/settings")
+async def post_user_settings(body: dict, request: Request):
+    user = _get_current_user(request)
+    save_user_settings(user["username"], body)
+    return {"ok": True}
 
 
 @app.post("/api/user/claude-config")
@@ -783,11 +798,19 @@ async def stop_live(request: Request):
 async def get_live_credentials(request: Request):
     user = _get_current_user(request)
     bkey, bsec = get_binance_keys(user["username"])
+    hint = f"{bkey[:4]}...{bkey[-4:]}" if len(bkey) >= 8 else ("✓" if bkey else "")
     return {
         "has_key": bool(bkey),
         "has_secret": bool(bsec),
-        "key_hint": f"...{bkey[-4:]}" if len(bkey) >= 4 else ("✓" if bkey else ""),
+        "key_hint": hint,
     }
+
+
+@app.get("/api/live/credentials/reveal")
+async def reveal_live_credentials(request: Request):
+    user = _get_current_user(request)
+    bkey, _ = get_binance_keys(user["username"])
+    return {"api_key": bkey or ""}
 
 
 class BinanceValidateRequest(BaseModel):
@@ -935,6 +958,16 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
         )
         if kb_ok:
             _log(sim_state, f"✅ {kb_msg}")
+            async def _run_community():
+                comm_ok, comm_msg = await synthesize_community_patterns(
+                    req.symbol, req.interval,
+                    api_key=api_key, oauth_token=oauth_token,
+                )
+                if comm_ok:
+                    logger.info("Community KB: %s", comm_msg)
+                else:
+                    logger.debug("Community KB skipped: %s", comm_msg)
+            asyncio.create_task(_run_community())
         else:
             _log(sim_state, f"⚠ Wissensbasis-Update fehlgeschlagen: {kb_msg}")
 
@@ -1409,6 +1442,11 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 reason     = signal.get("reason", "")
                 _log(live_state, f"Signal: {action} | Konfidenz: {confidence}% | {reason}")
 
+            raw_action = action
+            _d_vote = _d_news_mod = _d_regime_boost = _d_total = 0.0
+            _d_overrides: list = []
+            _d_green = None
+
             live_state["signals"].append({
                 "action": action, "confidence": confidence, "reason": reason,
                 "price": price, "symbol": active_symbol,
@@ -1427,21 +1465,28 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 news_mod = (news_sent / 100.0) * news_w
                 regime_boost = {"BULL_TREND": 0.3, "RANGING": 0.0, "BEAR_TREND": -0.3, "HIGH_VOLATILITY": -0.5}.get(regime_str, 0.0)
                 total_score = vote + news_mod + regime_boost
+                _d_vote, _d_news_mod, _d_regime_boost, _d_total = vote, news_mod, regime_boost, total_score
                 _log(live_state, f"Vote: Signal={vote:+.1f} News={news_mod:+.2f} Regime={regime_boost:+.1f} → {total_score:+.2f}")
 
                 if regime_str == "HIGH_VOLATILITY" and action == "BUY":
                     action = "HOLD"
+                    _d_overrides.append("BUY blockiert: HIGH_VOLATILITY-Regime")
                     _log(live_state, "🚫 BUY blockiert: HIGH_VOLATILITY")
                 if news_veto and action == "BUY":
                     action = "HOLD"
+                    _d_overrides.append("BUY blockiert: News-Veto")
                     _log(live_state, f"🚫 BUY blockiert: News-Veto")
                 if action == "BUY" and total_score < 1.3:
                     action = "HOLD"
+                    _d_overrides.append(f"BUY→HOLD: Voting-Score {total_score:.2f} unter Schwellenwert 1.3")
                     _log(live_state, f"→ HOLD: Score {total_score:.2f} < 1.3")
                 if action == "SELL" and live_state["position"] == "IN_POSITION" and total_score > -0.8:
                     if not force_sell:
                         action = "HOLD"
+                        _d_overrides.append(f"SELL→HOLD: Score {total_score:.2f} über Schwellenwert −0.8")
                         _log(live_state, f"→ HOLD: SELL Score {total_score:.2f} > -0.8")
+            else:
+                _d_overrides.append(f"Zwangsverkauf: {force_sell_reason}")
 
             # ── Agent 4: Risk sizing ─────────────────────────────────────────────
             risk_result = None
@@ -1459,12 +1504,14 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     regime_str not in ("BEAR_TREND", "HIGH_VOLATILITY"),
                     total_score >= 1.3,
                 ])
+                _d_green = green
                 capital = live_state.get("current_capital") or req.trade_amount_usdt
                 risk_result = calculate_risk_params(enriched, capital, regime_str, green)
                 live_state["last_risk"] = risk_result
                 _log(live_state, f"Risk: {risk_result['position_size_pct']}% Kapital | SL {risk_result['stop_loss_pct']:.2f}% | TP {risk_result['take_profit_pct']:.2f}%")
                 if risk_result["blocked"]:
                     action = "HOLD"
+                    _d_overrides.append(f"BUY blockiert: Risk Agent ({green}/4 Signale grün)")
                     _log(live_state, f"🚫 Risk Agent blockiert ({green}/4 Signale grün)")
 
             # ── Execute signal ───────────────────────────────────────────────────
@@ -1490,6 +1537,41 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 _log(live_state, f"→ HALTEN (Konfidenz: {confidence}%, Position: {live_state['position']})")
             else:
                 _log(live_state, f"→ {action} ignoriert (Position: {live_state['position']})")
+
+            live_state["last_decision"] = {
+                "ts": candles[-1]["timestamp"] if candles else int(time.time() * 1000),
+                "symbol": active_symbol,
+                "candle_num": live_state.get("candle_count", 0),
+                "price": price,
+                "regime": {
+                    "type": regime_result.get("regime", "RANGING"),
+                    "strength": regime_result.get("strength", 50),
+                    "strategy": regime_result.get("recommended_strategy", ""),
+                },
+                "news": {
+                    "score": news_score.get("sentiment_score", 50),
+                    "veto": news_score.get("veto", False),
+                },
+                "raw_action": raw_action,
+                "confidence": confidence,
+                "reason": reason,
+                "voting": {
+                    "vote": _d_vote,
+                    "news_mod": _d_news_mod,
+                    "regime_boost": _d_regime_boost,
+                    "total_score": _d_total,
+                },
+                "overrides": _d_overrides,
+                "final_action": action,
+                "risk": {
+                    "position_size_pct": risk_result["position_size_pct"],
+                    "stop_loss_pct": risk_result["stop_loss_pct"],
+                    "take_profit_pct": risk_result["take_profit_pct"],
+                    "blocked": risk_result["blocked"],
+                    "green_signals": _d_green,
+                } if risk_result else None,
+                "force_sell": force_sell,
+            }
 
             next2 = _next_close()
             live_state["next_check_ts"] = next2 + CLOSE_BUFFER
