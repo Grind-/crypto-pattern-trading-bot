@@ -1323,8 +1323,20 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             _log(live_state, f"⚠ Startup-Check fehlgeschlagen: {e}")
             logger.error(f"Startup-Check fehlgeschlagen [{username}]: {e}")
 
+        # Pre-fetch candles immediately so the chart is not empty during the first wait
         first_run = True
         candles: list = []
+        _init_sym = live_state.get("symbol") or current_symbol
+        if _init_sym:
+            try:
+                _init_raw = await fetch_latest_klines(_init_sym, req.interval, limit=100)
+                if _init_raw:
+                    candles = compute_indicators(_init_raw)
+                    live_state["live_candles"] = [
+                        {"timestamp": c["timestamp"], "close": c["close"]} for c in _init_raw[-80:]
+                    ]
+            except Exception as _e:
+                logger.warning(f"Initial candle pre-fetch failed [{username}]: {_e}")
         while _still_active():
 
             next_close_ts = _next_close()
