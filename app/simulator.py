@@ -10,20 +10,33 @@ FEE_TIERS = {
     "vip4":      0.05,
 }
 
+COMPOUNDING_MODES = {
+    "fixed":          "Fixes Volumen",
+    "compound":       "Volles Compounding",
+    "compound_wins":  "Gewinne compounding",
+}
+
 
 def run_simulation(
     candles: List[Dict],
     signals: List[Dict],
     initial_capital: float = 1000.0,
     fee_pct: float = 0.1,
+    compounding_mode: str = "compound",
 ) -> Dict:
+    """
+    compounding_mode:
+      "fixed"         — always trade with initial_capital; P&L accumulates in wallet_base
+      "compound"      — reinvest everything (wins AND losses compound)
+      "compound_wins" — compound wins; reset to initial_capital after a loss
+    """
     if not signals or not candles:
         history = [
             {"candle_index": i, "timestamp": c.get("timestamp", 0),
              "value": initial_capital, "close": c["close"]}
             for i, c in enumerate(candles)
         ]
-        return _empty_result(initial_capital, history)
+        return _empty_result(initial_capital, history, compounding_mode)
 
     sorted_sigs = sorted(signals, key=lambda x: x.get("candle_index", 0))
     sorted_sigs = [s for s in sorted_sigs if 0 <= s.get("candle_index", -1) < len(candles)]
@@ -41,11 +54,15 @@ def run_simulation(
 
     sig_map = {s["candle_index"]: s for s in valid}
 
-    capital = initial_capital
+    # active_capital: USDC available for the current/next trade (0 while IN_POSITION)
+    # wallet_base:    P&L accumulated outside the active trade pool (used by fixed/compound_wins)
+    active_capital = initial_capital
+    wallet_base = 0.0
     position = 0.0
     buy_price = 0.0
     buy_index = 0
-    buy_capital = 0.0      # capital committed at buy time (after buy fee)
+    entry_capital = 0.0    # capital committed at buy time (before fee)
+    buy_capital_net = 0.0  # capital after buy fee
     buy_fee_paid = 0.0
     trades = []
     history = []
@@ -55,7 +72,7 @@ def run_simulation(
 
     for i, candle in enumerate(candles):
         price = candle["close"]
-        current_value = capital + position * price
+        current_value = active_capital + position * price + wallet_base
 
         history.append({
             "candle_index": i,
@@ -66,65 +83,77 @@ def run_simulation(
 
         if current_value > peak_value:
             peak_value = current_value
-        drawdown = (peak_value - current_value) / peak_value * 100
+        drawdown = (peak_value - current_value) / peak_value * 100 if peak_value > 0 else 0
         max_drawdown = max(max_drawdown, drawdown)
 
         if i in sig_map:
             action = sig_map[i].get("action", "").upper()
 
-            if action == "BUY" and capital > 0:
-                buy_fee = capital * (fee_pct / 100)
+            if action == "BUY" and active_capital > 0:
+                buy_fee = active_capital * (fee_pct / 100)
                 total_fees += buy_fee
-                buy_capital = capital - buy_fee          # actual USDT used after fee
-                position = buy_capital / price
+                entry_capital = active_capital
+                buy_capital_net = active_capital - buy_fee
+                position = buy_capital_net / price
                 buy_price = price
                 buy_index = i
                 buy_fee_paid = buy_fee
-                capital = 0.0
+                active_capital = 0.0
 
             elif action == "SELL" and position > 0:
                 gross = position * price
                 sell_fee = gross * (fee_pct / 100)
                 total_fees += sell_fee
                 net_received = gross - sell_fee
-                capital = net_received
 
-                # True net P&L: compare net received vs original capital committed
-                original_committed = buy_capital + buy_fee_paid  # full capital before buy fee
-                net_pnl_pct = (net_received - original_committed) / original_committed * 100
-                # Raw price move (before fees)
-                price_move_pct = ((price - buy_price) / buy_price) * 100
+                original_committed = entry_capital
+                net_pnl_pct = (net_received - original_committed) / original_committed * 100 if original_committed else 0
+                price_move_pct = ((price - buy_price) / buy_price) * 100 if buy_price else 0
 
                 trades.append({
                     "buy_index": buy_index,
                     "sell_index": i,
                     "buy_price": round(buy_price, 2),
                     "sell_price": round(price, 2),
-                    "pnl_pct": round(net_pnl_pct, 3),          # net after both fees
-                    "price_move_pct": round(price_move_pct, 3), # raw price move
+                    "pnl_pct": round(net_pnl_pct, 3),
+                    "price_move_pct": round(price_move_pct, 3),
                     "fee_buy": round(buy_fee_paid, 4),
                     "fee_sell": round(sell_fee, 4),
                     "fees_total": round(buy_fee_paid + sell_fee, 4),
                     "reason_buy": sig_map.get(buy_index, {}).get("reason", ""),
                     "reason_sell": sig_map[i].get("reason", ""),
+                    "capital_used": round(entry_capital, 2),
+                    "capital_after": round(net_received, 2),
                 })
                 position = 0.0
 
-    # Close open position at last price
-    final_value = capital
+                # Apply compounding mode
+                if compounding_mode == "compound":
+                    active_capital = net_received
+                elif compounding_mode == "fixed":
+                    wallet_base += net_received - entry_capital
+                    active_capital = initial_capital
+                else:  # compound_wins
+                    if net_received >= initial_capital:
+                        active_capital = net_received
+                    else:
+                        wallet_base += net_received - initial_capital
+                        active_capital = initial_capital
+
+    # Close open position at last price (mark-to-market)
     if position > 0:
         last_price = candles[-1]["close"]
         close_fee = position * last_price * (fee_pct / 100)
         total_fees += close_fee
-        final_value = position * last_price - close_fee
+        final_value = position * last_price - close_fee + wallet_base
+    else:
+        final_value = active_capital + wallet_base
 
     total_return_usdt = final_value - initial_capital
-    total_return_pct = (total_return_usdt / initial_capital) * 100
+    total_return_pct = (total_return_usdt / initial_capital) * 100 if initial_capital else 0
     winning = sum(1 for t in trades if t["pnl_pct"] > 0)
     win_rate = (winning / len(trades) * 100) if trades else 0.0
-
-    # Fee impact: what return would be without any fees
-    fee_drag_pct = (total_fees / initial_capital) * 100
+    fee_drag_pct = (total_fees / initial_capital) * 100 if initial_capital else 0
 
     return {
         "trades": trades,
@@ -137,11 +166,13 @@ def run_simulation(
         "total_fees_usdt": round(total_fees, 4),
         "fee_drag_pct": round(fee_drag_pct, 3),
         "fee_pct_used": fee_pct,
+        "compounding_mode": compounding_mode,
+        "compounding_mode_label": COMPOUNDING_MODES.get(compounding_mode, compounding_mode),
         "portfolio_history": history,
     }
 
 
-def _empty_result(initial_capital: float, history: List[Dict]) -> Dict:
+def _empty_result(initial_capital: float, history: List[Dict], compounding_mode: str = "compound") -> Dict:
     return {
         "trades": [],
         "total_return_pct": 0.0,
@@ -153,5 +184,7 @@ def _empty_result(initial_capital: float, history: List[Dict]) -> Dict:
         "total_fees_usdt": 0.0,
         "fee_drag_pct": 0.0,
         "fee_pct_used": 0.1,
+        "compounding_mode": compounding_mode,
+        "compounding_mode_label": COMPOUNDING_MODES.get(compounding_mode, compounding_mode),
         "portfolio_history": history,
     }

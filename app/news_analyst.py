@@ -281,8 +281,14 @@ RSS FEED HEADLINES:
 Your task:
 1. Synthesize ALL sources above — structured data AND internet research carry equal weight
 2. Identify 2–5 USDC pairs with a concrete near-term catalyst (4–48h)
-3. Highlight any breaking news or social sentiment shifts from the internet research
-4. List key risks visible in the news right now
+3. For EVERY significant news item (8–12 total), explicitly evaluate:
+   - weight: "high" (breaks market direction), "medium" (relevant context), "low" (background noise)
+   - signal: "bullish", "bearish", or "neutral"
+   - affects_symbols: which USDC pairs are directly affected ([] if market-wide)
+   - decision_impact: one concrete sentence — e.g. "Stärkt BUY-Signal für XRPUSDC", "Erhöht Hold-Druck bei offenen Long-Positionen", "Kein direkter Einfluss auf Spot-Trading"
+   - reasoning: 1-2 sentences WHY this news shifts a trading signal (mechanism, not just restatement)
+   - flows_into_decision: true if this item is actively passed to the Trading Agent, false if filtered out as noise
+4. List key risks and warnings
 5. Confidence ≥ 60% only; pairs from AVAILABLE BINANCE USDC PAIRS only
 
 Respond with ONLY raw JSON:
@@ -298,6 +304,18 @@ Respond with ONLY raw JSON:
       "timeframe": "24h",
       "direction": "long",
       "source": "Google News / Reddit / RSS"
+    }}
+  ],
+  "weighted_news": [
+    {{
+      "headline": "Exact headline or concise summary of the news item",
+      "source": "RSS / Google News / Reddit",
+      "weight": "high",
+      "signal": "bullish",
+      "affects_symbols": ["XRPUSDC"],
+      "decision_impact": "Stärkt BUY-Signal für XRPUSDC aufgrund von Supply-Squeeze",
+      "reasoning": "Exchange outflows historically precede price appreciation as circulating supply tightens. Combined with regulatory tailwind, this shifts the BUY threshold lower.",
+      "flows_into_decision": true
     }}
   ],
   "warnings": ["warning1", "warning2"],
@@ -374,6 +392,15 @@ def get_news_context_for_trading(symbol: str) -> str:
     analysis = intel.get("analysis", "")
     if analysis:
         lines.append(f"Summary: {analysis}")
+
+    # Weighted news that flows into decisions — symbol-specific first, then market-wide
+    weighted = intel.get("weighted_news", [])
+    active = [n for n in weighted if n.get("flows_into_decision") and n.get("weight") in ("high", "medium")]
+    sym_news = [n for n in active if symbol.upper() in [s.upper() for s in n.get("affects_symbols", [])]]
+    market_news = [n for n in active if not n.get("affects_symbols")]
+    for n in (sym_news + market_news)[:5]:
+        sig = {"bullish": "↑", "bearish": "↓", "neutral": "→"}.get(n.get("signal", ""), "")
+        lines.append(f"  {sig}[{n.get('weight','').upper()}] {n.get('decision_impact', '')} — {n.get('reasoning', '')}")
 
     for w in intel.get("warnings", [])[:2]:
         lines.append(f"  ⚠ {w}")

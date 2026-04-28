@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bedienungsanleitung — Crypto Pattern AI</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    :root { --sidebar-w: 220px; }
+    body { background: var(--bg); }
+    .doc-layout { display: flex; min-height: 100vh; }
+
+    .sidebar {
+      width: var(--sidebar-w); flex-shrink: 0;
+      background: var(--surface); border-right: 1px solid var(--border);
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
+      padding: 0 0 40px;
+    }
+    .sidebar-header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+    .sidebar-header a { color: var(--text-muted); text-decoration: none; font-size: 12px; }
+    .sidebar-header a:hover { color: var(--text); }
+    .sidebar-title { font-size: 13px; font-weight: 700; color: var(--text); margin-top: 6px; }
+    .nav-group-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--text-muted); padding: 10px 16px 3px;
+    }
+    .nav-link {
+      display: block; padding: 5px 16px; font-size: 12px;
+      color: var(--text-muted); text-decoration: none;
+      border-left: 2px solid transparent; transition: color .1s, border-color .1s;
+    }
+    .nav-link:hover { color: var(--text); border-left-color: var(--border); }
+    .nav-link.active { color: var(--blue); border-left-color: var(--blue); }
+
+    .doc-content { flex: 1; max-width: 820px; padding: 0 40px 100px; margin: 0 auto; }
+
+    .hero { padding: 48px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+    .hero h1 { font-size: 26px; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+    .hero-sub { font-size: 14px; color: var(--text-muted); line-height: 1.65; max-width: 580px; }
+
+    .section { padding: 44px 0 0; }
+    h2 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+    .section-icon {
+      width: 30px; height: 30px; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 15px; flex-shrink: 0;
+    }
+    .ic-blue   { background: rgba(88,166,255,0.15); }
+    .ic-green  { background: rgba(63,185,80,0.15); }
+    .ic-purple { background: rgba(188,140,255,0.15); }
+    .ic-yellow { background: rgba(210,153,34,0.15); }
+    .ic-red    { background: rgba(248,81,73,0.15); }
+
+    .section-desc { font-size: 13px; color: var(--text-muted); line-height: 1.65; margin-bottom: 18px; }
+    h3 { font-size: 13px; font-weight: 700; color: var(--text); margin: 26px 0 8px; }
+    p  { font-size: 13px; color: var(--text-muted); line-height: 1.65; margin-bottom: 10px; }
+    li { font-size: 13px; color: var(--text-muted); line-height: 1.75; }
+    ul, ol { padding-left: 20px; margin-bottom: 12px; }
+    strong { color: var(--text); }
+    code {
+      font-family: 'SF Mono','Fira Code',monospace; font-size: 11.5px;
+      background: var(--surface2); padding: 2px 6px; border-radius: 4px; color: var(--blue);
+    }
+
+    .steps { display: flex; flex-direction: column; gap: 12px; margin: 16px 0 24px; }
+    .step { display: flex; gap: 14px; align-items: flex-start; }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%; background: var(--blue);
+      color: #0d1117; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    }
+    .step-body { flex: 1; }
+    .step-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+    .step-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+    .info-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px;
+    }
+    .info-card-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 6px; }
+    .info-card-value { font-size: 13px; color: var(--text); line-height: 1.5; }
+    .info-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+
+    .callout {
+      border-left: 3px solid; padding: 10px 14px;
+      border-radius: 0 6px 6px 0; font-size: 13px; line-height: 1.65; margin: 14px 0;
+    }
+    .callout-blue   { border-color: var(--blue);   background: rgba(88,166,255,0.06);  color: var(--text-muted); }
+    .callout-yellow { border-color: var(--yellow);  background: rgba(210,153,34,0.06);  color: var(--text-muted); }
+    .callout-green  { border-color: var(--green);   background: rgba(63,185,80,0.06);   color: var(--text-muted); }
+    .callout-red    { border-color: var(--red);     background: rgba(248,81,73,0.06);   color: var(--text-muted); }
+    .callout strong { color: var(--text); }
+
+    .tbl { width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0 20px; }
+    .tbl th { text-align: left; padding: 7px 10px; border-bottom: 2px solid var(--border);
+      color: var(--text-muted); font-weight: 600; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.05em; }
+    .tbl td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 13px; color: var(--text-muted); }
+    .tbl tr:last-child td { border-bottom: none; }
+    .tbl .tn { color: var(--blue); font-weight: 600; white-space: nowrap; }
+
+    .section-divider { border: none; border-top: 1px solid var(--border); margin: 44px 0 0; }
+
+    .badge-inline {
+      display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+    }
+    .b-green  { background: rgba(63,185,80,0.15);  color: var(--green); }
+    .b-red    { background: rgba(248,81,73,0.15);  color: var(--red); }
+    .b-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+    .b-blue   { background: rgba(88,166,255,0.15); color: var(--blue); }
+    .b-purple { background: rgba(188,140,255,0.15);color: var(--purple); }
+
+    @media (max-width: 700px) {
+      .sidebar { display: none; }
+      .doc-content { padding: 0 16px 60px; }
+      .info-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="doc-layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <a href="/">← Zurück zur App</a>
+      <div class="sidebar-title">Bedienungsanleitung</div>
+    </div>
+    <div class="nav-group-label">Einstieg</div>
+    <a class="nav-link" href="#start">Was ist Crypto Pattern AI?</a>
+    <a class="nav-link" href="#login">Anmelden &amp; Einstellungen</a>
+    <a class="nav-link" href="#claude">Claude-Zugang einrichten</a>
+    <div class="nav-group-label">Live Trading</div>
+    <a class="nav-link" href="#live-vorbereitung">Vorbereitung</a>
+    <a class="nav-link" href="#live-binance">Binance API-Key</a>
+    <a class="nav-link" href="#live-start">Live Trading starten</a>
+    <a class="nav-link" href="#live-lesen">Status verstehen</a>
+    <a class="nav-link" href="#live-stopp">Stoppen</a>
+    <div class="nav-group-label">Simulation</div>
+    <a class="nav-link" href="#sim-was">Was ist eine Simulation?</a>
+    <a class="nav-link" href="#sim-start">Simulation starten</a>
+    <a class="nav-link" href="#sim-lesen">Ergebnisse verstehen</a>
+    <a class="nav-link" href="#sim-historie">Vergangene Simulationen</a>
+    <div class="nav-group-label">Marktscanner</div>
+    <a class="nav-link" href="#scanner">Scanner nutzen</a>
+    <div class="nav-group-label">Hinweise</div>
+    <a class="nav-link" href="#risiken">Risiken &amp; Grenzen</a>
+    <a class="nav-link" href="#tipps">Tipps</a>
+  </nav>
+
+  <!-- Content -->
+  <main class="doc-content">
+
+    <!-- HERO -->
+    <div class="hero" id="start">
+      <h1>Bedienungsanleitung</h1>
+      <p class="hero-sub">
+        Crypto Pattern AI analysiert Kryptomärkte mit Hilfe von Claude und führt Trades auf Binance aus —
+        vollautomatisch. Diese Anleitung erklärt Schritt für Schritt, wie du die App als User bedienst.
+      </p>
+    </div>
+
+    <!-- ANMELDEN -->
+    <hr class="section-divider" />
+    <div class="section" id="login">
+      <h2><span class="section-icon ic-blue">👤</span>Anmelden &amp; Einstellungen</h2>
+      <p class="section-desc">Du erreichst die App über die Adresse, die dir der Administrator mitgeteilt hat. Melde dich mit Benutzername und Passwort an.</p>
+
+      <h3>Passwort ändern</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Einstellungen öffnen</div>
+            <div class="step-desc">Klicke oben rechts auf <strong>Einstellungen</strong>.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Passwort-Bereich</div>
+            <div class="step-desc">Scrolle nach unten zum Abschnitt <strong>Passwort ändern</strong>. Gib dein aktuelles und zweimal das neue Passwort ein.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Speichern</div>
+            <div class="step-desc">Klicke auf <strong>Passwort ändern</strong>. Das neue Passwort gilt sofort.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLAUDE ZUGANG -->
+    <hr class="section-divider" />
+    <div class="section" id="claude">
+      <h2><span class="section-icon ic-purple">◯</span>Claude-Zugang einrichten</h2>
+      <p class="section-desc">
+        Claude ist das KI-Gehirn der App — es analysiert Marktdaten und gibt Trading-Signale. Ohne einen funktionierenden Claude-Zugang können keine Simulationen oder Live-Analysen durchgeführt werden.
+      </p>
+
+      <div class="callout callout-blue">
+        <strong>Prüfe zuerst deinen Status:</strong> Öffne <strong>Einstellungen</strong> und schau, welcher Modus aktuell ausgewählt ist. Wenn du keinen eigenen Zugang hast, frage deinen Administrator, ob er dir den <em>Platform-Modus</em> freischaltet.
+      </div>
+
+      <h3>Die drei Modi</h3>
+      <table class="tbl">
+        <thead><tr><th>Modus</th><th>Was du brauchst</th><th>Wann nutzen?</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">Platform</td>
+            <td>Nichts — Admin schaltet frei</td>
+            <td>Einfachste Option. Nutzt den Server-Account. Kein eigener Schlüssel nötig.</td>
+          </tr>
+          <tr>
+            <td class="tn">Subscription</td>
+            <td>Eigenen Claude.ai-Token (<code>sk-ant-oat01-…</code>)</td>
+            <td>Du hast ein eigenes Claude.ai Pro/Team Abo und möchtest es nutzen.</td>
+          </tr>
+          <tr>
+            <td class="tn">API-Key</td>
+            <td>Anthropic API-Key (<code>sk-ant-api03-…</code>)</td>
+            <td>Du hast einen eigenen Anthropic API-Account. Kosten entstehen pro Anfrage.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>API-Key oder Token eintragen</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Einstellungen öffnen</div>
+            <div class="step-desc">Klicke oben rechts auf <strong>Einstellungen</strong>.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Modus wählen</div>
+            <div class="step-desc">Klicke auf die gewünschte Kachel (<em>Platform</em>, <em>Subscription</em> oder <em>API-Key</em>).</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Schlüssel eingeben</div>
+            <div class="step-desc">Nur bei <em>Subscription</em> oder <em>API-Key</em>: Füge deinen Schlüssel in das angezeigte Feld ein.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Verbindung testen</div>
+            <div class="step-desc">Klicke auf <strong>Verbindung testen</strong>. Bei Erfolg erscheint ein grüner Haken.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE TRADING VORBEREITUNG -->
+    <hr class="section-divider" />
+    <div class="section" id="live-vorbereitung">
+      <h2><span class="section-icon ic-red">📡</span>Live Trading — Vorbereitung</h2>
+
+      <div class="callout callout-red">
+        <strong>Wichtig:</strong> Live Trading führt <strong>echte Orders</strong> auf Binance aus — mit echtem Geld. Stelle sicher, dass du die Funktionsweise verstehst und nur Kapital einsetzt, dessen Verlust du dir leisten kannst.
+      </div>
+
+      <p>Bevor du Live Trading starten kannst, brauchst du:</p>
+      <ol>
+        <li>Einen <strong>funktionierenden Claude-Zugang</strong> (siehe Einstellungen)</li>
+        <li>Einen <strong>Binance API-Key</strong> mit Spot-Trading-Berechtigung</li>
+        <li>Ausreichend <strong>USDC-Guthaben</strong> auf deinem Binance-Konto (mindestens den gewählten Trade-Betrag)</li>
+      </ol>
+    </div>
+
+    <!-- BINANCE API KEY -->
+    <hr class="section-divider" />
+    <div class="section" id="live-binance">
+      <h2><span class="section-icon ic-yellow">🔑</span>Binance API-Key einrichten</h2>
+
+      <h3>API-Key auf Binance erstellen</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Binance öffnen</div>
+            <div class="step-desc">Melde dich auf <strong>binance.com</strong> an. Gehe zu <strong>Profil → API-Verwaltung</strong>.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Neuen Key erstellen</div>
+            <div class="step-desc">Klicke auf <strong>API erstellen</strong>. Vergib einen Namen (z.B. <em>CryptoPatternAI</em>).</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Berechtigungen setzen</div>
+            <div class="step-desc">Aktiviere <strong>nur</strong> <em>Spot &amp; Margin Trading aktivieren</em>. Deaktiviere alles andere — insbesondere keine Auszahlungs- oder Transferrechte.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Key und Secret kopieren</div>
+            <div class="step-desc">Kopiere <strong>API Key</strong> und <strong>Secret Key</strong> sofort — das Secret wird nur einmal angezeigt.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <div class="step-title">In die App eintragen</div>
+            <div class="step-desc">Öffne den Tab <strong>Live Trading</strong> und trage Key und Secret in die Felder ein. Klicke auf <strong>Keys testen</strong> — bei Erfolg erscheint ein grüner Haken.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-yellow">
+        <strong>Sicherheit:</strong> Lege eine IP-Whitelist auf Binance fest (die IP des Servers). Das verhindert Missbrauch, wenn der Key jemals kompromittiert werden sollte.
+      </div>
+    </div>
+
+    <!-- LIVE TRADING STARTEN -->
+    <hr class="section-divider" />
+    <div class="section" id="live-start">
+      <h2><span class="section-icon ic-green">▶</span>Live Trading starten</h2>
+
+      <p class="section-desc">
+        Der Bot entscheidet <strong>selbst</strong>, welches Symbol er kauft — du musst kein Startpaar angeben.
+        Beim Start scannt Claude den Markt und wählt das aktuell beste Setup aus.
+      </p>
+
+      <h3>Konfiguration im Tab "Live Trading"</h3>
+      <table class="tbl">
+        <thead><tr><th>Feld</th><th>Was es bedeutet</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">API Key / Secret</td>
+            <td>Dein Binance API-Key und Secret. Nur beim ersten Mal nötig — danach gespeichert.</td>
+          </tr>
+          <tr>
+            <td class="tn">Intervall</td>
+            <td>Kerzenlänge: <code>1h</code>, <code>4h</code> oder <code>1d</code>. Bestimmt, wie oft analysiert wird.</td>
+          </tr>
+          <tr>
+            <td class="tn">Trade-Betrag (USDC)</td>
+            <td>Wie viel USDC pro Trade eingesetzt wird. Mindestens 10 USDC.</td>
+          </tr>
+          <tr>
+            <td class="tn">Compounding-Modus</td>
+            <td>Bestimmt, wie Gewinne und Verluste den nächsten Trade-Betrag beeinflussen.</td>
+          </tr>
+          <tr>
+            <td class="tn">Wissensbasis vs. Marktanalyse</td>
+            <td>Wie stark die gesammelten Simulations-Erfahrungen (Wissensbasis) gegenüber der reinen Echtzeit-Marktanalyse gewichtet werden. Empfehlung: 50–70 % Wissensbasis.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Startup-Logik: Was passiert beim Start?</h3>
+      <p>Der Bot prüft beim Start automatisch dein Guthaben und handelt intelligent:</p>
+      <table class="tbl">
+        <thead><tr><th>Situation</th><th>Was der Bot tut</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Genug USDC vorhanden</td>
+            <td>Scannt den Markt, wählt bestes Symbol, kauft sofort.</td>
+          </tr>
+          <tr>
+            <td>Ziel-Crypto bereits gehalten + USDC zum Aufstocken reicht</td>
+            <td>Setzt vorhandenes Crypto als Position ein, kauft fehlende Menge nach.</td>
+          </tr>
+          <tr>
+            <td>Ziel-Crypto vorhanden, kein USDC</td>
+            <td>Setzt vorhandenes Crypto direkt als offene Position ein.</td>
+          </tr>
+          <tr>
+            <td>Wenig USDC, kein Crypto</td>
+            <td>Kauft so viel wie möglich mit verfügbarem USDC.</td>
+          </tr>
+          <tr>
+            <td>Weniger als $10 USDC, kein Crypto</td>
+            <td>Wartet auf Einzahlung und loggt eine Warnung.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Parameter prüfen</div>
+            <div class="step-desc">Vergewissere dich, dass API-Key, Intervall und Trade-Betrag korrekt eingestellt sind.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Live Trading starten</div>
+            <div class="step-desc">Klicke auf <strong>▶ Live Trading starten</strong>. Der Bot scannt sofort den Markt, wählt das beste Symbol und kauft automatisch.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Log beobachten</div>
+            <div class="step-desc">Im Log siehst du, welches Symbol der Agent gewählt hat und ob der Kauf erfolgreich war.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-blue">
+        <strong>Hintergrundprozess:</strong> Der Bot läuft auf dem Server und analysiert den Markt bei jedem Kerzenschluss (z.B. alle 4 Stunden bei <code>4h</code>). Du musst die Seite nicht offen lassen.
+      </div>
+    </div>
+
+    <!-- LIVE STATUS LESEN -->
+    <hr class="section-divider" />
+    <div class="section" id="live-lesen">
+      <h2><span class="section-icon ic-blue">📈</span>Live-Status verstehen</h2>
+      <p class="section-desc">Sobald der Bot läuft, zeigt das Status-Panel alle wichtigen Informationen.</p>
+
+      <h3>Status-Anzeigen</h3>
+      <table class="tbl">
+        <thead><tr><th>Anzeige</th><th>Bedeutung</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">FLAT</td>
+            <td>Keine offene Position — der Bot hält USDC und wartet auf ein Kaufsignal.</td>
+          </tr>
+          <tr>
+            <td class="tn">IN POSITION</td>
+            <td>Eine Position ist offen — der Bot hält Crypto und wartet auf ein Verkaufssignal.</td>
+          </tr>
+          <tr>
+            <td class="tn">Entscheidungsgrundlage</td>
+            <td>Zeigt das aktive Symbol und die eingestellte KB/Markt-Gewichtung.</td>
+          </tr>
+          <tr>
+            <td class="tn">Nächste Analyse in…</td>
+            <td>Countdown bis zum nächsten Kerzenschluss. Dann analysiert der Bot den Markt erneut.</td>
+          </tr>
+          <tr>
+            <td class="tn">Log-Einträge</td>
+            <td>Chronologische Protokollzeilen: Kerzenschlüsse, Signale von Claude, ausgeführte Orders, Fehler.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Signal-Schwellwerte (automatisch)</h3>
+      <table class="tbl">
+        <thead><tr><th>Aktion</th><th>Voraussetzung</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="badge-inline b-green">BUY</span></td>
+            <td>Claude sagt KAUFEN mit ≥ 60 % Konfidenz, und du bist FLAT</td>
+          </tr>
+          <tr>
+            <td><span class="badge-inline b-red">SELL</span></td>
+            <td>Claude sagt VERKAUFEN mit ≥ 55 % Konfidenz, und du hast eine offene Position</td>
+          </tr>
+          <tr>
+            <td><span class="badge-inline b-yellow">HOLD</span></td>
+            <td>Kein ausreichendes Signal — keine Order wird ausgeführt</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Automatischer Symbol-Wechsel</h3>
+      <p>Bei jedem Analysezyklus scannt der Bot den Markt und wechselt zum Symbol mit dem besten Handelspotenzial — jedoch nur wenn du gerade FLAT bist. Solange du eine Position hältst, bleibt der Bot beim aktuellen Symbol. Beim Wechsel versucht der Bot zunächst ein direktes Tauschpaar (z.B. XRPBTC) und fällt andernfalls über USDC um.</p>
+
+      <h3>Wissensbasis</h3>
+      <p>Nach jeder abgeschlossenen Simulation aktualisiert der Bot automatisch eine interne Wissensbasis für das jeweilige Symbol und Intervall. Im Live Trading fließt diese Wissensbasis — gewichtet durch den eingestellten Schieberegler — in die Entscheidungen von Claude ein. Je mehr Simulationen du durchgeführt hast, desto besser wird die Wissensbasis.</p>
+
+      <div class="callout callout-blue">
+        <strong>Manuell scannen:</strong> Klicke auf den Button <strong>🔍 Jetzt scannen</strong>, um sofort eine Marktanalyse auszulösen — ohne auf den nächsten Kerzenschluss zu warten. Das führt keine Order aus, sondern gibt dir eine aktuelle Einschätzung.
+      </div>
+    </div>
+
+    <!-- LIVE STOPP -->
+    <hr class="section-divider" />
+    <div class="section" id="live-stopp">
+      <h2><span class="section-icon ic-red">■</span>Live Trading stoppen</h2>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Stopp-Button klicken</div>
+            <div class="step-desc">Klicke auf <strong>■ Stopp</strong> im Live-Trading-Tab.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Offene Position</div>
+            <div class="step-desc">Der Bot stellt alle Analysen ein — aber eine eventuell offene Position wird <strong>nicht automatisch geschlossen</strong>. Wenn du eine Position hältst (IN POSITION), schließe sie manuell auf Binance.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-yellow">
+        <strong>Neustart:</strong> Falls der Server neu startet, setzt der Bot automatisch weiter, wenn er vorher lief. Das zuletzt gehandelte Symbol wird dabei beibehalten.
+      </div>
+    </div>
+
+    <!-- WAS IST EINE SIMULATION -->
+    <hr class="section-divider" />
+    <div class="section" id="sim-was">
+      <h2><span class="section-icon ic-green">🔬</span>Was ist eine Simulation?</h2>
+      <p class="section-desc">
+        Eine Simulation testet eine Handelsstrategie auf <strong>historischen Kursdaten</strong> — kein echtes Geld ist im Spiel.
+        Claude analysiert die Daten, generiert Kauf- und Verkaufssignale mit derselben Logik wie im Live Trading,
+        und ein Backtesting-System berechnet, wie viel Gewinn oder Verlust entstanden wäre.
+      </p>
+
+      <div class="callout callout-green">
+        <strong>Simulation = Live-Training.</strong> Simulationen laufen mit denselben Parametern wie das Live Trading — inklusive Wissensbasis-Gewichtung. Nach jeder Simulation lernt der Bot aus dem Ergebnis und aktualisiert seine Wissensbasis. Je mehr Simulationen du durchführst, desto besser wird das Live Trading.
+      </div>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-card-label">Was wird simuliert?</div>
+          <div class="info-card-value">Historische Kursverläufe (bis zu 1 000 Kerzen)</div>
+          <div class="info-card-sub">Claude analysiert Chartmuster und Indikatoren wie RSI, MACD und Bollinger Bands — identisch zum Live Trading.</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Wie läuft eine Simulation ab?</div>
+          <div class="info-card-value">Einmaliger Analyse-Pass</div>
+          <div class="info-card-sub">Claude analysiert die Marktdaten einmal und generiert alle Signale in einem Durchgang — kein Iterations-Loop.</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Was passiert mit dem Ergebnis?</div>
+          <div class="info-card-value">Automatische Wissensbasis-Aktualisierung</div>
+          <div class="info-card-sub">Nach jeder Simulation lernt der Bot aus den erkannten Mustern und Fehlern. Die Wissensbasis fließt in alle folgenden Simulationen und das Live Trading ein.</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Ist das garantiert profitabel?</div>
+          <div class="info-card-value">Nein — Backtests sind keine Garantie</div>
+          <div class="info-card-sub">Vergangene Performance sagt nichts über zukünftige Ergebnisse aus. Simulationen dienen der Wissensgenerierung, nicht der Gewissheit.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIMULATION STARTEN -->
+    <hr class="section-divider" />
+    <div class="section" id="sim-start">
+      <h2><span class="section-icon ic-green">▷</span>Simulation starten</h2>
+      <p class="section-desc">Öffne den Tab <strong>Simulation</strong> in der Hauptapp.</p>
+
+      <h3>Parameter erklären</h3>
+      <table class="tbl">
+        <thead><tr><th>Feld</th><th>Was es bedeutet</th><th>Empfehlung</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">Symbol</td>
+            <td>Das Handelspaar, z.B. <code>BTCUSDC</code> oder <code>ETHUSDC</code></td>
+            <td>Dasselbe Symbol wie im Live Trading simulieren</td>
+          </tr>
+          <tr>
+            <td class="tn">Intervall</td>
+            <td>Länge einer Kerze: <code>1h</code>, <code>4h</code> oder <code>1d</code></td>
+            <td><code>4h</code> — gute Balance aus Signalqualität und Trade-Häufigkeit</td>
+          </tr>
+          <tr>
+            <td class="tn">Zeitraum (Tage)</td>
+            <td>Wie viele Tage historische Daten geladen werden</td>
+            <td>90–180 Tage für aussagekräftige Ergebnisse</td>
+          </tr>
+          <tr>
+            <td class="tn">Startkapital (USDC)</td>
+            <td>Fiktives Startguthaben für die Simulation</td>
+            <td>Denselben Betrag wie den Live Trade-Betrag wählen</td>
+          </tr>
+          <tr>
+            <td class="tn">Gebühren-Tier</td>
+            <td>Binance-Handelsprovision</td>
+            <td><em>Standard (0,10 %)</em> wenn kein BNB-Rabatt</td>
+          </tr>
+          <tr>
+            <td class="tn">Wissensbasis vs. Marktanalyse</td>
+            <td>Wie stark die bisherige Wissensbasis die Signale beeinflusst</td>
+            <td>Gleiche Einstellung wie im Live Trading verwenden</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Parameter einstellen</div>
+            <div class="step-desc">Wähle Symbol, Intervall, Zeitraum, Kapital und Gewichtung.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Simulation starten</div>
+            <div class="step-desc">Klicke auf <strong>Simulation starten</strong>. Der Log-Bereich unterhalb zeigt den Fortschritt in Echtzeit.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Warten</div>
+            <div class="step-desc">Eine Simulation dauert typisch 30–90 Sekunden. Die Seite muss offen bleiben.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Ergebnis lesen</div>
+            <div class="step-desc">Nach dem Abschluss erscheinen Kennzahlen, Chart und Trade-Protokoll direkt unterhalb.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-yellow">
+        <strong>Simulation abbrechen:</strong> Du kannst jederzeit auf <strong>Stopp</strong> klicken. Das bis dahin erzielte Teilergebnis wird nicht gespeichert, wenn die Simulation noch nicht abgeschlossen war.
+      </div>
+    </div>
+
+    <!-- ERGEBNISSE LESEN -->
+    <hr class="section-divider" />
+    <div class="section" id="sim-lesen">
+      <h2><span class="section-icon ic-yellow">📊</span>Simulations-Ergebnisse verstehen</h2>
+
+      <h3>Kennzahlen im Überblick</h3>
+      <table class="tbl">
+        <thead><tr><th>Kennzahl</th><th>Was sie bedeutet</th><th>Guter Wert</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tn">Netto-Return</td>
+            <td>Prozentualer Gewinn oder Verlust gegenüber dem Startkapital, nach Gebühren</td>
+            <td>Positiv &gt; 0 %</td>
+          </tr>
+          <tr>
+            <td class="tn">Win-Rate</td>
+            <td>Anteil der profitablen Trades an allen Trades</td>
+            <td>Über 50 % als Richtwert</td>
+          </tr>
+          <tr>
+            <td class="tn">Anzahl Trades</td>
+            <td>Wie viele Kauf-Verkauf-Paare durchgeführt wurden</td>
+            <td>Mindestens 5 für Aussagekraft</td>
+          </tr>
+          <tr>
+            <td class="tn">Max. Drawdown</td>
+            <td>Größter prozentualer Rückgang vom Hochpunkt während der Simulation</td>
+            <td>Unter 20 % ist konservativ; unter 10 % sehr gut</td>
+          </tr>
+          <tr>
+            <td class="tn">Gebühren gesamt</td>
+            <td>Summe aller bezahlten Handelsgebühren (USDC)</td>
+            <td>Sollte deutlich kleiner als der Gewinn sein</td>
+          </tr>
+          <tr>
+            <td class="tn">Fee Drag</td>
+            <td>Wie viel Prozent die Gebühren die Rendite reduziert haben</td>
+            <td>Unter 2 %</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Chart lesen</h3>
+      <p>Direkt unter dem Log erscheinen nach der Simulation:</p>
+      <ul>
+        <li><strong>Preischart</strong> — historischer Kursverlauf mit Kauf- (<span class="badge-inline b-green">BUY</span>) und Verkaufssignalen (<span class="badge-inline b-red">SELL</span>).</li>
+        <li><strong>Portfolio-Kurve</strong> — wie sich das simulierte Kapital im gleichen Zeitraum entwickelt hätte, verglichen mit Buy &amp; Hold.</li>
+        <li><strong>Trade-Protokoll</strong> — alle einzelnen Trades mit Einstieg, Ausstieg und P&amp;L.</li>
+      </ul>
+    </div>
+
+    <!-- VERGANGENE SIMULATIONEN -->
+    <hr class="section-divider" />
+    <div class="section" id="sim-historie">
+      <h2><span class="section-icon ic-blue">🗂</span>Vergangene Simulationen</h2>
+      <p class="section-desc">Ganz unten im Simulations-Tab findest du bis zu 50 deiner zuletzt gespeicherten Simulationen. Ältere werden automatisch gelöscht, wenn das Limit erreicht ist.</p>
+
+      <ul>
+        <li>Klicke auf <strong>Charts</strong> bei einer vergangenen Simulation, um den vollständigen Chart und alle Trades zu laden.</li>
+        <li>Mit <strong>→ Live</strong> wechselst du direkt zum Live-Trading-Tab — das Intervall der Simulation wird dabei übernommen.</li>
+        <li><span class="badge-inline b-green">Profitabel</span> — die Simulation hat einen positiven Gesamtertrag erzielt.</li>
+        <li><span class="badge-inline b-red">Nicht profitabel</span> — kein positives Ergebnis.</li>
+      </ul>
+
+      <div class="callout callout-blue">
+        <strong>Wissensbasis wächst automatisch.</strong> Jede abgeschlossene Simulation — egal ob profitabel oder nicht — aktualisiert die interne Wissensbasis. Du musst nichts manuell tun: das Gelernte fließt beim nächsten Start automatisch ins Live Trading ein.
+      </div>
+    </div>
+
+    <!-- SCANNER -->
+    <hr class="section-divider" />
+    <div class="section" id="scanner">
+      <h2><span class="section-icon ic-purple">🔍</span>Marktscanner nutzen</h2>
+      <p class="section-desc">
+        Der Marktscanner analysiert bis zu 10 USDC-Paare gleichzeitig und gibt eine Empfehlung, welches Paar aktuell das beste Handelspotenzial hat.
+        Er ist im Live-Trading-Tab oben zu finden und kann auch unabhängig vom Bot genutzt werden.
+      </p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Intervall wählen</div>
+            <div class="step-desc">Wähle das Zeitfenster für die Analyse (<code>1h</code>, <code>4h</code>, <code>1d</code>).</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Eigene Paare hinzufügen (optional)</div>
+            <div class="step-desc">Trage in die drei freien Felder eigene Paare ein (z.B. <code>SUIUSDC</code>), die zusätzlich gescannt werden sollen.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Markt scannen</div>
+            <div class="step-desc">Klicke auf <strong>Markt scannen</strong>. Claude analysiert alle Paare und nennt das empfohlene Symbol mit Begründung.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Intervall übernehmen (optional)</div>
+            <div class="step-desc">Klicke bei einem Paar auf <strong>★ Intervall übernehmen</strong>, um das Scanner-Intervall direkt für das Live Trading zu übernehmen. Das eigentliche Symbol wählt der Agent beim Start selbst.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-blue">
+        <strong>Automatisch im Live-Betrieb:</strong> Der Bot führt bei jedem Kerzenschluss automatisch einen internen Markt-Scan durch. Du musst den Scanner nicht manuell bedienen — er dient zur Information und manuellen Orientierung.
+      </div>
+    </div>
+
+    <!-- RISIKEN -->
+    <hr class="section-divider" />
+    <div class="section" id="risiken">
+      <h2><span class="section-icon ic-red">⚠</span>Risiken &amp; Grenzen</h2>
+
+      <div class="callout callout-red">
+        <strong>Kein Finanzprodukt.</strong> Diese App ist ein technisches Werkzeug, keine Anlageberatung. Alle Trading-Entscheidungen trägst du selbst. Vergangene Simulationsergebnisse sind keine Garantie für zukünftige Gewinne.
+      </div>
+
+      <ul>
+        <li><strong>Backtests sind keine Zukunftsgarantie.</strong> Märkte ändern sich — eine Strategie, die historisch gut funktioniert hat, kann in Zukunft verlieren.</li>
+        <li><strong>Claude kann falsch liegen.</strong> Die KI analysiert Chartmuster, hat aber keine perfekte Marktkenntnis. Signale sind Wahrscheinlichkeiten, keine Gewissheiten.</li>
+        <li><strong>Nur Spot-Trading.</strong> Der Bot führt ausschließlich einfache Kauf- und Verkaufsorders aus — kein Margin, kein Hebel, keine Futures.</li>
+        <li><strong>Kein automatischer Stop-Loss.</strong> Der Bot hat keinen integrierten Stop-Loss. Eine offene Position bleibt offen, bis Claude ein SELL-Signal mit ausreichender Konfidenz gibt.</li>
+        <li><strong>Verbindungsausfälle.</strong> Bei Netzwerkproblemen oder API-Fehlern wird kein Trade ausgeführt. Der Bot protokolliert den Fehler und wartet auf den nächsten Zyklus.</li>
+      </ul>
+    </div>
+
+    <!-- TIPPS -->
+    <hr class="section-divider" />
+    <div class="section" id="tipps">
+      <h2><span class="section-icon ic-green">💡</span>Tipps für den Einstieg</h2>
+
+      <ul>
+        <li><strong>Erst simulieren, dann live.</strong> Starte mehrere Simulationen für dein gewünschtes Symbol und Intervall. Jede Simulation verbessert die Wissensbasis des Bots.</li>
+        <li><strong>Gleiche Einstellungen in Sim und Live.</strong> Verwende für Simulation und Live Trading dasselbe Intervall und dieselbe Wissensbasis-Gewichtung — dann sind die Ergebnisse direkt vergleichbar.</li>
+        <li><strong>Klein anfangen.</strong> Starte Live Trading mit einem kleinen Trade-Betrag (z.B. 20–50 USDC), um den Bot kennenzulernen.</li>
+        <li><strong>4h-Intervall bevorzugen.</strong> Das 1h-Intervall ist deutlich rauschiger und produziert öfter Fehlsignale. <code>4h</code> ist der empfohlene Einstieg.</li>
+        <li><strong>Log im Auge behalten.</strong> Schau regelmäßig in den Live-Log, um zu sehen, was der Bot tut und ob Fehler aufgetreten sind.</li>
+        <li><strong>Binance API-Key absichern.</strong> Setze auf Binance eine IP-Einschränkung und aktiviere nur Spot-Trading — keine Auszahlungs- oder Transfer-Rechte.</li>
+        <li><strong>HOLD ist kein Fehler.</strong> Wenn Claude mehrfach HOLD sagt, wartet der Bot auf einen klaren Einstiegspunkt. Das ist beabsichtigtes Verhalten.</li>
+      </ul>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  const links = document.querySelectorAll('.nav-link');
+  const sections = [...links]
+    .map(l => document.querySelector(l.getAttribute('href')))
+    .filter(Boolean);
+
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-5% 0px -80% 0px' });
+
+  sections.forEach(s => io.observe(s));
+</script>
+</body>
+</html>

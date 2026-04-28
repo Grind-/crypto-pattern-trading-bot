@@ -4,9 +4,7 @@ services:
       context: ./claude-proxy
     container_name: crypto-claude-proxy
     volumes:
-      - /opt/claude-platform/apps/claude-platform-sandbox/crypto-pattern-ai/claude-proxy/claude.exe:/opt/claude.exe:ro
-      - /opt/claude-platform/.home-orchestrator/.claude:/home/claude/.claude:ro
-      - /opt/claude-platform/.home-orchestrator/.claude.json:/home/claude/.claude.json:ro
+      - /opt/claude-platform/apps/crypto-pattern-trading-bot/crypto-pattern-ai/claude-proxy/claude.exe:/opt/claude.exe:ro
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
@@ -24,8 +22,8 @@ services:
       - BINANCE_API_KEY=${BINANCE_API_KEY:-}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
     volumes:
-      - /opt/claude-platform/apps/claude-platform-sandbox/crypto-pattern-ai/data:/app/data
-      - /opt/claude-platform/apps/claude-platform-sandbox/crypto-pattern-ai/knowledge:/app/knowledge
+      - /opt/claude-platform/apps/crypto-pattern-trading-bot/crypto-pattern-ai/data:/app/data
+      - /opt/claude-platform/apps/crypto-pattern-trading-bot/crypto-pattern-ai/knowledge:/app/knowledge
     depends_on:
       - claude-proxy
     networks:

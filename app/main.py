@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import math
 import os
 import secrets
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -37,6 +39,15 @@ from .user_store import (init_users, list_users, get_user, authenticate,
                          get_claude_api_key, get_claude_oauth_token,
                          uses_platform, uses_subscription,
                          save_binance_keys, get_binance_keys)
+
+def _floor_to_step(qty: float, step: float) -> float:
+    """Floor qty to the nearest multiple of step (avoids LOT_SIZE filter errors)."""
+    if step <= 0:
+        return qty
+    precision = max(0, -int(math.floor(math.log10(step))))
+    floored = math.floor(qty / step) * step
+    return round(floored, precision)
+
 
 # ── Session store ─────────────────────────────────────────────────────────────
 _SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
@@ -155,46 +166,74 @@ async def _auto_resume_all():
             deactivate_live_state(username)
             continue
 
+        saved_symbol = saved.get("symbol") or ""
         req = LiveRequest(
             api_key=bkey,
             api_secret=bsec,
-            symbol=saved["symbol"],
+            symbol=saved_symbol,
             interval=saved["interval"],
             trade_amount_usdt=saved["trade_amount"],
-            strategy_name=saved.get("strategy_name", ""),
-            strategy_analysis=saved.get("strategy_analysis", ""),
-            strategy_patterns=saved.get("strategy_patterns", []),
+            compounding_mode=saved.get("compounding_mode", "compound"),
+            analysis_weight=saved.get("analysis_weight", 70),
         )
-        valid = await BinanceTrader(bkey, bsec).validate_keys()
+        trader = BinanceTrader(bkey, bsec)
+        valid = await trader.validate_keys()
         if not valid:
             deactivate_live_state(username)
             continue
+
+        # Reconcile state against actual Binance holdings (only when symbol is known)
+        reconciled_position = saved.get("position", "FLAT")
+        reconciled_qty = saved.get("position_qty") or 0
+        reconciled_buy_price = saved.get("buy_price")
+        if saved_symbol:
+            try:
+                balances = await trader.get_balances()
+                usdc = balances.get("USDC", 0.0)
+                base_asset = saved_symbol.replace("USDC", "").replace("USDT", "")
+                crypto_held = balances.get(base_asset, 0.0)
+                if reconciled_position == "IN_POSITION" and crypto_held <= 0:
+                    logger.warning(f"[{username}] Resume desync: saved=IN_POSITION but {base_asset}=0 → FLAT")
+                    reconciled_position = "FLAT"
+                    reconciled_qty = 0
+                    reconciled_buy_price = None
+                elif reconciled_position == "FLAT" and crypto_held > 0 and usdc < 10.0:
+                    logger.info(f"[{username}] Resume: found {crypto_held} {base_asset}, no USDC → IN_POSITION")
+                    reconciled_position = "IN_POSITION"
+                    reconciled_qty = crypto_held
+            except Exception as e:
+                logger.warning(f"[{username}] Could not reconcile on resume: {e}")
+
         api_key, oauth_token = _claude_creds(username)
+        session_token = str(uuid.uuid4())
         state = _get_live_state(username)
         state.update({
             "running": True,
             "status": "active",
-            "position": saved.get("position", "FLAT"),
-            "symbol": req.symbol,
+            "position": reconciled_position,
+            "symbol": saved_symbol,
             "interval": req.interval,
             "trade_amount": req.trade_amount_usdt,
+            "current_capital": saved.get("current_capital") or req.trade_amount_usdt,
+            "position_qty": reconciled_qty,
+            "compounding_mode": req.compounding_mode,
             "signals": [],
-            "log": ["⟳ Live Trading nach Neustart wiederhergestellt"],
+            "log": [],
             "api_key": req.api_key,
             "api_secret": req.api_secret,
             "next_check_ts": None,
             "next_check_str": None,
             "candle_count": 0,
-            "strategy_name": req.strategy_name,
-            "strategy_analysis": req.strategy_analysis,
-            "strategy_patterns": req.strategy_patterns,
+            "analysis_weight": req.analysis_weight,
             "trade_history": saved.get("trade_history", []),
             "live_candles": [],
-            "buy_price": saved.get("buy_price"),
+            "buy_price": reconciled_buy_price,
             "sl_pct": None,
             "tp_pct": None,
+            "_session_token": session_token,
         })
-        asyncio.create_task(_live_loop(req, username, api_key, oauth_token))
+        update_position(username, reconciled_position)
+        asyncio.create_task(_live_loop(req, username, api_key, oauth_token, session_token))
 
 
 # ── Per-user state ────────────────────────────────────────────────────────────
@@ -205,7 +244,7 @@ live_states: dict[str, dict] = {}
 
 def _default_sim_state() -> dict:
     return {
-        "running": False, "iteration": 0, "max_iterations": 10,
+        "running": False, "iteration": 0,
         "status": "idle", "results": [], "best_result": None, "log": [],
         "symbol": None, "interval": None,
         "candle_prices": [], "candle_timestamps": [],
@@ -215,10 +254,11 @@ def _default_sim_state() -> dict:
 def _default_live_state() -> dict:
     return {
         "running": False, "status": "idle", "position": "FLAT",
-        "symbol": None, "interval": None, "trade_amount": 0,
+        "symbol": None, "interval": None, "trade_amount": 0, "current_capital": 0,
+        "position_qty": 0, "compounding_mode": "compound",
         "signals": [], "log": [], "api_key": None, "api_secret": None,
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
-        "strategy_name": "", "strategy_analysis": "", "strategy_patterns": [],
+        "analysis_weight": 70,
         "trade_history": [], "live_candles": [], "buy_price": None,
         "sl_pct": None, "tp_pct": None,
     }
@@ -262,19 +302,19 @@ class SimRequest(BaseModel):
     interval: str = "4h"
     days: int = 30
     initial_capital: float = 1000.0
-    max_iterations: int = 10
     fee_tier: str = "standard"
+    compounding_mode: str = "compound"   # "fixed" | "compound" | "compound_wins"
+    analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
 
 
 class LiveRequest(BaseModel):
     api_key: str = ""
     api_secret: str = ""
-    symbol: str = "BTCUSDC"
+    symbol: str = ""          # empty = agent decides on startup
     interval: str = "4h"
     trade_amount_usdt: float = 50.0
-    strategy_name: str = ""
-    strategy_analysis: str = ""
-    strategy_patterns: List[str] = []
+    compounding_mode: str = "compound"   # "fixed" | "compound" | "compound_wins"
+    analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
 
 
 # ── Auth routes ────────────────────────────────────────────────────────────────
@@ -331,6 +371,12 @@ async def settings_page():
 async def docs_page(request: Request):
     _require_admin(request)
     return FileResponse("frontend/docs.html")
+
+
+@app.get("/guide")
+async def guide_page(request: Request):
+    _get_current_user(request)
+    return FileResponse("frontend/guide.html")
 
 
 # ── User profile + settings API ────────────────────────────────────────────────
@@ -589,7 +635,7 @@ async def start_sim(req: SimRequest, background_tasks: BackgroundTasks,
     api_key, oauth_token = _claude_creds(username)
 
     sim_state.update({
-        "running": True, "iteration": 0, "max_iterations": req.max_iterations,
+        "running": True, "iteration": 0,
         "status": "starting", "results": [], "best_result": None, "log": [],
         "symbol": req.symbol, "interval": req.interval,
         "candle_prices": [], "candle_timestamps": [],
@@ -671,41 +717,42 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
 
     save_binance_keys(username, bkey, bsec)
 
-    # Reconstruct req with resolved keys so _live_loop receives them
     req = LiveRequest(
         api_key=bkey, api_secret=bsec,
-        symbol=req.symbol, interval=req.interval,
+        symbol="", interval=req.interval,
         trade_amount_usdt=req.trade_amount_usdt,
-        strategy_name=req.strategy_name,
-        strategy_analysis=req.strategy_analysis,
-        strategy_patterns=req.strategy_patterns,
+        compounding_mode=req.compounding_mode,
+        analysis_weight=req.analysis_weight,
     )
 
-    strategy_note = f" | Strategie: {req.strategy_name}" if req.strategy_name else ""
+    kb_pct = 100 - req.analysis_weight
+    weight_note = f"Wissensbasis {kb_pct}% / Markt {req.analysis_weight}%"
+    session_token = str(uuid.uuid4())
     live_state.update({
         "running": True, "status": "active", "position": "FLAT",
-        "symbol": req.symbol, "interval": req.interval,
+        "symbol": "", "interval": req.interval,
         "trade_amount": req.trade_amount_usdt,
+        "current_capital": req.trade_amount_usdt,
+        "position_qty": 0,
+        "compounding_mode": req.compounding_mode,
         "signals": [],
-        "log": [f"Live Trading gestartet: {req.symbol} {req.interval}, ${req.trade_amount_usdt} pro Trade{strategy_note}"],
+        "log": [f"Live Trading gestartet — {req.interval}, ${req.trade_amount_usdt} USDC | {weight_note}"],
         "api_key": bkey, "api_secret": bsec,
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
-        "strategy_name": req.strategy_name,
-        "strategy_analysis": req.strategy_analysis,
-        "strategy_patterns": req.strategy_patterns,
+        "analysis_weight": req.analysis_weight,
         "trade_history": [], "live_candles": [], "buy_price": None,
+        "_session_token": session_token,
     })
     save_live_state(username, {
         "was_running": True,
         "api_key": bkey, "api_secret": bsec,
-        "symbol": req.symbol, "interval": req.interval,
-        "trade_amount": req.trade_amount_usdt, "position": "FLAT",
-        "strategy_name": req.strategy_name,
-        "strategy_analysis": req.strategy_analysis,
-        "strategy_patterns": req.strategy_patterns,
+        "symbol": "", "interval": req.interval,
+        "trade_amount": req.trade_amount_usdt, "current_capital": req.trade_amount_usdt,
+        "position_qty": 0, "compounding_mode": req.compounding_mode, "position": "FLAT",
+        "analysis_weight": req.analysis_weight,
         "trade_history": [], "buy_price": None,
     })
-    background_tasks.add_task(_live_loop, req, username, api_key, oauth_token)
+    background_tasks.add_task(_live_loop, req, username, api_key, oauth_token, session_token)
     return {"ok": True}
 
 
@@ -730,6 +777,28 @@ async def get_live_credentials(request: Request):
         "has_secret": bool(bsec),
         "key_hint": f"...{bkey[-4:]}" if len(bkey) >= 4 else ("✓" if bkey else ""),
     }
+
+
+class BinanceValidateRequest(BaseModel):
+    api_key: str = ""
+    api_secret: str = ""
+
+@app.post("/api/live/validate-keys")
+async def validate_binance_keys(req: BinanceValidateRequest, request: Request):
+    user = _get_current_user(request)
+    saved_key, saved_sec = get_binance_keys(user["username"])
+    bkey = req.api_key.strip() or saved_key
+    bsec = req.api_secret.strip() or saved_sec
+    if not bkey or not bsec:
+        return {"ok": False, "error": "API Key und Secret erforderlich"}
+    try:
+        trader = BinanceTrader(bkey, bsec)
+        account = await trader.get_account()
+        balances = {b["asset"]: float(b["free"]) for b in account.get("balances", []) if float(b["free"]) > 0}
+        usdc = balances.get("USDC", 0.0)
+        return {"ok": True, "usdc_balance": usdc}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/live/status")
@@ -768,105 +837,81 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
         enriched = compute_indicators(candles)
         _log(sim_state, "Technical indicators computed (RSI, MACD, BB, ATR, StochRSI)")
 
-        feedback = None
-        best_return = float("-inf")
+        if not sim_state["running"]:
+            return
 
-        for iteration in range(req.max_iterations):
-            if not sim_state["running"]:
-                break
+        sim_state["status"] = "analyzing"
+        _log(sim_state, f"Asking Claude to generate signals (KB {100 - req.analysis_weight}% / Market {req.analysis_weight}%)…")
 
-            sim_state["iteration"] = iteration + 1
-            sim_state["status"] = f"iteration_{iteration + 1}"
-            _log(sim_state, f"\n──── Iteration {iteration + 1}/{req.max_iterations} ────")
-            _log(sim_state, "Asking Claude to analyze patterns and generate signals…")
+        analysis = await analyze_with_claude(
+            symbol=req.symbol, interval=req.interval,
+            candles=enriched, username=username,
+            analysis_weight=req.analysis_weight,
+            api_key=api_key, oauth_token=oauth_token,
+        )
 
-            analysis = await analyze_with_claude(
-                symbol=req.symbol, interval=req.interval,
-                candles=enriched, username=username, feedback=feedback,
-                api_key=api_key, oauth_token=oauth_token,
-            )
+        signals = analysis.get("signals", [])
+        _log(sim_state, f"Signals: {len(signals)} | Confidence: {analysis.get('confidence', 0)}%")
+        _log(sim_state, f"Patterns: {', '.join(analysis.get('patterns_found', []))}")
 
-            strategy = analysis.get("strategy_name", f"Strategy {iteration + 1}")
-            signals = analysis.get("signals", [])
-            _log(sim_state, f"Strategy: {strategy}")
-            _log(sim_state, f"Signals: {len(signals)} | Confidence: {analysis.get('confidence', 0)}%")
-            _log(sim_state, f"Patterns: {', '.join(analysis.get('patterns_found', []))}")
+        sim_result = run_simulation(
+            candles=enriched, signals=signals,
+            initial_capital=req.initial_capital, fee_pct=fee_pct,
+            compounding_mode=req.compounding_mode,
+        )
 
-            sim_result = run_simulation(
-                candles=enriched, signals=signals,
-                initial_capital=req.initial_capital, fee_pct=fee_pct,
-            )
+        ret = sim_result["total_return_pct"]
+        _log(sim_state, f"Return: {ret:+.2f}% | Win rate: {sim_result['win_rate']:.1f}% | "
+             f"Trades: {sim_result['num_trades']} | Drawdown: {sim_result['max_drawdown']:.1f}% | "
+             f"Fees: ${sim_result['total_fees_usdt']:.2f} ({sim_result['fee_drag_pct']:.2f}% drag)")
 
-            ret = sim_result["total_return_pct"]
-            _log(sim_state, f"Return: {ret:+.2f}% | Win rate: {sim_result['win_rate']:.1f}% | "
-                 f"Trades: {sim_result['num_trades']} | Drawdown: {sim_result['max_drawdown']:.1f}% | "
-                 f"Fees: ${sim_result['total_fees_usdt']:.2f} ({sim_result['fee_drag_pct']:.2f}% drag)")
-
-            result = {
-                "iteration": iteration + 1, "strategy_name": strategy,
-                "analysis": analysis.get("analysis", ""),
-                "patterns_found": analysis.get("patterns_found", []),
-                "signals": signals, "confidence": analysis.get("confidence", 0),
-                **sim_result, "profitable": ret > 0,
-            }
-            sim_state["results"].append(result)
-
-            if ret > best_return:
-                best_return = ret
-                sim_state["best_result"] = result
-
-            if ret > 0:
-                _log(sim_state, f"✅ PROFITABLE! Return: +{ret:.2f}% with {sim_result['num_trades']} trades")
-                sim_state["status"] = "profitable"
-                break
-            else:
-                _log(sim_state, f"❌ Not profitable ({ret:.2f}%). Sending feedback to Claude…")
-                feedback = {
-                    "strategy_name": strategy,
-                    "previous_return": ret,
-                    "patterns_found": analysis.get("patterns_found", []),
-                    "trades": sim_result["trades"][:8],
-                }
-
-        if sim_state["status"] not in ("profitable", "stopped"):
+        if ret > 0:
+            _log(sim_state, f"✅ Profitable! Return: +{ret:.2f}%")
+            sim_state["status"] = "profitable"
+        else:
             sim_state["status"] = "completed"
-            _log(sim_state, f"\n✓ Simulation complete. Best return: {best_return:+.2f}%")
+            _log(sim_state, f"✓ Simulation complete. Return: {ret:+.2f}%")
 
-        if sim_state.get("best_result"):
-            br = sim_state["best_result"]
-            sim_id = f"sim_{int(time.time())}_{secrets.token_hex(4)}"
-            entry = {
-                "id": sim_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "symbol": req.symbol, "interval": req.interval,
-                "days": req.days, "capital": req.initial_capital,
-                "fee_tier": req.fee_tier,
-                "total_return_pct": br.get("total_return_pct", 0),
-                "win_rate": br.get("win_rate", 0),
-                "num_trades": br.get("num_trades", 0),
-                "max_drawdown": br.get("max_drawdown", 0),
-                "total_fees_usdt": br.get("total_fees_usdt", 0),
-                "fee_drag_pct": br.get("fee_drag_pct", 0),
-                "strategy_name": br.get("strategy_name", "Unknown"),
-                "strategy_analysis": br.get("analysis", ""),
-                "strategy_patterns": br.get("patterns_found", []),
-                "profitable": br.get("profitable", False),
-                "iterations": sim_state.get("iteration", 0),
-            }
-            full_result = {
-                **br, "id": sim_id, "symbol": req.symbol, "interval": req.interval,
-                "days": req.days, "capital": req.initial_capital, "fee_tier": req.fee_tier,
-                "candle_prices": sim_state.get("candle_prices", []),
-                "candle_timestamps": sim_state.get("candle_timestamps", []),
-            }
-            save_simulation(username, entry, full_result)
+        result = {
+            "analysis": analysis.get("analysis", ""),
+            "patterns_found": analysis.get("patterns_found", []),
+            "signals": signals, "confidence": analysis.get("confidence", 0),
+            **sim_result, "profitable": ret > 0,
+        }
+        sim_state["results"].append(result)
+        sim_state["best_result"] = result
 
-            # Fire-and-forget: let Claude update this user's knowledge area
-            asyncio.create_task(
-                synthesize_learnings(req.symbol, req.interval, entry,
-                                     username=username,
-                                     api_key=api_key, oauth_token=oauth_token)
-            )
+        sim_id = f"sim_{int(time.time())}_{secrets.token_hex(4)}"
+        entry = {
+            "id": sim_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "symbol": req.symbol, "interval": req.interval,
+            "days": req.days, "capital": req.initial_capital,
+            "fee_tier": req.fee_tier,
+            "total_return_pct": sim_result.get("total_return_pct", 0),
+            "win_rate": sim_result.get("win_rate", 0),
+            "num_trades": sim_result.get("num_trades", 0),
+            "max_drawdown": sim_result.get("max_drawdown", 0),
+            "total_fees_usdt": sim_result.get("total_fees_usdt", 0),
+            "fee_drag_pct": sim_result.get("fee_drag_pct", 0),
+            "analysis_weight": req.analysis_weight,
+            "profitable": ret > 0,
+            "compounding_mode": req.compounding_mode,
+            "compounding_mode_label": sim_result.get("compounding_mode_label", req.compounding_mode),
+        }
+        full_result = {
+            **result, "id": sim_id, "symbol": req.symbol, "interval": req.interval,
+            "days": req.days, "capital": req.initial_capital, "fee_tier": req.fee_tier,
+            "candle_prices": sim_state.get("candle_prices", []),
+            "candle_timestamps": sim_state.get("candle_timestamps", []),
+        }
+        save_simulation(username, entry, full_result)
+
+        asyncio.create_task(
+            synthesize_learnings(req.symbol, req.interval, entry,
+                                 username=username,
+                                 api_key=api_key, oauth_token=oauth_token)
+        )
 
     except Exception as e:
         sim_state["status"] = "error"
@@ -882,15 +927,18 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
     try:
         summaries = await _fetch_scan_summaries(interval)
         if not summaries:
-            return current_symbol
+            return current_symbol or "BTCUSDC"
         result = await scan_market(summaries, interval, api_key=api_key, oauth_token=oauth_token)
         best = result.get("best_symbol", "")
         rec = result.get("recommendation", "")
         if not best:
-            return current_symbol
+            return current_symbol or "BTCUSDC"
         if position == "FLAT":
             if best != current_symbol:
-                _log(live_state, f"🔄 Wechsel: {current_symbol} → {best} | {rec[:100]}")
+                if current_symbol:
+                    _log(live_state, f"🔄 Wechsel: {current_symbol} → {best} | {rec[:100]}")
+                else:
+                    _log(live_state, f"🤖 Agent wählt: {best} | {rec[:100]}")
                 live_state["symbol"] = best
                 update_position(username, "FLAT")
                 return best
@@ -898,7 +946,8 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
                 _log(live_state, f"✓ Scanner bestätigt {current_symbol} als bestes Setup")
         else:
             if best != position_symbol:
-                _log(live_state, f"ℹ Scanner: {best} wäre jetzt besser — Wechsel nach Verkauf von {position_symbol}")
+                _log(live_state, f"🔄 Besseres Setup gefunden: {best} — verkaufe {position_symbol} zuerst")
+                live_state["pending_symbol_switch"] = best
             else:
                 _log(live_state, f"✓ Scanner bestätigt {position_symbol} weiterhin stark")
         return current_symbol
@@ -908,14 +957,18 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
 
 
 async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
-                     oauth_token: str = ""):
+                     oauth_token: str = "", session_token: str = ""):
     live_state = _get_live_state(username)
+
+    def _still_active() -> bool:
+        return live_state["running"] and live_state.get("_session_token") == session_token
     trader = BinanceTrader(req.api_key, req.api_secret)
     interval_seconds = _interval_to_seconds(req.interval)
     CLOSE_BUFFER = 10
 
-    current_symbol = req.symbol
-    position_symbol = req.symbol
+    # symbol comes from saved state (resume) or will be picked by agent (fresh start)
+    current_symbol = live_state.get("symbol") or ""
+    position_symbol = current_symbol
 
     def _next_close() -> float:
         now = time.time()
@@ -931,9 +984,219 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
         if m: return f"{m}m {s}s"
         return f"{s}s"
 
+    async def _do_buy(symbol: str, capital: float) -> bool:
+        """Place BUY order. Returns True on success, False on failure. Updates live_state."""
+        nonlocal position_symbol
+        live_state["position"] = "BUYING"
+        try:
+            balances = await trader.get_balances()
+            usdc_available = balances.get("USDC", 0.0)
+            actual_capital = min(capital, round(usdc_available * 0.995, 2))
+            if actual_capital < 10.0:
+                _log(live_state, f"⚠ Zu wenig USDC ({usdc_available:.2f}) — Mindestorder $10 nicht erreicht")
+                live_state["position"] = "FLAT"
+                return False
+            if actual_capital < capital:
+                _log(live_state, f"Balance: {usdc_available:.2f} USDC — kaufe mit {actual_capital:.2f} USDC (verfügbar)")
+            order = await trader.place_market_order(symbol=symbol, side="BUY", quote_quantity=actual_capital)
+            bought_qty = float(order.get("executedQty", 0))
+            if bought_qty <= 0:
+                _log(live_state, f"⚠ Kauf: executedQty=0 — bleibt FLAT")
+                live_state["position"] = "FLAT"
+                return False
+            buy_price = candles[-1]["close"] if candles else actual_capital / bought_qty
+            position_symbol = symbol
+            live_state["position"]        = "IN_POSITION"
+            live_state["symbol"]          = symbol
+            live_state["buy_price"]       = buy_price
+            live_state["position_qty"]    = bought_qty
+            live_state["current_capital"] = actual_capital
+            live_state["sl_pct"]          = None
+            live_state["tp_pct"]          = None
+            update_position(username, "IN_POSITION")
+            live_state["trade_history"].append({
+                "type": "BUY", "symbol": symbol,
+                "price": buy_price, "timestamp": int(time.time() * 1000),
+                "order_id": str(order.get("orderId", "")), "pnl_pct": None,
+            })
+            _persist_trade_history(username, live_state)
+            _log(live_state, f"✅ KAUF {symbol} — {bought_qty:.6f} @ ${buy_price:,.4f} | Eingesetzt: ${actual_capital:.2f}")
+            return True
+        except Exception as e:
+            live_state["position"] = "FLAT"
+            _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
+            logger.error(f"KAUF fehlgeschlagen [{username}]: {e}")
+            return False
+
+    async def _do_sell(force: bool = False, force_reason: str = "") -> tuple[bool, float]:
+        """Place SELL order. Returns (success, net_usdc). Updates live_state."""
+        nonlocal position_symbol
+        qty = live_state.get("position_qty") or 0
+        if qty <= 0:
+            # Reconcile: check actual balance
+            base = position_symbol.replace("USDC", "").replace("USDT", "")
+            try:
+                qty = await trader.get_asset_balance(base)
+            except Exception:
+                pass
+        if qty <= 0:
+            _log(live_state, f"⚠ position_qty=0 — nichts zu verkaufen, setze auf FLAT")
+            live_state["position"] = "FLAT"
+            live_state["position_qty"] = 0
+            update_position(username, "FLAT")
+            return False, 0.0
+        live_state["position"] = "SELLING"
+        try:
+            step = await trader.get_lot_step(position_symbol)
+            qty = _floor_to_step(qty, step)
+            if qty <= 0:
+                _log(live_state, f"⚠ Menge nach LOT_SIZE-Rundung = 0 — nichts zu verkaufen")
+                live_state["position"] = "IN_POSITION"
+                return False, 0.0
+            precision = max(0, -int(math.floor(math.log10(step))))
+            order = await trader.place_market_order(symbol=position_symbol, side="SELL", quantity=qty, qty_precision=precision)
+            buy_p     = live_state.get("buy_price") or (candles[-1]["close"] if candles else 0)
+            cur_price = candles[-1]["close"] if candles else 0
+            pnl_pct   = (cur_price - buy_p) / buy_p * 100 if buy_p else 0.0
+            gross_usdc = float(order.get("cummulativeQuoteQty", 0))
+            usdc_fees  = sum(float(f["commission"]) for f in order.get("fills", []) if f.get("commissionAsset", "").upper() == "USDC")
+            net_usdc   = (gross_usdc - usdc_fees) if gross_usdc > 0 else (qty * cur_price)
+            prev_capital = live_state.get("current_capital") or req.trade_amount_usdt
+            mode = live_state.get("compounding_mode", "compound")
+            if mode == "fixed":
+                live_state["current_capital"] = req.trade_amount_usdt
+            elif mode == "compound_wins":
+                live_state["current_capital"] = net_usdc if net_usdc >= req.trade_amount_usdt else req.trade_amount_usdt
+            else:
+                live_state["current_capital"] = net_usdc
+            live_state["position"]     = "FLAT"
+            live_state["buy_price"]    = None
+            live_state["position_qty"] = 0
+            live_state["sl_pct"]       = None
+            live_state["tp_pct"]       = None
+            update_position(username, "FLAT")
+            live_state["_sell_fail_count"] = 0
+            delta = net_usdc - prev_capital
+            reason_str = f" [{force_reason}]" if force_reason else ""
+            live_state["trade_history"].append({
+                "type": "SELL", "symbol": position_symbol,
+                "price": cur_price, "timestamp": int(time.time() * 1000),
+                "order_id": str(order.get("orderId", "")), "pnl_pct": round(pnl_pct, 3),
+            })
+            _log(live_state, f"✅ VERKAUF {position_symbol}{reason_str} @ ${cur_price:,.4f} | P&L: {pnl_pct:+.2f}% | Kapital: ${net_usdc:.2f} ({delta:+.2f}$)")
+            _persist_trade_history(username, live_state)
+            return True, net_usdc
+        except Exception as e:
+            live_state["position"] = "IN_POSITION"
+            fail_count = live_state.get("_sell_fail_count", 0) + 1
+            live_state["_sell_fail_count"] = fail_count
+            _log(live_state, f"❌ VERKAUF fehlgeschlagen ({fail_count}x): {e} — bleibt IN_POSITION")
+            logger.error(f"VERKAUF fehlgeschlagen [{username}]: {e}")
+            return False, 0.0
+
     try:
+        # ── Startup ──────────────────────────────────────────────────────────────
+        _log(live_state, "🔍 Startup: prüfe Guthaben…")
+        try:
+            balances = await trader.get_balances()
+            usdc_available = balances.get("USDC", 0.0)
+
+            # ── Resume: symbol already known from saved state ─────────────────
+            if current_symbol and live_state.get("position") == "IN_POSITION":
+                base_asset = current_symbol.replace("USDC", "").replace("USDT", "")
+                crypto_held = balances.get(base_asset, 0.0)
+                if crypto_held > 0:
+                    live_state["position_qty"] = crypto_held
+                    position_symbol = current_symbol
+                    _log(live_state, f"✓ Wiederaufnahme: {crypto_held:.6f} {base_asset} vorhanden")
+                else:
+                    _log(live_state, f"⚠ Zustand-Desync: IN_POSITION aber kein {base_asset} — setze auf FLAT")
+                    live_state["position"] = "FLAT"
+                    live_state["position_qty"] = 0
+                    update_position(username, "FLAT")
+                    current_symbol = ""  # trigger fresh scan below
+
+            # ── Fresh start or desync: agent picks symbol, smart capital logic ─
+            if not current_symbol or live_state.get("position", "FLAT") == "FLAT":
+                _log(live_state, "🤖 Agent sucht bestes Symbol…")
+                chosen = await _scan_and_maybe_switch(
+                    req.interval, "", "FLAT", "",
+                    username, api_key, oauth_token,
+                )
+                current_symbol = chosen
+                position_symbol = chosen
+                live_state["symbol"] = chosen
+                base_asset = chosen.replace("USDC", "").replace("USDT", "")
+                crypto_held = balances.get(base_asset, 0.0)
+                target = live_state.get("current_capital") or req.trade_amount_usdt
+
+                # Get price for crypto-value calculation
+                try:
+                    crypto_price = await trader.get_price(chosen) if crypto_held > 0 else 0.0
+                except Exception:
+                    crypto_price = 0.0
+                crypto_value = crypto_held * crypto_price
+
+                if usdc_available >= target:
+                    # Enough USDC → full buy
+                    _log(live_state, f"💰 {usdc_available:.2f} USDC — kaufe {chosen}")
+                    await _do_buy(chosen, target)
+
+                elif crypto_held > 0:
+                    need_usdc = max(0.0, target - crypto_value)
+                    if need_usdc < 10.0:
+                        # Already have enough crypto → set IN_POSITION
+                        _log(live_state, f"✓ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) — setze IN_POSITION")
+                        live_state.update({
+                            "position": "IN_POSITION", "position_qty": crypto_held,
+                            "buy_price": crypto_price or live_state.get("buy_price"),
+                            "current_capital": crypto_value, "symbol": chosen,
+                        })
+                        update_position(username, "IN_POSITION")
+                    elif usdc_available >= 10.0:
+                        # Have some crypto + enough USDC to top up → set IN_POSITION + buy more
+                        buy_usdc = min(need_usdc, round(usdc_available * 0.995, 2))
+                        _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) + kaufe ${buy_usdc:.2f} nach")
+                        live_state.update({
+                            "position": "IN_POSITION", "position_qty": crypto_held,
+                            "buy_price": crypto_price or live_state.get("buy_price"),
+                            "current_capital": crypto_value, "symbol": chosen,
+                        })
+                        update_position(username, "IN_POSITION")
+                        try:
+                            order = await trader.place_market_order(chosen, "BUY", quote_quantity=buy_usdc)
+                            extra_qty = float(order.get("executedQty", 0))
+                            if extra_qty > 0:
+                                live_state["position_qty"] += extra_qty
+                                live_state["current_capital"] += buy_usdc
+                                _log(live_state, f"✅ Aufgestockt +{extra_qty:.6f} | Gesamt: {live_state['position_qty']:.6f} {base_asset}")
+                        except Exception as e:
+                            _log(live_state, f"⚠ Aufstocken fehlgeschlagen: {e} — behalte bestehende Position")
+                    else:
+                        # No USDC to add → use existing crypto as position
+                        _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}), kein USDC — setze IN_POSITION")
+                        live_state.update({
+                            "position": "IN_POSITION", "position_qty": crypto_held,
+                            "buy_price": crypto_price or live_state.get("buy_price"),
+                            "current_capital": crypto_value, "symbol": chosen,
+                        })
+                        update_position(username, "IN_POSITION")
+
+                elif usdc_available >= 10.0:
+                    # No crypto, buy as much as possible with available USDC
+                    _log(live_state, f"💰 {usdc_available:.2f} USDC (< Ziel ${target:.2f}) — kaufe soviel wie möglich")
+                    await _do_buy(chosen, target)  # _do_buy caps at actual usdc_available
+
+                else:
+                    _log(live_state, f"⚠ Kein {base_asset} und weniger als $10 USDC — warte auf Einzahlung.")
+
+        except Exception as e:
+            _log(live_state, f"⚠ Startup-Check fehlgeschlagen: {e}")
+            logger.error(f"Startup-Check fehlgeschlagen [{username}]: {e}")
+
         first_run = True
-        while live_state["running"]:
+        candles: list = []
+        while _still_active():
 
             next_close_ts = _next_close()
             wake_at = next_close_ts + CLOSE_BUFFER
@@ -944,21 +1207,21 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
 
             if first_run:
                 _log(live_state, f"Live Trading aktiv — {current_symbol} {req.interval}")
-                _log(live_state, f"Erste Analyse: {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
+                _log(live_state, f"Nächste Analyse: {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
                 first_run = False
 
             if wait_secs > 0:
                 slept = 0.0
-                while slept < wait_secs and live_state["running"]:
+                while slept < wait_secs and _still_active():
                     chunk = min(30.0, wait_secs - slept)
                     await asyncio.sleep(chunk)
                     slept += chunk
 
-            if not live_state["running"]:
+            if not _still_active():
                 break
 
             live_state["candle_count"] += 1
-            _log(live_state, f"\n── Kerze #{live_state['candle_count']} geschlossen ({_fmt_ts(next_close_ts)}) ──")
+            _log(live_state, f"\n── Kerze #{live_state['candle_count']} ({_fmt_ts(next_close_ts)}) ──")
 
             _log(live_state, "🔍 Marktcheck…")
             current_symbol = await _scan_and_maybe_switch(
@@ -966,8 +1229,67 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 position_symbol, username, api_key, oauth_token,
             )
 
-            active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
+            # ── Symbol-Switch: direkt oder über USDC ────────────────────────────
+            pending_switch = live_state.pop("pending_symbol_switch", None)
+            if pending_switch and live_state["position"] == "IN_POSITION":
+                from_base   = position_symbol.replace("USDC", "").replace("USDT", "")
+                to_base     = pending_switch.replace("USDC", "").replace("USDT", "")
+                direct_pair = f"{to_base}{from_base}"
+                switched    = False
 
+                # Fetch actual balance — position_qty may be stale
+                try:
+                    actual_qty = await trader.get_asset_balance(from_base)
+                    if actual_qty <= 0:
+                        actual_qty = live_state.get("position_qty") or 0
+                except Exception:
+                    actual_qty = live_state.get("position_qty") or 0
+
+                if actual_qty > 0 and await trader.symbol_exists(direct_pair):
+                    try:
+                        _log(live_state, f"🔀 Direktwechsel {from_base}→{to_base} via {direct_pair} (halbe Gebühren)…")
+                        # direct_pair e.g. XRPBTC: base=XRP, quote=BTC → spend BTC = quoteOrderQty
+                        order    = await trader.place_market_order(symbol=direct_pair, side="BUY", quote_quantity=actual_qty)
+                        new_qty  = float(order.get("executedQty", 0))
+                        if new_qty > 0:
+                            new_price = await trader.get_price(pending_switch)
+                            live_state["position_qty"]    = new_qty
+                            live_state["buy_price"]       = new_price
+                            live_state["current_capital"] = new_qty * new_price
+                            live_state["sl_pct"]          = None
+                            live_state["tp_pct"]          = None
+                            position_symbol = pending_switch
+                            current_symbol  = pending_switch
+                            live_state["symbol"] = pending_switch
+                            update_position(username, "IN_POSITION")
+                            live_state["trade_history"].append({
+                                "type": "SWAP", "symbol": direct_pair,
+                                "price": new_price, "timestamp": int(time.time() * 1000),
+                                "order_id": str(order.get("orderId", "")), "pnl_pct": None,
+                            })
+                            _persist_trade_history(username, live_state)
+                            _log(live_state, f"✅ SWAP {from_base}→{to_base} — {new_qty:.6f} {to_base} @ ${new_price:,.4f}")
+                            switched = True
+                    except Exception as e:
+                        _log(live_state, f"Direktwechsel fehlgeschlagen ({e}) — Fallback über USDC")
+
+                if not switched and actual_qty > 0:
+                    # Two-step: sell → USDC → buy new symbol
+                    sell_ok, usdc_net = await _do_sell(force=True, force_reason=f"Wechsel→{to_base}")
+                    if sell_ok and usdc_net >= 10.0:
+                        bought = await _do_buy(pending_switch, usdc_net)
+                        if not bought:
+                            _log(live_state, f"⚠ Schritt 2 (Kauf {to_base}) fehlgeschlagen — bleibe FLAT mit {usdc_net:.2f} USDC")
+                    elif sell_ok:
+                        _log(live_state, f"⚠ Zu wenig USDC nach Verkauf ({usdc_net:.2f}) — kein Kauf möglich")
+
+                _persist_trade_history(username, live_state)
+                # Re-fetch data for new symbol and continue to signal generation
+                current_symbol = live_state.get("symbol", current_symbol)
+                position_symbol = current_symbol if live_state["position"] == "IN_POSITION" else position_symbol
+
+            # ── Fetch candle data ────────────────────────────────────────────────
+            active_symbol = position_symbol if live_state["position"] == "IN_POSITION" else current_symbol
             _log(live_state, f"Lade {active_symbol} {req.interval} Daten…")
             candles = await fetch_latest_klines(active_symbol, req.interval, limit=100)
             enriched = compute_indicators(candles)
@@ -977,7 +1299,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 {"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]
             ]
 
-            # ── Stop-Loss / Take-Profit check before asking Claude ──────────────
+            # ── Stop-Loss / Take-Profit ──────────────────────────────────────────
             force_sell = False
             force_sell_reason = ""
             if live_state["position"] == "IN_POSITION":
@@ -986,15 +1308,14 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 tp_pct = live_state.get("tp_pct") or 0
                 if buy_p and sl_pct and price <= buy_p * (1 - sl_pct / 100):
                     force_sell = True
-                    limit = buy_p * (1 - sl_pct / 100)
-                    force_sell_reason = f"Stop-Loss {sl_pct}% — Kurs ${price:,.2f} ≤ Limit ${limit:,.2f}"
-                    _log(live_state, f"🛑 STOP-LOSS ausgelöst: {force_sell_reason}")
+                    force_sell_reason = f"Stop-Loss {sl_pct}% — ${price:,.2f} ≤ ${buy_p*(1-sl_pct/100):,.2f}"
+                    _log(live_state, f"🛑 STOP-LOSS: {force_sell_reason}")
                 elif buy_p and tp_pct and price >= buy_p * (1 + tp_pct / 100):
                     force_sell = True
-                    limit = buy_p * (1 + tp_pct / 100)
-                    force_sell_reason = f"Take-Profit {tp_pct}% — Kurs ${price:,.2f} ≥ Limit ${limit:,.2f}"
-                    _log(live_state, f"🎯 TAKE-PROFIT ausgelöst: {force_sell_reason}")
+                    force_sell_reason = f"Take-Profit {tp_pct}% — ${price:,.2f} ≥ ${buy_p*(1+tp_pct/100):,.2f}"
+                    _log(live_state, f"🎯 TAKE-PROFIT: {force_sell_reason}")
 
+            # ── Signal generation ────────────────────────────────────────────────
             if force_sell:
                 action, confidence, reason = "SELL", 100, force_sell_reason
             else:
@@ -1004,9 +1325,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     candles=enriched, current_position=live_state["position"],
                     username=username,
                     signal_history=live_state["signals"][-10:],
-                    strategy_name=req.strategy_name,
-                    strategy_analysis=req.strategy_analysis,
-                    strategy_patterns=req.strategy_patterns,
+                    analysis_weight=req.analysis_weight,
                     api_key=api_key, oauth_token=oauth_token,
                 )
                 action     = signal.get("action", "HOLD")
@@ -1019,66 +1338,26 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 "price": price, "symbol": active_symbol,
                 "timestamp": candles[-1]["timestamp"] if candles else 0,
             })
+            if len(live_state["signals"]) > 500:
+                live_state["signals"] = live_state["signals"][-500:]
 
+            # ── Execute signal ───────────────────────────────────────────────────
             if action == "BUY" and live_state["position"] == "FLAT" and confidence >= 60:
-                try:
-                    order = await trader.place_market_order(
-                        symbol=current_symbol, side="BUY",
-                        quote_quantity=req.trade_amount_usdt,
-                    )
-                    position_symbol = current_symbol
-                    live_state["position"] = "IN_POSITION"
-                    live_state["symbol"] = current_symbol
-                    live_state["buy_price"] = price
-                    # Store SL/TP from the signal for automated exit checks
-                    if not force_sell:
-                        live_state["sl_pct"] = signal.get("stop_loss_pct") or 0
-                        live_state["tp_pct"] = signal.get("take_profit_pct") or 0
-                    update_position(username, "IN_POSITION")
-                    live_state["trade_history"].append({
-                        "type": "BUY", "symbol": current_symbol,
-                        "price": price, "timestamp": int(time.time() * 1000),
-                        "order_id": str(order.get("orderId", "")), "pnl_pct": None,
-                    })
-                    sl_info = f" | SL {live_state['sl_pct']}% / TP {live_state['tp_pct']}%" if live_state.get("sl_pct") else ""
-                    _log(live_state, f"✅ KAUF {current_symbol} — Order {order.get('orderId','?')} @ ${price:,.2f}{sl_info}")
-                except Exception as e:
-                    _log(live_state, f"❌ KAUF fehlgeschlagen: {e}")
+                capital = live_state.get("current_capital") or req.trade_amount_usdt
+                bought = await _do_buy(current_symbol, capital)
+                if bought and not force_sell:
+                    live_state["sl_pct"] = signal.get("stop_loss_pct") or 0
+                    live_state["tp_pct"] = signal.get("take_profit_pct") or 0
+                    if live_state.get("sl_pct") or live_state.get("tp_pct"):
+                        _log(live_state, f"SL: {live_state['sl_pct']}% / TP: {live_state['tp_pct']}%")
 
-            # force_sell bypasses the confidence threshold
             elif action == "SELL" and live_state["position"] == "IN_POSITION" and (force_sell or confidence >= 55):
-                try:
-                    base_asset = position_symbol.replace("USDC", "").replace("USDT", "")
-                    balances = await trader.get_balances()
-                    qty = balances.get(base_asset, 0)
-                    if qty > 0:
-                        order = await trader.place_market_order(
-                            symbol=position_symbol, side="SELL", quantity=qty,
-                        )
-                        buy_p = live_state.get("buy_price") or price
-                        pnl_pct = (price - buy_p) / buy_p * 100 if buy_p else 0.0
-                        live_state["position"] = "FLAT"
-                        live_state["buy_price"] = None
-                        live_state["sl_pct"] = None
-                        live_state["tp_pct"] = None
-                        update_position(username, "FLAT")
-                        live_state["trade_history"].append({
-                            "type": "SELL", "symbol": position_symbol,
-                            "price": price, "timestamp": int(time.time() * 1000),
-                            "order_id": str(order.get("orderId", "")),
-                            "pnl_pct": round(pnl_pct, 3),
-                        })
-                        _log(live_state, f"✅ VERKAUF {position_symbol} — Order {order.get('orderId','?')} @ ${price:,.2f} | P&L: {pnl_pct:+.2f}%")
-                        _persist_trade_history(username, live_state)
-                    else:
-                        _log(live_state, f"⚠ Kein {base_asset}-Guthaben zum Verkaufen")
-                except Exception as e:
-                    _log(live_state, f"❌ VERKAUF fehlgeschlagen: {e}")
+                await _do_sell(force=force_sell, force_reason=force_sell_reason)
 
             elif action == "HOLD":
-                _log(live_state, f"→ HALTEN (Position: {live_state['position']})")
+                _log(live_state, f"→ HALTEN (Konfidenz: {confidence}%, Position: {live_state['position']})")
             else:
-                _log(live_state, f"→ {action} ignoriert (Konfidenz {confidence}% unter Schwellwert)")
+                _log(live_state, f"→ {action} ignoriert (Konfidenz {confidence}% unter Schwellwert oder falsche Position)")
 
             next2 = _next_close()
             live_state["next_check_ts"] = next2 + CLOSE_BUFFER
@@ -1103,6 +1382,9 @@ def _persist_trade_history(username: str, live_state: dict) -> None:
     if saved:
         saved["trade_history"] = live_state.get("trade_history", [])
         saved["buy_price"] = live_state.get("buy_price")
+        saved["current_capital"] = live_state.get("current_capital")
+        saved["position_qty"] = live_state.get("position_qty")
+        saved["compounding_mode"] = live_state.get("compounding_mode")
         save_live_state(username, saved)
 
 

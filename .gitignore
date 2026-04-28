@@ -1,2 +1,9 @@
 claude-proxy/claude.exe
 claude-proxy/dot-claude/
+data/
+knowledge/users/
+knowledge/news/
+knowledge/*.migrated
+.team/
+__pycache__/
+*.pyc

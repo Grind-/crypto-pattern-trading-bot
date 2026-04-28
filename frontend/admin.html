@@ -37,6 +37,7 @@
     .tag-apikey { color: var(--yellow); border-color: var(--yellow);
       background: rgba(210,153,34,0.1); }
     .act-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
     .modal-overlay { display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
     .modal-overlay.open { display: flex; }
@@ -51,10 +52,13 @@
   <div class="page-header">
     <a href="/">← Zurück</a>
     <span class="page-title">Admin-Panel</span>
-    <a href="/documentation" style="margin-left:auto">Dokumentation →</a>
+    <a href="/guide" style="margin-left:auto">Anleitung →</a>
+    <a href="/documentation" style="margin-left:6px">Entwickler-Doku →</a>
   </div>
 
   <div class="page-body">
+
+    <!-- ── Benutzer ──────────────────────────────────────────── -->
     <div class="card" style="margin-bottom:20px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <h2>Benutzer</h2>

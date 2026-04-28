@@ -82,8 +82,9 @@ async function startSim() {
     interval: document.getElementById('interval').value,
     days: parseInt(document.getElementById('days').value),
     initial_capital: parseFloat(document.getElementById('capital').value),
-    max_iterations: parseInt(document.getElementById('iterations').value),
     fee_tier: document.getElementById('fee-tier').value,
+    compounding_mode: document.getElementById('compounding-mode').value,
+    analysis_weight: parseInt(document.getElementById('sim-analysis-weight').value),
   };
 
   lastLogLen = 0;
@@ -96,8 +97,6 @@ async function startSim() {
   document.getElementById('trade-tbody').innerHTML = '';
   document.getElementById('trade-table-wrap').style.display = 'none';
   document.getElementById('no-trades').style.display = 'block';
-  document.getElementById('iter-cards').innerHTML = '';
-  document.getElementById('iterations-list').style.display = 'none';
   document.getElementById('metrics-row').style.display = 'none';
   document.getElementById('analysis-box').style.display = 'none';
   document.getElementById('status-card').style.display = 'block';
@@ -158,9 +157,7 @@ function updateStatusUI(state) {
   statusEl.textContent = label;
   pulseEl.style.background = state.status === 'profitable' ? '#3fb950' : state.running ? '#58a6ff' : '#8b949e';
 
-  if (state.iteration > 0) {
-    badgeEl.textContent = `Iteration ${state.iteration} / ${state.max_iterations}`;
-  }
+  badgeEl.textContent = '';
 
   const log = state.log || [];
   if (log.length > lastLogLen) {
@@ -206,23 +203,6 @@ function updateCharts(data) {
 }
 
 function addIterationResult(result) {
-  const profitable = result.total_return_pct > 0;
-  const ret = result.total_return_pct;
-
-  const iterList = document.getElementById('iterations-list');
-  const iterCards = document.getElementById('iter-cards');
-  iterList.style.display = 'block';
-
-  const card = document.createElement('div');
-  card.className = 'iter-card' + (profitable ? ' profitable' : '');
-  card.innerHTML = `
-    <span class="iter-num">Iter. ${result.iteration}</span>
-    <span class="iter-name">${result.strategy_name}</span>
-    <span class="iter-ret" style="color:${profitable ? '#3fb950' : '#f85149'}">${ret > 0 ? '+' : ''}${ret.toFixed(2)}%</span>
-  `;
-  card.addEventListener('click', () => showIterResult(result));
-  iterCards.appendChild(card);
-
   if (result.trades && result.trades.length > 0) {
     const tbody = document.getElementById('trade-tbody');
     document.getElementById('no-trades').style.display = 'none';
@@ -256,10 +236,20 @@ function showBestResult(result) {
   document.getElementById('m-fees').textContent = '$' + (result.total_fees_usdt || 0).toFixed(2);
   document.getElementById('m-feedrag').textContent = '-' + (result.fee_drag_pct || 0).toFixed(2) + '%';
 
+  const modeLabel = result.compounding_mode_label || result.compounding_mode || '';
+  if (modeLabel) {
+    const existing = document.getElementById('sim-compounding-badge');
+    const badge = existing || document.createElement('div');
+    badge.id = 'sim-compounding-badge';
+    badge.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:6px';
+    badge.textContent = `Compounding: ${modeLabel}`;
+    if (!existing) document.getElementById('metrics-row').after(badge);
+  }
+
   if (result.analysis) {
     const box = document.getElementById('analysis-box');
     box.style.display = 'block';
-    box.innerHTML = `<strong>${result.strategy_name}</strong><br/>${result.analysis}`;
+    box.innerHTML = result.analysis;
   }
 
   showIterResult(result);
@@ -302,19 +292,49 @@ function clearLog() {
 // ── Live Trading ──────────────────────────────────────────────────────────────
 let livePolling = null;
 let lastLiveLogLen = 0;
-let selectedSimForLive = null;
 let viewedSim = null;
 
-async function startLive() {
+async function validateBinanceKeys() {
+  const btn = document.getElementById('btn-validate-keys');
+  const result = document.getElementById('binance-validate-result');
+  btn.disabled = true;
+  result.textContent = 'Prüfe…';
+  result.style.color = 'var(--text-muted)';
   const body = {
     api_key: document.getElementById('live-api-key').value.trim(),
     api_secret: document.getElementById('live-api-secret').value.trim(),
-    symbol: document.getElementById('live-symbol').value,
+  };
+  try {
+    const r = await fetch('/api/live/validate-keys', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const bal = data.usdc_balance != null ? ` — USDC-Guthaben: ${data.usdc_balance.toFixed(2)}` : '';
+      result.textContent = `✓ Keys gültig${bal}`;
+      result.style.color = 'var(--green)';
+      await loadSavedCredentials();
+    } else {
+      result.textContent = `✗ ${data.error || 'Ungültige Keys'}`;
+      result.style.color = 'var(--red)';
+    }
+  } catch {
+    result.textContent = '✗ Verbindungsfehler';
+    result.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function startLive() {
+  const rawWeight = parseInt(document.getElementById('live-analysis-weight')?.value ?? '30', 10);
+  const body = {
+    api_key: document.getElementById('live-api-key').value.trim(),
+    api_secret: document.getElementById('live-api-secret').value.trim(),
     interval: document.getElementById('live-interval').value,
     trade_amount_usdt: parseFloat(document.getElementById('live-amount').value),
-    strategy_name: selectedSimForLive?.strategy_name || '',
-    strategy_analysis: selectedSimForLive?.strategy_analysis || '',
-    strategy_patterns: selectedSimForLive?.strategy_patterns || [],
+    compounding_mode: document.getElementById('live-compounding-mode').value,
+    analysis_weight: rawWeight,
   };
   const keyEl = document.getElementById('live-api-key');
   const secEl = document.getElementById('live-api-secret');
@@ -331,6 +351,8 @@ async function startLive() {
     alert('Fehler: ' + (err.detail || r.statusText));
     return;
   }
+
+  await loadSavedCredentials();
 
   document.getElementById('btn-live-start').disabled = true;
   document.getElementById('btn-live-stop').disabled = false;
@@ -387,6 +409,31 @@ async function pollLive() {
   const posBadge = document.getElementById('live-position-badge');
   posBadge.textContent = state.position || 'FLAT';
   posBadge.style.color = state.position === 'IN_POSITION' ? '#3fb950' : '#8b949e';
+
+  const basisEl = document.getElementById('live-basis-name');
+  if (basisEl) {
+    const w = state.analysis_weight ?? 70;
+    const kbPct = 100 - w;
+    basisEl.innerHTML = `<span style="color:var(--blue);font-weight:600">Wissensbasis</span>`
+      + `<span style="color:var(--text-muted);font-size:11px;margin-left:6px">${kbPct}% KB · ${w}% Markt</span>`;
+  }
+
+  const capRow = document.getElementById('live-capital-row');
+  const capVal = document.getElementById('live-capital-value');
+  if (capRow && capVal && state.running && state.current_capital > 0) {
+    capRow.style.display = 'block';
+    const initial = state.trade_amount || state.current_capital;
+    const current = state.current_capital;
+    const delta = current - initial;
+    const deltaPct = initial > 0 ? (delta / initial * 100) : 0;
+    const color = delta > 0 ? 'var(--green)' : delta < 0 ? 'var(--red)' : 'var(--text-muted)';
+    const sign = delta >= 0 ? '+' : '';
+    const modeLabels = {compound: 'Volles Compounding', fixed: 'Fixes Volumen', compound_wins: 'Nur Gewinne'};
+    const modeStr = modeLabels[state.compounding_mode] || state.compounding_mode || '';
+    capVal.innerHTML = `<strong>$${current.toFixed(2)}</strong> <span style="color:${color};font-size:11px">${sign}$${delta.toFixed(2)} (${sign}${deltaPct.toFixed(1)}%)</span> <span style="color:var(--text-muted);font-size:11px">· Start: $${initial.toFixed(2)}${modeStr ? ' · ' + modeStr : ''}</span>`;
+  } else if (capRow && !state.running) {
+    capRow.style.display = 'none';
+  }
 
   if (state.next_check_ts) {
     startCountdown(state.next_check_ts);
@@ -579,7 +626,7 @@ function renderScanResult(data, interval) {
       <span class="scanner-score" style="color:${scoreColor}">${r.score}/100</span>
       <span class="scanner-reason">${r.reason}</span>
       <button class="${isBest ? 'btn-use-sim' : 'btn-tiny'}" onclick="useSym('${r.symbol}','${interval}')">
-        ${isBest ? '★ Verwenden' : 'Verwenden'}
+        ${isBest ? '★ Intervall übernehmen' : 'Intervall'}
       </button>
     </div>`;
   }).join('');
@@ -620,19 +667,7 @@ async function loadSimHistory() {
     const data = await fetch('/api/simulations').then(r => r.json());
     _simList = data.simulations || [];
     renderSimHistory(_simList);
-    populateSimPicker(_simList);
   } catch (e) {}
-}
-
-function populateSimPicker(sims) {
-  const opts = ['<option value="">— Aktuelle Simulation —</option>',
-    ...sims.map(s => {
-      const ret = (s.total_return_pct || 0);
-      const sign = ret >= 0 ? '+' : '';
-      return `<option value="${s.id}">${s.symbol} ${s.interval} · ${sign}${ret.toFixed(2)}% · ${s.strategy_name || '?'}</option>`;
-    })
-  ].join('');
-  document.getElementById('charts-sim-select').innerHTML = opts;
 }
 
 async function _loadSimDetail(id) {
@@ -644,13 +679,8 @@ async function _loadSimDetail(id) {
   } catch (e) { return null; }
 }
 
-async function loadSelectedSim() {
-  const id = document.getElementById('charts-sim-select').value;
-  if (!id) return;
-  const sim = await _loadSimDetail(id);
-  if (!sim) return;
-
-  document.getElementById('chart-title').textContent = `${sim.symbol} ${sim.interval} — ${sim.strategy_name || 'Simulation'}`;
+function renderSimDetail(sim) {
+  document.getElementById('chart-title').textContent = `${sim.symbol} ${sim.interval}`;
 
   if (sim.candle_prices && sim.candle_prices.length > 0) {
     chartPrices = sim.candle_prices;
@@ -711,57 +741,29 @@ async function loadSelectedSim() {
     });
   }
 
-  // Iteration card
-  if (sim.iteration) {
-    const iterList = document.getElementById('iterations-list');
-    const iterCards = document.getElementById('iter-cards');
-    iterCards.innerHTML = '';
-    iterList.style.display = 'block';
-    const card = document.createElement('div');
-    card.className = 'iter-card' + (sim.profitable ? ' profitable' : '');
-    const ret = sim.total_return_pct || 0;
-    card.innerHTML = `
-      <span class="iter-num">Iter. ${sim.iteration}</span>
-      <span class="iter-name">${sim.strategy_name || '?'}</span>
-      <span class="iter-ret" style="color:${ret >= 0 ? '#3fb950' : '#f85149'}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
-    `;
-    iterCards.appendChild(card);
+}
+
+function _applyWeightLabel(kbPct, labelId, hintId) {
+  const w = 100 - kbPct;
+  const lbl = document.getElementById(labelId);
+  const hint = document.getElementById(hintId);
+  if (lbl) lbl.textContent = `${kbPct}% Wissensbasis · ${w}% Markt`;
+  if (hint) {
+    if (kbPct >= 80) hint.textContent = 'Wissensbasis führt strikt. Marktanalyse vetoet nur bei extremen Risiken.';
+    else if (kbPct >= 50) hint.textContent = 'Wissensbasis gibt Rahmen vor, Marktbedingungen können Signale anpassen.';
+    else if (kbPct >= 20) hint.textContent = 'Marktanalyse dominiert. Wissensbasis dient nur zur Bestätigung.';
+    else hint.textContent = 'Reine Marktanalyse — Wissensbasis nur als Hintergrundinformation.';
   }
 }
 
-function setSimAsLiveStrategy() {
-  const id = document.getElementById('charts-sim-select').value;
-  const sim = viewedSim || _simList.find(s => s.id === id);
-  if (!id || !sim) { alert('Bitte zuerst eine Simulation auswählen und laden.'); return; }
-  selectedSimForLive = {
-    id: sim.id,
-    symbol: sim.symbol,
-    interval: sim.interval,
-    strategy_name: sim.strategy_name || '',
-    strategy_analysis: sim.strategy_analysis || sim.analysis || '',
-    strategy_patterns: sim.strategy_patterns || sim.patterns_found || [],
-  };
-  switchTab('live');
-  updateLiveStrategyBar();
-  useSym(sim.symbol, sim.interval);
+function updateWeightLabel(val) {
+  _applyWeightLabel(100 - parseInt(val, 10), 'weight-label', 'weight-hint');
 }
 
-function clearLiveStrategy() {
-  selectedSimForLive = null;
-  document.getElementById('live-strategy-bar').style.display = 'none';
+function updateSimWeightLabel(val) {
+  _applyWeightLabel(100 - parseInt(val, 10), 'sim-weight-label', 'sim-weight-hint');
 }
 
-function updateLiveStrategyBar() {
-  if (!selectedSimForLive) {
-    document.getElementById('live-strategy-bar').style.display = 'none';
-    return;
-  }
-  document.getElementById('live-strategy-bar').style.display = 'block';
-  document.getElementById('live-strategy-name').textContent = selectedSimForLive.strategy_name || 'Strategie';
-  const patterns = (selectedSimForLive.strategy_patterns || []).join(', ');
-  document.getElementById('live-strategy-detail').textContent =
-    `${selectedSimForLive.symbol} ${selectedSimForLive.interval}${patterns ? ' · ' + patterns : ''}`;
-}
 
 function renderSimHistory(sims) {
   const list = document.getElementById('sim-history-list');
@@ -780,48 +782,25 @@ function renderSimHistory(sims) {
         <div class="sim-hist-main">
           <span class="sim-hist-sym">${s.symbol} ${s.interval}</span>
           <span class="sim-hist-ret" style="color:${color}">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</span>
-          <span class="sim-hist-strat">${s.strategy_name || '—'}</span>
           <span class="sim-hist-meta">${s.num_trades || 0} Trades · ${date}</span>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           <button class="btn-tiny" onclick="viewSimInCharts('${s.id}')">Charts</button>
-          <button class="btn-use-sim" onclick="useSimForLive('${s.id}')">★ Für Live</button>
+          <button class="btn-use-sim" onclick="useSym('${s.symbol}','${s.interval}');switchTab('live')">→ Live</button>
         </div>
       </div>`;
   }).join('');
 }
 
 async function viewSimInCharts(id) {
-  document.getElementById('charts-sim-select').value = id;
-  await loadSelectedSim();
-  switchTab('ergebnisse');
+  const sim = await _loadSimDetail(id);
+  if (!sim) return;
+  renderSimDetail(sim);
+  switchTab('simulation');
 }
 
-async function useSimForLive(id) {
-  const sim = _simList.find(s => s.id === id);
-  if (!sim) return;
-  const detail = await _loadSimDetail(id);
-  selectedSimForLive = {
-    id: sim.id,
-    symbol: sim.symbol,
-    interval: sim.interval,
-    strategy_name: sim.strategy_name || '',
-    strategy_analysis: (detail || sim).strategy_analysis || (detail || sim).analysis || '',
-    strategy_patterns: sim.strategy_patterns || (detail || sim).patterns_found || [],
-  };
-  useSym(sim.symbol, sim.interval);
-  updateLiveStrategyBar();
-  const bar = document.getElementById('live-strategy-bar');
-  bar.style.outline = '2px solid #3fb950';
-  setTimeout(() => { bar.style.outline = ''; }, 1500);
-}
 
 function useSym(symbol, interval) {
-  const sel = document.getElementById('live-symbol');
-  if (![...sel.options].some(o => o.value === symbol)) {
-    sel.insertAdjacentHTML('beforeend', `<option value="${symbol}">${symbol}</option>`);
-  }
-  sel.value = symbol;
   if (interval) document.getElementById('live-interval').value = interval;
 }
 
@@ -842,6 +821,7 @@ async function loadSavedCredentials() {
     const keyEl = document.getElementById('live-api-key');
     const secEl = document.getElementById('live-api-secret');
     const hintEl = document.getElementById('live-key-hint');
+    const statusEl = document.getElementById('binance-key-status');
     if (creds.has_key) {
       keyEl.placeholder = '••••••••••••••••';
       keyEl.dataset.saved = '1';
@@ -852,6 +832,13 @@ async function loadSavedCredentials() {
     }
     if (hintEl) {
       hintEl.textContent = creds.has_key ? creds.key_hint : '';
+    }
+    if (statusEl) {
+      if (creds.has_key && creds.has_secret) {
+        statusEl.innerHTML = `<span style="background:rgba(63,185,80,0.15);border:1px solid var(--green,#3fb950);color:var(--green,#3fb950);padding:3px 10px;border-radius:12px">✓ Binance API Key gespeichert (${creds.key_hint})</span>`;
+      } else {
+        statusEl.innerHTML = `<span style="background:rgba(255,165,0,0.12);border:1px solid #f0a500;color:#f0a500;padding:3px 10px;border-radius:12px">⚠ Kein Binance API Key gespeichert</span>`;
+      }
     }
   } catch {}
 }
@@ -887,15 +874,12 @@ async function initPage() {
         document.getElementById('live-next-str').textContent = state.next_check_str || '';
       }
 
-      if (state.strategy_name) {
-        selectedSimForLive = {
-          strategy_name: state.strategy_name,
-          strategy_analysis: state.strategy_analysis || '',
-          strategy_patterns: state.strategy_patterns || [],
-          symbol: state.symbol,
-          interval: state.interval,
-        };
-        updateLiveStrategyBar();
+      const basisEl = document.getElementById('live-basis-name');
+      if (basisEl) {
+        const w = state.analysis_weight ?? 70;
+        const kbPct = 100 - w;
+        const weightTag = `<span style="color:var(--text-muted);font-size:11px;margin-left:6px">${kbPct}% KB · ${w}% Markt</span>`;
+        basisEl.innerHTML = `<span style="color:var(--blue);font-weight:600">Wissensbasis</span>${weightTag}`;
       }
 
       document.getElementById('live-chart-title').textContent = `Live Preischart — ${state.symbol || ''}`;
@@ -923,8 +907,142 @@ fetch('/api/user/profile').then(r => r.json()).then(data => {
   if (data.role === 'admin') {
     const btn = document.getElementById('btn-admin');
     if (btn) btn.style.display = '';
+    const docs = document.getElementById('btn-docs');
+    if (docs) docs.style.display = '';
+    const refreshBtn = document.getElementById('btn-news-refresh');
+    if (refreshBtn) refreshBtn.style.display = '';
   }
 }).catch(() => {});
+
+// ── News Intelligence ────────────────────────────────────────────────────────
+let _newsLoaded = false;
+
+function renderNews(d) {
+  const loading = document.getElementById('news-loading');
+  const empty   = document.getElementById('news-empty');
+  const content = document.getElementById('news-content');
+  if (!d || !d.market_sentiment) {
+    loading.style.display = 'none'; empty.style.display = 'block'; return;
+  }
+
+  const sentEl = document.getElementById('news-sentiment');
+  const sentKey = (d.market_sentiment || 'neutral').replace(/\s+/g, '_');
+  sentEl.textContent = (d.market_sentiment || '—').replace(/_/g, ' ');
+  sentEl.className = 'news-sentiment sent-' + sentKey;
+
+  const fgv = d.fear_greed_value ?? 50;
+  document.getElementById('fng-label').textContent = d.fear_greed_label || '';
+  document.getElementById('fng-value').textContent = fgv + '/100';
+  const fill = document.getElementById('fng-fill');
+  fill.style.width = fgv + '%';
+  fill.style.background = fgv >= 60 ? 'var(--green)' : fgv <= 30 ? 'var(--red)' : 'var(--yellow)';
+
+  if (d.timestamp) {
+    const dt = new Date(d.timestamp);
+    const age = Math.round((Date.now() - dt) / 60000);
+    const ageStr = age < 60 ? `vor ${age} Min.` : `vor ${Math.round(age/60)} Std.`;
+    const tsEl = document.getElementById('news-ts');
+    if (tsEl) tsEl.textContent = `Zuletzt: ${dt.toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'})} Uhr (${ageStr})`;
+  }
+
+  document.getElementById('news-analysis').textContent = d.analysis || '';
+
+  const opps = d.top_opportunities || [];
+  document.getElementById('news-opps').innerHTML = opps.map(o => {
+    const dir = (o.direction || 'long').toLowerCase();
+    const confBg = o.confidence >= 70 ? 'rgba(63,185,80,0.12)' : 'rgba(210,153,34,0.12)';
+    const confColor = o.confidence >= 70 ? 'var(--green)' : 'var(--yellow)';
+    const dirColor = dir === 'long' ? 'var(--green)' : 'var(--red)';
+    return `<div class="opp-card direction-${dir}">
+      <div class="opp-header">
+        <span class="opp-symbol">${o.symbol}</span>
+        <span class="opp-conf" style="background:${confBg};color:${confColor}">${o.confidence}%</span>
+        <span class="opp-tf">${o.timeframe || ''}</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:700;text-transform:uppercase;color:${dirColor}">${dir}</span>
+      </div>
+      <div class="opp-catalyst">${o.catalyst || ''}</div>
+      <div class="opp-source">${o.source || ''}</div>
+    </div>`;
+  }).join('');
+
+  // Weighted news
+  const weighted = d.weighted_news || [];
+  const wnSection = document.getElementById('weighted-news-section');
+  const wnList = document.getElementById('news-weighted-list');
+  if (weighted.length > 0) {
+    const sigIcon = { bullish: '🟢', bearish: '🔴', neutral: '⚪' };
+    const impactColor = { bullish: 'var(--green)', bearish: 'var(--red)', neutral: 'var(--text-muted)' };
+    wnList.innerHTML = weighted.map(n => {
+      const wCls = 'ww-' + (n.weight || 'low');
+      const wLabel = { high: 'HOCH', medium: 'MITTEL', low: 'GERING' }[n.weight] || n.weight;
+      const sig = sigIcon[n.signal] || '⚪';
+      const iColor = impactColor[n.signal] || 'var(--text-muted)';
+      const syms = (n.affects_symbols || []).map(s => `<span class="wnews-sym">${s}</span>`).join('');
+      const filteredBadge = n.flows_into_decision
+        ? ''
+        : `<span class="wnews-filtered">nicht in Entscheidung</span>`;
+      return `<div class="wnews-item">
+        <div class="wnews-left">
+          <span class="wnews-weight ${wCls}">${wLabel}</span>
+          <span class="wnews-signal">${sig}</span>
+        </div>
+        <div class="wnews-body">
+          <div class="wnews-headline">${n.headline || ''}</div>
+          <div class="wnews-impact" style="color:${iColor}">${n.decision_impact || ''}</div>
+          <div class="wnews-reasoning">${n.reasoning || ''}</div>
+          <div class="wnews-footer">
+            <div class="wnews-symbols">${syms}</div>
+            <span class="wnews-source">${n.source || ''}</span>
+            ${filteredBadge}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    wnSection.style.display = 'block';
+  } else {
+    wnSection.style.display = 'none';
+  }
+
+  document.getElementById('news-warnings').innerHTML =
+    (d.warnings || []).map(w => `<li>${w}</li>`).join('') || '<li style="list-style:none;color:var(--text-muted)">Keine Warnungen</li>';
+
+  document.getElementById('news-trending').innerHTML =
+    (d.trending_coins || []).map(c => `<span class="trend-pill">${c}</span>`).join('');
+
+  document.getElementById('news-sources').textContent = (d.sources_used || []).join(', ') || '—';
+
+  loading.style.display = 'none'; empty.style.display = 'none'; content.style.display = 'block';
+  _newsLoaded = true;
+}
+
+async function ensureNewsLoaded() {
+  if (_newsLoaded) return;
+  try {
+    const d = await fetch('/api/news/intelligence').then(r => r.json());
+    renderNews(d);
+  } catch {
+    document.getElementById('news-loading').style.display = 'none';
+    document.getElementById('news-empty').style.display = 'block';
+  }
+}
+
+async function refreshNews() {
+  const btn = document.getElementById('btn-news-refresh');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ Läuft…'; }
+  _newsLoaded = false;
+  document.getElementById('news-content').style.display = 'none';
+  document.getElementById('news-empty').style.display = 'none';
+  document.getElementById('news-loading').style.display = 'block';
+  try {
+    const d = await fetch('/api/news/refresh', {method:'POST'}).then(r => r.json());
+    renderNews(d);
+  } catch {
+    document.getElementById('news-loading').style.display = 'none';
+    document.getElementById('news-empty').style.display = 'block';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Aktualisieren'; }
+  }
+}
 
 // Load symbols on startup
 fetch('/api/symbols').then(r => r.json()).then(data => {

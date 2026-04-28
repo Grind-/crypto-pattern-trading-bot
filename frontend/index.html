@@ -13,6 +13,8 @@
     <div class="header-actions" id="header-actions">
       <span id="header-user"></span>
       <a id="btn-admin" href="/admin" style="display:none" class="btn-logout">Admin</a>
+      <a id="btn-docs" href="/documentation" style="display:none" class="btn-logout">Entwickler-Doku</a>
+      <a href="/guide" class="btn-logout">Anleitung</a>
       <a href="/settings" class="btn-logout">Einstellungen</a>
       <button class="btn-logout" onclick="logout()">Abmelden</button>
     </div>
@@ -22,13 +24,13 @@
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="simulation">Simulation</button>
-    <button class="tab" data-tab="ergebnisse">Ergebnisse</button>
-    <button class="tab" data-tab="live">Live Trading</button>
+    <button class="tab active" data-tab="live">Live Trading</button>
+    <button class="tab" data-tab="simulation">Simulation</button>
+    <button class="tab" data-tab="news" onclick="ensureNewsLoaded()">News</button>
   </nav>
 
   <!-- ══ SIMULATION TAB ══════════════════════════════════════════════════════ -->
-  <section id="tab-simulation" class="tab-content active">
+  <section id="tab-simulation" class="tab-content">
     <div class="card">
       <h2>Konfiguration</h2>
       <div class="form-grid">
@@ -59,10 +61,6 @@
           <input id="capital" type="number" value="1000" min="100" />
         </div>
         <div class="field">
-          <label>Max. Iterationen</label>
-          <input id="iterations" type="number" value="10" min="1" max="20" />
-        </div>
-        <div class="field">
           <label>Binance Gebühren</label>
           <select id="fee-tier">
             <option value="standard">Standard 0.10%</option>
@@ -72,6 +70,27 @@
             <option value="vip3">VIP 3 — 0.07%</option>
             <option value="vip4">VIP 4 — 0.05%</option>
           </select>
+        </div>
+        <div class="field">
+          <label>Compounding-Modus</label>
+          <select id="compounding-mode">
+            <option value="compound">Volles Compounding (Gewinne &amp; Verluste)</option>
+            <option value="fixed">Fixes Volumen (immer Startbetrag)</option>
+            <option value="compound_wins">Nur Gewinne compounding (Verluste zurücksetzen)</option>
+          </select>
+        </div>
+        <div class="field full">
+          <label>Wissensbasis vs. Marktanalyse <span id="sim-weight-label" style="color:var(--blue);font-weight:600;margin-left:6px">70% Wissensbasis · 30% Markt</span></label>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Wissensbasis</span>
+            <input id="sim-analysis-weight" type="range" min="0" max="100" value="30" step="10"
+              oninput="updateSimWeightLabel(this.value)"
+              style="flex:1;accent-color:var(--blue)" />
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Markt</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px" id="sim-weight-hint">
+            Wissensbasis gibt Rahmen vor, Marktbedingungen können Signale anpassen.
+          </div>
         </div>
       </div>
       <div class="btn-row">
@@ -84,7 +103,6 @@
       <div class="status-row">
         <div class="pulse" id="pulse"></div>
         <span id="status-text">Idle</span>
-        <span id="iteration-badge" class="badge"></span>
       </div>
       <div class="metrics-row" id="metrics-row" style="display:none">
         <div class="metric"><div class="metric-val" id="m-return">—</div><div class="metric-label">Netto-Return</div></div>
@@ -101,20 +119,6 @@
       <h2>Log <button class="btn-tiny" onclick="clearLog()">Clear</button></h2>
       <div id="log-box" class="log-box"></div>
     </div>
-  </section>
-
-  <!-- ══ ERGEBNISSE TAB (Simulation Charts + Trades) ══════════════════════ -->
-  <section id="tab-ergebnisse" class="tab-content">
-    <div class="card sim-picker-bar">
-      <div class="sim-picker-row">
-        <label>Simulation:</label>
-        <select id="charts-sim-select">
-          <option value="">— Aktuelle Simulation —</option>
-        </select>
-        <button class="btn-tiny" onclick="loadSelectedSim()">Laden</button>
-        <button class="btn btn-primary btn-sm" onclick="setSimAsLiveStrategy()">★ Für Live wählen</button>
-      </div>
-    </div>
 
     <div class="card">
       <h2 id="chart-title">Preischart</h2>
@@ -122,19 +126,17 @@
         <canvas id="price-chart"></canvas>
       </div>
     </div>
+
     <div class="card">
       <h2>Portfolio-Entwicklung</h2>
       <div class="chart-wrap">
         <canvas id="portfolio-chart"></canvas>
       </div>
     </div>
-    <div class="card" id="iterations-list" style="display:none">
-      <h2>Iterationen</h2>
-      <div id="iter-cards"></div>
-    </div>
+
     <div class="card">
       <h2>Trade-Protokoll</h2>
-      <div id="no-trades" class="empty-state">Starte eine Simulation oder wähle eine aus dem Dropdown.</div>
+      <div id="no-trades" class="empty-state">Starte eine Simulation.</div>
       <div class="table-wrap" id="trade-table-wrap" style="display:none">
         <table>
           <thead>
@@ -144,10 +146,20 @@
         </table>
       </div>
     </div>
+
+    <div class="card" id="sim-history-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:600">Vergangene Simulationen</span>
+        <button class="btn-tiny" onclick="loadSimHistory()">↻ Aktualisieren</button>
+      </div>
+      <div id="sim-history-list">
+        <div class="empty-state">Noch keine Simulationen gespeichert.</div>
+      </div>
+    </div>
   </section>
 
   <!-- ══ LIVE TRADING TAB ══════════════════════════════════════════════════ -->
-  <section id="tab-live" class="tab-content">
+  <section id="tab-live" class="tab-content active">
 
     <!-- Setup: Scanner + Config -->
     <div class="live-section-label">Setup</div>
@@ -174,6 +186,7 @@
 
     <div class="card">
       <h2>Konfiguration</h2>
+      <div id="binance-key-status" style="margin-bottom:12px;font-size:0.85em"></div>
       <div class="form-grid">
         <div class="field full">
           <label>API Key <span id="live-key-hint" style="font-size:0.75em;color:var(--muted);margin-left:6px;font-weight:400"></span></label>
@@ -183,13 +196,9 @@
           <label>API Secret</label>
           <input id="live-api-secret" type="password" placeholder="Binance API Secret" />
         </div>
-        <div class="field">
-          <label>Start-Symbol</label>
-          <select id="live-symbol">
-            <option>BTCUSDC</option>
-            <option>ETHUSDC</option>
-            <option>SOLUSDC</option>
-          </select>
+        <div class="field full">
+          <button class="btn btn-secondary btn-sm" id="btn-validate-keys" onclick="validateBinanceKeys()" type="button">Keys testen</button>
+          <span id="binance-validate-result" style="font-size:0.85em;margin-left:10px"></span>
         </div>
         <div class="field">
           <label>Intervall</label>
@@ -203,6 +212,27 @@
           <label>Trade-Betrag (USDC)</label>
           <input id="live-amount" type="number" value="50" min="10" />
         </div>
+        <div class="field">
+          <label>Compounding-Modus</label>
+          <select id="live-compounding-mode">
+            <option value="compound">Volles Compounding (Gewinne &amp; Verluste)</option>
+            <option value="fixed">Fixes Volumen (immer Startbetrag)</option>
+            <option value="compound_wins">Nur Gewinne compounding (Verluste zurücksetzen)</option>
+          </select>
+        </div>
+        <div class="field full">
+          <label>Wissensbasis vs. Marktanalyse <span id="weight-label" style="color:var(--blue);font-weight:600;margin-left:6px">70% Wissensbasis · 30% Markt</span></label>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Wissensbasis</span>
+            <input id="live-analysis-weight" type="range" min="0" max="100" value="30" step="10"
+              oninput="updateWeightLabel(this.value)"
+              style="flex:1;accent-color:var(--blue)" />
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">Nur Markt</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px" id="weight-hint">
+            Simulation gibt Einstiegsregeln vor, Marktanalyse filtert ungünstige Situationen.
+          </div>
+        </div>
       </div>
       <div class="btn-row">
         <button id="btn-live-start" class="btn btn-primary" onclick="startLive()">▶ Live Trading starten</button>
@@ -210,14 +240,6 @@
       </div>
     </div>
 
-    <div class="card strategy-bar" id="live-strategy-bar" style="display:none">
-      <div class="strategy-bar-inner">
-        <span class="badge badge-green">★ Strategie aktiv</span>
-        <span id="live-strategy-name" style="font-weight:600;font-size:13px"></span>
-        <span id="live-strategy-detail" style="color:var(--text-muted);font-size:12px;flex:1"></span>
-        <button class="btn-tiny" onclick="clearLiveStrategy()">✕ Entfernen</button>
-      </div>
-    </div>
 
     <!-- Active: Status + Chart + Trades -->
     <div id="live-active-section" style="display:none">
@@ -230,6 +252,12 @@
           <span id="live-symbol-badge" class="badge" style="background:rgba(88,166,255,0.15);border-color:var(--blue);color:var(--blue)"></span>
           <span id="live-position-badge" class="badge"></span>
           <button class="btn-tiny" id="btn-live-scan" onclick="runLiveScan()" style="margin-left:auto">🔍 Jetzt scannen</button>
+        </div>
+        <div id="live-basis-row" style="font-size:12px;padding:6px 0 2px;border-top:1px solid var(--border);margin-top:8px">
+          <span style="color:var(--text-muted)">Entscheidungsgrundlage: </span><span id="live-basis-name"></span>
+        </div>
+        <div id="live-capital-row" style="font-size:12px;padding:4px 0;display:none">
+          <span style="color:var(--text-muted)">Kapital: </span><span id="live-capital-value"></span>
         </div>
         <div id="live-countdown-box" class="countdown-box" style="display:none">
           <div class="countdown-label">Nächste Analyse</div>
@@ -260,18 +288,55 @@
       </div>
     </div>
 
-    <!-- History: Past simulations -->
-    <div class="live-section-label">Vergangene Simulationen</div>
-    <div class="card" id="sim-history-card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <span style="font-size:13px;font-weight:600">Simulation auswählen</span>
-        <button class="btn-tiny" onclick="loadSimHistory()">↻ Aktualisieren</button>
+
+  </section>
+
+  <!-- ══ NEWS TAB ══════════════════════════════════════════════════════════ -->
+  <section id="tab-news" class="tab-content">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <h2>Markt-Intelligence</h2>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span id="news-ts" class="news-ts"></span>
+          <button id="btn-news-refresh" class="btn btn-secondary btn-sm" onclick="refreshNews()" style="display:none">↻ Aktualisieren</button>
+        </div>
       </div>
-      <div id="sim-history-list">
-        <div class="empty-state">Noch keine Simulationen gespeichert.</div>
+
+      <div id="news-loading" style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center">Lade…</div>
+      <div id="news-empty" style="display:none" class="empty-state">Noch keine News-Intelligence verfügbar. Bitte warte auf den nächsten stündlichen Zyklus.</div>
+
+      <div id="news-content" style="display:none">
+        <div class="news-meta">
+          <span id="news-sentiment" class="news-sentiment"></span>
+          <div class="fng-bar">
+            <span id="fng-label"></span>
+            <div class="fng-track"><div class="fng-fill" id="fng-fill"></div></div>
+            <span id="fng-value" style="font-weight:600"></span>
+          </div>
+        </div>
+
+        <div class="news-analysis-text" id="news-analysis"></div>
+
+        <div class="news-section-title">Top-Chancen</div>
+        <div class="opp-grid" id="news-opps"></div>
+
+        <div id="weighted-news-section" style="display:none">
+          <div class="news-section-title" style="display:flex;align-items:center;gap:8px">
+            News-Gewichtung &amp; Entscheidungseinfluss
+            <span style="font-size:10px;font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0">— fließt aktiv in Trading-Signale ein</span>
+          </div>
+          <div id="news-weighted-list"></div>
+        </div>
+
+        <div class="news-section-title">Risiken &amp; Warnungen</div>
+        <ul class="warning-list" id="news-warnings"></ul>
+
+        <div class="news-section-title">Trending auf CoinGecko</div>
+        <div class="trending-row" id="news-trending" style="margin-bottom:12px"></div>
+
+        <div style="font-size:11px;color:var(--text-muted)">Quellen: <span id="news-sources"></span></div>
       </div>
     </div>
-
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>

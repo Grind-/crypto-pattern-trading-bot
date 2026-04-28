@@ -23,7 +23,6 @@ async def health():
 
 @app.post("/analyze")
 async def analyze(req: PromptRequest):
-    # Prepend system prompt into the user message so the CLI receives full context
     full_prompt = f"{req.system}\n\n{req.prompt}" if req.system else req.prompt
 
     env = {
@@ -68,7 +67,6 @@ async def analyze(req: PromptRequest):
         parts = raw.split("```")
         raw = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
 
-    # Try JSON parse
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -79,5 +77,4 @@ async def analyze(req: PromptRequest):
                 return json.loads(raw[start:end])
             except Exception:
                 pass
-        # Return raw text wrapped
         return {"raw_text": raw}
