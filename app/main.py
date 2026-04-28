@@ -372,12 +372,14 @@ async def do_logout(request: Request, response: Response):
 
 # ── Page routes ────────────────────────────────────────────────────────────────
 
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
 @app.get("/")
 async def index(request: Request):
     token = request.cookies.get("session", "")
     if _valid_session(token):
-        return FileResponse("frontend/index.html")
-    return FileResponse("frontend/landing.html")
+        return FileResponse("frontend/index.html", headers=_NO_CACHE)
+    return FileResponse("frontend/landing.html", headers=_NO_CACHE)
 
 
 @app.get("/admin")
