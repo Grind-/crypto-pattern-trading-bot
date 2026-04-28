@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=4" />
+  <link rel="stylesheet" href="/static/style.css?v=5" />
 </head>
 <body>
   <header>
@@ -223,32 +223,48 @@
       <div class="live-section-label">Aktiv</div>
 
       <div class="card" id="live-status-card">
-        <div class="status-row">
-          <div class="pulse pulse-live" id="live-pulse"></div>
-          <span id="live-status-text">Idle</span>
-          <span id="live-symbol-badge" class="badge" style="background:rgba(88,166,255,0.15);border-color:var(--blue);color:var(--blue)"></span>
-          <span id="live-position-badge" class="badge"></span>
-          <span id="live-regime-badge" class="badge regime-badge" style="display:none"></span>
-          <span id="live-news-score-badge" class="badge" style="display:none"></span>
+        <!-- Header: pulse + status (left) | badges (right, wrapping) -->
+        <div class="live-status-header">
+          <div class="live-status-main">
+            <div class="pulse pulse-live" id="live-pulse"></div>
+            <span id="live-status-text" class="live-status-text">Idle</span>
+          </div>
+          <div class="live-status-badges">
+            <span id="live-symbol-badge" class="badge badge--blue" style="display:none"></span>
+            <span id="live-position-badge" class="badge"></span>
+            <span id="live-regime-badge" class="badge regime-badge" style="display:none"></span>
+            <span id="live-news-score-badge" class="badge" style="display:none"></span>
+          </div>
         </div>
-        <div id="live-basis-row" style="font-size:12px;padding:6px 0 2px;border-top:1px solid var(--border);margin-top:8px">
-          <span style="color:var(--text-muted)">Entscheidungsgrundlage: </span><span id="live-basis-name"></span>
+
+        <!-- Capital widget -->
+        <div id="live-capital-row" class="live-capital-widget" style="display:none">
+          <div class="live-capital-label">Kapital</div>
+          <div id="live-capital-value" class="live-capital-amount">—</div>
+          <div id="live-capital-meta" class="live-capital-meta"></div>
         </div>
-        <div id="live-capital-row" style="font-size:12px;padding:4px 0;display:none">
-          <span style="color:var(--text-muted)">Kapital: </span><span id="live-capital-value"></span>
-        </div>
+
+        <!-- Countdown to next candle -->
         <div id="live-countdown-box" class="countdown-box" style="display:none">
-          <div class="countdown-label">Nächste Analyse</div>
+          <div>
+            <div class="countdown-label">Nächste Analyse</div>
+            <div class="countdown-sub" id="live-next-str">—</div>
+          </div>
           <div class="countdown-time" id="live-countdown">—</div>
-          <div class="countdown-sub" id="live-next-str">—</div>
         </div>
-        <div id="live-agent-panel" style="display:none;font-size:11px;padding:6px 0;
-          border-top:1px solid var(--border);margin-top:6px;color:var(--text-muted)">
-          <span id="live-regime-text"></span> &nbsp;|&nbsp;
-          <span id="live-news-text"></span> &nbsp;|&nbsp;
-          <span id="live-risk-text"></span>
+
+        <!-- Knowledge basis + agent summary chips -->
+        <div id="live-basis-row" class="live-basis-row">
+          <span class="live-basis-label">Basis</span>
+          <span id="live-basis-name"></span>
         </div>
-        <div id="live-log-box" class="log-box"></div>
+        <div id="live-agent-panel" class="live-agent-chips" style="display:none">
+          <span id="live-regime-text" class="agent-chip"></span>
+          <span id="live-news-text" class="agent-chip"></span>
+          <span id="live-risk-text" class="agent-chip"></span>
+        </div>
+
+        <div id="live-log-box" class="log-box" style="margin-top:12px"></div>
       </div>
 
       <!-- Decision Transparency Card -->

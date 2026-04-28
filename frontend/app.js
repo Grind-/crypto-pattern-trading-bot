@@ -467,12 +467,24 @@ async function pollLive() {
 
   document.getElementById('live-status-text').textContent = state.status || 'idle';
 
+  // Running state card glow
+  const statusCard = document.getElementById('live-status-card');
+  if (statusCard) statusCard.classList.toggle('card--running', !!state.running);
+
   const symBadge = document.getElementById('live-symbol-badge');
-  symBadge.textContent = state.symbol || '';
+  if (state.symbol) {
+    symBadge.textContent = state.symbol;
+    symBadge.style.display = 'inline-block';
+  } else {
+    symBadge.style.display = 'none';
+  }
 
   const posBadge = document.getElementById('live-position-badge');
+  const isInPos = state.position === 'IN_POSITION';
   posBadge.textContent = state.position || 'FLAT';
-  posBadge.style.color = state.position === 'IN_POSITION' ? '#3fb950' : '#8b949e';
+  posBadge.style.cssText = isInPos
+    ? 'color:#3fb950;border-color:#3fb95044;background:rgba(63,185,80,0.1)'
+    : 'color:#8b949e';
 
   const basisEl = document.getElementById('live-basis-name');
   if (basisEl) {
@@ -484,6 +496,7 @@ async function pollLive() {
 
   const capRow = document.getElementById('live-capital-row');
   const capVal = document.getElementById('live-capital-value');
+  const capMeta = document.getElementById('live-capital-meta');
   if (capRow && capVal && state.running && state.current_capital > 0) {
     capRow.style.display = 'block';
     const initial = state.trade_amount || state.current_capital;
@@ -494,7 +507,8 @@ async function pollLive() {
     const sign = delta >= 0 ? '+' : '';
     const modeLabels = {compound: 'Volles Compounding', fixed: 'Fixes Volumen', compound_wins: 'Nur Gewinne'};
     const modeStr = modeLabels[state.compounding_mode] || state.compounding_mode || '';
-    capVal.innerHTML = `<strong>$${current.toFixed(2)}</strong> <span style="color:${color};font-size:11px">${sign}$${delta.toFixed(2)} (${sign}${deltaPct.toFixed(1)}%)</span> <span style="color:var(--text-muted);font-size:11px">· Start: $${initial.toFixed(2)}${modeStr ? ' · ' + modeStr : ''}</span>`;
+    capVal.innerHTML = `$${current.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="color:${color};font-size:13px;font-weight:600">${sign}${deltaPct.toFixed(1)}%</span>`;
+    if (capMeta) capMeta.innerHTML = `<span style="color:${color}">${sign}$${delta.toFixed(2)}</span> seit Start ($${initial.toFixed(2)})${modeStr ? ' · ' + modeStr : ''}`;
   } else if (capRow && !state.running) {
     capRow.style.display = 'none';
   }
