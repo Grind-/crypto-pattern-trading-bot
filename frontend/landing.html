@@ -86,7 +86,11 @@
       pointer-events: none;
       z-index: 0;
     }
+    /* Children sit above the glow but never above the sticky header (z:100) */
     .hero > * { position: relative; z-index: 1; }
+    /* Ensure header always wins — it's outside .hero so stacking is separate,
+       but belt-and-suspenders on mobile where paint order can differ */
+    header { isolation: isolate; }
     .hero-badge {
       display: inline-flex; align-items: center; gap: 7px;
       background: var(--blue-dim); border: 1px solid rgba(88,166,255,0.3);

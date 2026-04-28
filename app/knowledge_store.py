@@ -89,6 +89,43 @@ def _user_live_state_snapshot_path(username: str, symbol: str) -> str:
     return f"{_user_dir(username)}/live_state_{symbol}.json"
 
 
+def _user_live_log_path(username: str) -> str:
+    return f"{_user_dir(username)}/live_log.txt"
+
+
+def append_live_log(username: str, line: str) -> None:
+    """Append one log line to the persistent live log file."""
+    try:
+        os.makedirs(_user_dir(username), exist_ok=True)
+        with open(_user_live_log_path(username), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def load_live_log(username: str, limit: int = 300) -> list:
+    """Return the last `limit` lines from the persisted live log."""
+    try:
+        with open(_user_live_log_path(username), "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        return [l.rstrip("\n") for l in lines[-limit:]]
+    except Exception:
+        return []
+
+
+def trim_live_log(username: str, keep: int = 1000) -> None:
+    """Truncate the log file to the most recent `keep` lines."""
+    try:
+        path = _user_live_log_path(username)
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > keep:
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(lines[-keep:])
+    except Exception:
+        pass
+
+
 def _community_path(symbol: str, interval: str) -> str:
     return f"{COMMUNITY_DIR}/{symbol}_{interval}.json"
 

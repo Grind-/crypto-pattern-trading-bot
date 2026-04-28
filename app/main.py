@@ -45,7 +45,8 @@ from .user_store import (init_users, list_users, get_user, authenticate,
                          save_binance_keys, get_binance_keys)
 from .knowledge_store import (append_trade_log, load_trade_log,
                                save_live_state_snapshot, load_live_state_snapshot,
-                               load_user_settings, save_user_settings)
+                               load_user_settings, save_user_settings,
+                               append_live_log, load_live_log, trim_live_log)
 
 def _floor_to_step(qty: float, step: float) -> float:
     """Floor qty to the nearest multiple of step (avoids LOT_SIZE filter errors)."""
@@ -60,7 +61,7 @@ def _floor_to_step(qty: float, step: float) -> float:
 _SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
 _SESSION_TTL = 86400 * 7
 
-PUBLIC_PATHS = {"/", "/login", "/auth/login", "/auth/logout"}
+PUBLIC_PATHS = {"/", "/login", "/auth/login", "/auth/logout", "/guide", "/documentation"}
 
 # ── Login rate limiter ─────────────────────────────────────────────────────────
 _LOGIN_ATTEMPTS: dict[str, list] = defaultdict(list)
@@ -215,6 +216,8 @@ async def _auto_resume_all():
         session_token = str(uuid.uuid4())
         state = _get_live_state(username)
         snapshot = load_live_state_snapshot(username, saved_symbol) if saved_symbol else None
+        resumed_log = load_live_log(username)
+        resumed_log.append("── Bot neu gestartet, Trading fortgesetzt ──")
         state.update({
             "running": True,
             "status": "active",
@@ -226,7 +229,7 @@ async def _auto_resume_all():
             "position_qty": reconciled_qty,
             "compounding_mode": req.compounding_mode,
             "signals": [],
-            "log": [],
+            "log": resumed_log,
             "api_key": req.api_key,
             "api_secret": req.api_secret,
             "next_check_ts": None,
@@ -239,6 +242,7 @@ async def _auto_resume_all():
             "sl_pct": (snapshot or saved).get("sl_pct"),
             "tp_pct": (snapshot or saved).get("tp_pct"),
             "_session_token": session_token,
+            "_username": username,
             "last_regime": None,
             "last_risk": None,
             "last_news_score": None,
@@ -770,6 +774,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "analysis_weight": req.analysis_weight,
         "trade_history": [], "live_candles": [], "buy_price": None,
         "_session_token": session_token,
+        "_username": username,
     })
     save_live_state(username, {
         "was_running": True,
@@ -1609,6 +1614,10 @@ def _log(state: dict, msg: str):
     state["log"].append(msg)
     if len(state["log"]) > 500:
         state["log"] = state["log"][-400:]
+        if username := state.get("_username"):
+            trim_live_log(username)
+    if username := state.get("_username"):
+        append_live_log(username, msg)
 
 
 def _interval_to_seconds(interval: str) -> int:
