@@ -60,7 +60,7 @@ def _floor_to_step(qty: float, step: float) -> float:
 _SESSIONS: dict[str, dict] = {}  # token → {"username": str, "expiry": float}
 _SESSION_TTL = 86400 * 7
 
-PUBLIC_PATHS = {"/login", "/auth/login", "/auth/logout"}
+PUBLIC_PATHS = {"/", "/login", "/auth/login", "/auth/logout"}
 
 # ── Login rate limiter ─────────────────────────────────────────────────────────
 _LOGIN_ATTEMPTS: dict[str, list] = defaultdict(list)
@@ -114,7 +114,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not _valid_session(token):
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
-            return RedirectResponse("/login", status_code=302)
+            return RedirectResponse("/", status_code=302)
         return await call_next(request)
 
 
@@ -364,8 +364,11 @@ async def do_logout(request: Request, response: Response):
 # ── Page routes ────────────────────────────────────────────────────────────────
 
 @app.get("/")
-async def index():
-    return FileResponse("frontend/index.html")
+async def index(request: Request):
+    token = request.cookies.get("session", "")
+    if _valid_session(token):
+        return FileResponse("frontend/index.html")
+    return FileResponse("frontend/landing.html")
 
 
 @app.get("/admin")

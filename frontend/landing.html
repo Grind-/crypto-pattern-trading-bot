@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Pattern AI — KI-gestütztes Krypto-Trading</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --blue: #58a6ff;
+      --blue-dim: rgba(88,166,255,0.12);
+      --green: #3fb950;
+      --green-dim: rgba(63,185,80,0.12);
+      --orange: #e3b341;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --purple-dim: rgba(188,140,255,0.12);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,17,23,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .header-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 17px; font-weight: 700; color: var(--blue);
+      text-decoration: none;
+    }
+    .header-logo .hex { font-size: 22px; }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .btn-outline {
+      padding: 6px 16px; border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent; color: var(--text);
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; text-decoration: none;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-outline:hover { border-color: var(--blue); color: var(--blue); }
+    .btn-primary {
+      padding: 6px 18px; border-radius: 6px;
+      background: var(--blue); color: #0d1117;
+      border: none; font-size: 13px; font-weight: 700;
+      cursor: pointer; text-decoration: none;
+      transition: opacity .15s;
+    }
+    .btn-primary:hover { opacity: 0.88; }
+
+    /* ── Hero ────────────────────────────────────────────────────────── */
+    .hero {
+      max-width: 860px; margin: 0 auto;
+      padding: 80px 24px 60px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: var(--blue-dim); border: 1px solid rgba(88,166,255,0.3);
+      color: var(--blue); border-radius: 20px;
+      padding: 4px 14px; font-size: 12px; font-weight: 600;
+      letter-spacing: .04em; text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .hero-badge .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--blue);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .5; transform: scale(0.7); }
+    }
+    .hero h1 {
+      font-size: clamp(32px, 6vw, 58px);
+      font-weight: 800; line-height: 1.15;
+      letter-spacing: -0.02em; margin-bottom: 20px;
+    }
+    .hero h1 .accent { color: var(--blue); }
+    .hero p {
+      font-size: clamp(15px, 2.5vw, 18px);
+      color: var(--muted); max-width: 560px;
+      margin: 0 auto 36px;
+    }
+    .hero-cta {
+      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+    }
+    .btn-hero-primary {
+      padding: 12px 28px; border-radius: 8px;
+      background: var(--blue); color: #0d1117;
+      border: none; font-size: 15px; font-weight: 700;
+      cursor: pointer; text-decoration: none;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn-hero-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn-hero-outline {
+      padding: 12px 28px; border-radius: 8px;
+      background: transparent; color: var(--text);
+      border: 1px solid var(--border);
+      font-size: 15px; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      transition: border-color .15s, transform .1s;
+    }
+    .btn-hero-outline:hover { border-color: var(--blue); transform: translateY(-1px); }
+
+    /* ── Stats row ───────────────────────────────────────────────────── */
+    .stats {
+      max-width: 740px; margin: 0 auto 70px;
+      display: flex; gap: 0; flex-wrap: wrap;
+      border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    .stat {
+      flex: 1; min-width: 140px;
+      padding: 18px 24px;
+      border-right: 1px solid var(--border);
+      text-align: center;
+    }
+    .stat:last-child { border-right: none; }
+    .stat-val {
+      font-size: 22px; font-weight: 800; color: var(--text);
+      margin-bottom: 2px;
+    }
+    .stat-val .accent { color: var(--blue); }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+    /* ── Section wrapper ─────────────────────────────────────────────── */
+    .section {
+      max-width: 1000px; margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+    .section-title {
+      font-size: 24px; font-weight: 700;
+      margin-bottom: 8px; text-align: center;
+    }
+    .section-sub {
+      color: var(--muted); font-size: 14px;
+      text-align: center; margin-bottom: 36px;
+    }
+
+    /* ── Agent cards ─────────────────────────────────────────────────── */
+    .agents-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+    }
+    .agent-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px;
+      transition: border-color .15s, transform .15s;
+    }
+    .agent-card:hover { border-color: var(--blue); transform: translateY(-2px); }
+    .agent-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; margin-bottom: 12px;
+    }
+    .agent-num {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .agent-name {
+      font-size: 15px; font-weight: 700; margin-bottom: 6px;
+    }
+    .agent-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .agent-card.signal .agent-icon { background: var(--blue-dim); }
+    .agent-card.regime .agent-icon { background: rgba(63,185,80,0.12); }
+    .agent-card.news   .agent-icon { background: rgba(227,179,65,0.12); }
+    .agent-card.risk   .agent-icon { background: rgba(188,140,255,0.12); }
+
+    /* ── Features grid ───────────────────────────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .feature-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 22px 20px;
+    }
+    .feature-card-icon {
+      font-size: 24px; margin-bottom: 10px;
+    }
+    .feature-card h3 {
+      font-size: 15px; font-weight: 700; margin-bottom: 7px;
+    }
+    .feature-card p { font-size: 13px; color: var(--muted); line-height: 1.55; }
+
+    /* ── How it works ────────────────────────────────────────────────── */
+    .steps {
+      display: flex; gap: 0;
+      border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; flex-wrap: wrap;
+    }
+    .step {
+      flex: 1; min-width: 220px;
+      padding: 24px 22px;
+      border-right: 1px solid var(--border);
+      position: relative;
+    }
+    .step:last-child { border-right: none; }
+    .step-num {
+      font-size: 11px; font-weight: 700; color: var(--blue);
+      text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 8px;
+    }
+    .step h3 { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+    .step p { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+    /* ── Voting visualizer ───────────────────────────────────────────── */
+    .vote-demo {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px 22px;
+      margin-top: 24px;
+    }
+    .vote-demo-title {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .05em;
+      margin-bottom: 14px;
+    }
+    .vote-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .vote-lbl { font-size: 11px; color: var(--muted); min-width: 100px; }
+    .vote-bar-bg {
+      flex: 1; height: 7px; background: var(--border);
+      border-radius: 4px; overflow: hidden;
+    }
+    .vote-bar { height: 100%; border-radius: 4px; }
+    .vote-num { font-size: 11px; font-family: monospace; min-width: 36px; text-align: right; }
+    .vote-row.total { padding-top: 8px; border-top: 1px solid var(--border); margin-top: 2px; }
+    .vote-row.total .vote-lbl { font-weight: 700; color: var(--text); }
+
+    /* ── CTA banner ──────────────────────────────────────────────────── */
+    .cta-banner {
+      max-width: 700px; margin: 0 auto 80px;
+      text-align: center;
+      background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+      border: 1px solid var(--border); border-radius: 14px;
+      padding: 48px 32px;
+    }
+    .cta-banner h2 { font-size: 26px; font-weight: 800; margin-bottom: 10px; }
+    .cta-banner p { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 20px 24px;
+      text-align: center;
+      font-size: 12px; color: var(--muted);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── Divider ─────────────────────────────────────────────────────── */
+    .divider {
+      max-width: 1000px; margin: 0 auto 80px;
+      border: none; border-top: 1px solid var(--border);
+    }
+
+    @media (max-width: 600px) {
+      .hero { padding: 48px 20px 40px; }
+      .stats { margin-bottom: 48px; }
+      .stat { min-width: 50%; }
+      .cta-banner { padding: 36px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ───────────────────────────────────────────────────────────── -->
+  <header>
+    <a href="/" class="header-logo">
+      <span class="hex">⬡</span> Crypto Pattern AI
+    </a>
+    <div class="header-actions">
+      <a href="/guide" class="btn-outline">Anleitung</a>
+      <a href="/login" class="btn-primary">Anmelden</a>
+    </div>
+  </header>
+
+  <!-- ── Hero ─────────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      4 KI-Agenten · Claude-Powered
+    </div>
+    <h1>
+      Smarter Krypto-Handel<br>
+      mit <span class="accent">echter KI</span>
+    </h1>
+    <p>
+      Vier spezialisierte Claude-Agenten analysieren Markt, Regime, News und Risiko —
+      und stimmen gemeinsam ab, bevor ein Trade ausgeführt wird.
+    </p>
+    <div class="hero-cta">
+      <a href="/login" class="btn-hero-primary">Jetzt anmelden →</a>
+      <a href="/guide" class="btn-hero-outline">Anleitung lesen</a>
+    </div>
+  </section>
+
+  <!-- ── Stats ────────────────────────────────────────────────────────────── -->
+  <div class="section" style="padding-bottom:0">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-val"><span class="accent">4</span></div>
+        <div class="stat-label">KI-Agenten</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val"><span class="accent">3</span></div>
+        <div class="stat-label">Intervalle (1h / 4h / 1d)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val"><span class="accent">10+</span></div>
+        <div class="stat-label">Handelssymbole</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val"><span class="accent">24/7</span></div>
+        <div class="stat-label">Automatisch</div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider" style="margin-top:60px">
+
+  <!-- ── 4 Agents ─────────────────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="section-title">Das Vier-Agenten-System</div>
+    <div class="section-sub">Jeder Agent ist auf eine Aufgabe spezialisiert — gemeinsam treffen sie bessere Entscheidungen</div>
+
+    <div class="agents-grid">
+      <div class="agent-card signal">
+        <div class="agent-num">Agent 1</div>
+        <div class="agent-icon">📊</div>
+        <div class="agent-name">Signal Agent</div>
+        <div class="agent-desc">Analysiert Kerzen, Indikatoren (RSI, MACD, Bollinger) und die Wissensbasis — gibt BUY / SELL / HOLD mit Konfidenzscore aus.</div>
+      </div>
+      <div class="agent-card regime">
+        <div class="agent-num">Agent 2</div>
+        <div class="agent-icon">🌐</div>
+        <div class="agent-name">Regime Agent</div>
+        <div class="agent-desc">Erkennt den aktuellen Marktmodus (BULL_TREND, BEAR_TREND, RANGING, HIGH_VOLATILITY) und gewichtet das Signal entsprechend.</div>
+      </div>
+      <div class="agent-card news">
+        <div class="agent-num">Agent 3</div>
+        <div class="agent-icon">📰</div>
+        <div class="agent-name">News Agent</div>
+        <div class="agent-desc">Liest stündlich aktuelle Krypto-Nachrichten und berechnet einen Sentiment-Score. Bei negativen Ereignissen wird ein Kauf-Veto gesetzt.</div>
+      </div>
+      <div class="agent-card risk">
+        <div class="agent-num">Agent 4</div>
+        <div class="agent-icon">🛡️</div>
+        <div class="agent-name">Risk Agent</div>
+        <div class="agent-desc">Berechnet ATR-basierte Stop-Loss / Take-Profit Levels und die optimale Positionsgröße. Blockiert Käufe wenn weniger als 2/4 Signale grün sind.</div>
+      </div>
+    </div>
+
+    <!-- Demo voting matrix -->
+    <div class="vote-demo">
+      <div class="vote-demo-title">Beispiel: Voting Matrix für einen Kauf</div>
+      <div class="vote-row">
+        <span class="vote-lbl">Signal-Vote</span>
+        <div class="vote-bar-bg"><div class="vote-bar" style="width:50%;background:#58a6ff"></div></div>
+        <span class="vote-num" style="color:#58a6ff">+1.00</span>
+      </div>
+      <div class="vote-row">
+        <span class="vote-lbl">News-Einfluss</span>
+        <div class="vote-bar-bg"><div class="vote-bar" style="width:22%;background:#3fb950"></div></div>
+        <span class="vote-num" style="color:#3fb950">+0.44</span>
+      </div>
+      <div class="vote-row">
+        <span class="vote-lbl">Regime-Boost</span>
+        <div class="vote-bar-bg"><div class="vote-bar" style="width:15%;background:#3fb950"></div></div>
+        <span class="vote-num" style="color:#3fb950">+0.30</span>
+      </div>
+      <div class="vote-row total">
+        <span class="vote-lbl">Gesamt-Score</span>
+        <div class="vote-bar-bg" style="position:relative">
+          <div class="vote-bar" style="width:87%;background:#3fb950"></div>
+          <div style="position:absolute;top:-2px;bottom:-2px;left:65%;width:2px;background:rgba(255,255,255,0.4);border-radius:1px" title="Schwellenwert 1.3"></div>
+        </div>
+        <span class="vote-num" style="color:#3fb950;font-weight:700">+1.74</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">
+        ✓ Score 1.74 übersteigt Kauf-Schwellenwert 1.3 — <strong style="color:#3fb950">BUY wird ausgeführt</strong>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Features ─────────────────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="section-title">Alles was du brauchst</div>
+    <div class="section-sub">Von der Strategie-Entwicklung bis zum vollautomatischen Live-Handel</div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-card-icon">⚡</div>
+        <h3>Live Trading</h3>
+        <p>Vollautomatischer Handel auf Binance. Der Bot analysiert jede Kerze, wählt das beste Symbol und führt Orders per API aus.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-card-icon">🔬</div>
+        <h3>Simulation & Backtesting</h3>
+        <p>Teste deine Strategie mit bis zu 90 Tagen historischer Daten. Claude analysiert jeden Trade und dokumentiert Muster in der Wissensbasis.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-card-icon">🧠</div>
+        <h3>Lernende Wissensbasis</h3>
+        <p>Nach jeder Simulation destilliert Claude die Erkenntnisse. Erfolgreiche Muster werden dauerhaft gespeichert und verbessern künftige Signale.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-card-icon">📰</div>
+        <h3>News Intelligence</h3>
+        <p>Stündlicher Crawl von CoinDesk, CoinTelegraph und anderen Quellen. Sentiment-Score und Ereignis-Veto schützen vor schlechtem Markttiming.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-card-icon">🔍</div>
+        <h3>Entscheidungs-Transparenz</h3>
+        <p>Nach jedem Trade siehst du genau warum der Bot gekauft oder gehalten hat — mit allen Agenten-Scores, Überstimmungen und Voting-Matrix.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-card-icon">🛡️</div>
+        <h3>ATR-basiertes Risiko</h3>
+        <p>Stop-Loss und Take-Profit werden anhand der aktuellen Volatilität (ATR) berechnet. Die Positionsgröße passt sich dem Marktregime an.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── How it works ──────────────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="section-title">Wie es funktioniert</div>
+    <div class="section-sub">In drei Schritten zum automatisierten Trading</div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">Schritt 1</div>
+        <h3>Simulation starten</h3>
+        <p>Wähle Symbol, Intervall und Zeitraum. Claude analysiert historische Daten und baut eine Wissensbasis mit funktionierenden Mustern auf.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">Schritt 2</div>
+        <h3>Wissensbasis aufbauen</h3>
+        <p>Nach der Simulation destilliert Claude die besten Erkenntnisse. Je mehr Simulationen, desto besser werden die Live-Signale.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">Schritt 3</div>
+        <h3>Live Trading aktivieren</h3>
+        <p>Binance API-Keys hinterlegen, Betrag konfigurieren, starten. Der Bot handelt vollautomatisch und zeigt dir jede Entscheidung transparent.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ───────────────────────────────────────────────────────────────── -->
+  <div class="section" style="padding-bottom:80px">
+    <div class="cta-banner">
+      <h2>Bereit zu starten?</h2>
+      <p>Meld dich an und führe deine erste Simulation durch — kostenlos, keine Kreditkarte.</p>
+      <a href="/login" class="btn-hero-primary">Jetzt anmelden →</a>
+    </div>
+  </div>
+
+  <!-- ── Footer ────────────────────────────────────────────────────────────── -->
+  <footer>
+    <span>Crypto Pattern AI</span>
+    &nbsp;·&nbsp;
+    <a href="/guide">Anleitung</a>
+    &nbsp;·&nbsp;
+    <a href="/login">Anmelden</a>
+  </footer>
+
+</body>
+</html>
