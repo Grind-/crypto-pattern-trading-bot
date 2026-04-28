@@ -258,7 +258,7 @@
     <a class="nav-link" href="#api-user">User</a>
     <a class="nav-link" href="#api-admin">Admin</a>
     <a class="nav-link" href="#api-sim">Simulation</a>
-    <a class="nav-link" href="#api-live">Live Trading</a>
+    <a class="nav-link" href="#api-live">Live Trading &amp; Trades</a>
     <a class="nav-link" href="#api-market">Markt</a>
     <div class="nav-group-label">Betrieb</div>
     <a class="nav-link" href="#auth-roles">Auth &amp; Rollen</a>
@@ -430,6 +430,18 @@
           <div class="module-name">data_fetcher.py</div>
           <div class="module-desc">Binance REST: historische Kerzen (<code>/api/v3/klines</code>), verfügbare USDC-Paare, aktuelle Kursdaten für den Scanner.</div>
         </div>
+        <div class="module-card">
+          <div class="module-name">risk_agent.py</div>
+          <div class="module-desc">Reiner Python-Rechenagent (kein Claude-Aufruf). Berechnet ATR-basiertes SL (1,5×ATR) und TP (2,5×ATR), Positionsgröße 33/66/100 % je Signalstärke, blockiert bei extremer Volatilität (SL &gt; 5 %).</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">news_fetcher.py</div>
+          <div class="module-desc">Lädt RSS-Feeds (CoinDesk, CoinTelegraph, Decrypt, u.a.), Whale Alert on-chain Daten, Fear &amp; Greed Index. Gewichtet Quellen (Announcements 3×, Whale Alert 2,5×, Media 1,5×, Reddit 0,8×). 15-Minuten-Cache.</div>
+        </div>
+        <div class="module-card">
+          <div class="module-name">news_analyst.py</div>
+          <div class="module-desc">Claude-Analyse der gesammelten News. Gibt numerischen Sentiment-Score 0–100 pro Symbol aus, Signal-Modifier (±Confidence-Schwelle) und Veto-Flag (Score &lt; 20). Läuft stündlich im Hintergrund; Live-Loop liest nur den Cache.</div>
+        </div>
       </div>
     </div>
 
@@ -477,19 +489,25 @@
       <div class="flow-steps">
         <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>Zeitalignierung:</strong> <code>next_close = (int(now/interval_s)+1) * interval_s + 10s</code> — 10s Buffer nach offiziellem Kerzenschluss. Loop schläft in 30s-Chunks (damit Stop-Requests sofort greifen).</div></div>
         <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Marktscan:</strong> Alle 10 Standard-Paare + bis zu 3 User-definierte Extras werden gleichzeitig über <code>asyncio.gather()</code> gefetcht. Claude rankt alle Paare nach Handelspotenzial (0–100 Punkte).</div></div>
-        <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Symbol-Wahl:</strong> Bei FLAT → wechsle zum besten Paar. Bei IN_POSITION → bleibe beim <code>position_symbol</code> (das gelockte Paar beim letzten BUY). Wechsel nur nach SELL.</div></div>
-        <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Signal:</strong> <code>get_live_signal()</code> mit 100 Kerzen + aktuelle Position + letzten 10 Signalen + optionaler Strategie-Kontext aus einer gespeicherten Simulation.</div></div>
-        <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Ausführung:</strong> BUY wenn Confidence ≥ 60 % und FLAT. SELL wenn Confidence ≥ 55 % und IN_POSITION. Orders werden als Binance Market-Orders platziert (<code>quoteOrderQty</code>).</div></div>
-        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>State-Update:</strong> Position, Trade-History, Buy-Preis → in-memory + <code>live_states</code>-Tabelle in SQLite. Ermöglicht Wiederaufnahme nach Container-Neustart (<code>_auto_resume_all()</code>).</div></div>
+        <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>Symbol-Wahl:</strong> Bei FLAT → wechsle zum besten Paar. Bei IN_POSITION → bleibe beim <code>position_symbol</code>. Wechsel nur nach SELL.</div></div>
+        <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Regime Agent:</strong> <code>get_regime()</code> läuft einmal pro Kerze. Wertet ADX (14), 1h+4h EMA-Vergleich und Fear &amp; Greed aus. Gibt <code>BULL_TREND | BEAR_TREND | RANGING | HIGH_VOLATILITY</code> zurück. Bei HIGH_VOLATILITY → kein BUY.</div></div>
+        <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>News Score:</strong> <code>get_news_score_for_symbol(symbol)</code> liest den stündlich aktualisierten Cache (kein Netzwerkaufruf im Loop). Liefert Sentiment 0–100, Signal-Modifier und Veto-Flag. Veto → kein BUY.</div></div>
+        <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>Signal Agent:</strong> <code>get_live_signal()</code> erhält 100 Kerzen + Regime-Kontext + News-Score + RSI-Divergenz-Flags. Gibt <code>BUY | SELL | HOLD</code> mit Confidence zurück.</div></div>
+        <div class="flow-step"><div class="flow-num">7</div><div class="flow-text"><strong>Voting Matrix:</strong> <code>total_score = signal_vote + news_modifier + regime_boost</code>. BUY wenn score ≥ 1.3 und FLAT; SELL wenn score ≤ −0.8 und IN_POSITION. Sonst HOLD.</div></div>
+        <div class="flow-step"><div class="flow-num">8</div><div class="flow-text"><strong>Risk Agent:</strong> <code>calculate_risk_params()</code> — ATR-basiertes SL (1,5×ATR) und TP (2,5×ATR), Positionsgröße 33/66/100 % je nach Signalstärke. Blockiert wenn SL &gt; 5 %.</div></div>
+        <div class="flow-step"><div class="flow-num">9</div><div class="flow-text"><strong>Ausführung:</strong> Market-Order auf Binance. Menge wird auf Binance LOT_SIZE-stepSize abgerundet. Nach jedem Trade: <code>append_trade_log()</code> in JSON-Datei + <code>save_live_state_snapshot()</code> für Crash-Recovery.</div></div>
+        <div class="flow-step"><div class="flow-num">10</div><div class="flow-text"><strong>State-Update:</strong> Position, Trade-History, Buy-Preis → in-memory + SQLite <code>live_states</code>. Beim Neustart liest <code>_auto_resume_all()</code> zusätzlich den JSON-Snapshot für SL/TP/buy_price.</div></div>
       </div>
 
-      <h3>Konfidenz-Schwellwerte</h3>
+      <h3>Voting Matrix — Schwellwerte</h3>
       <table class="table-doc">
-        <thead><tr><th>Aktion</th><th>Min. Confidence</th><th>Bedingung</th></tr></thead>
+        <thead><tr><th>Komponente</th><th>Wert</th><th>Beschreibung</th></tr></thead>
         <tbody>
-          <tr><td class="td-name">BUY</td><td>≥ 60 %</td><td class="td-desc">Position muss FLAT sein</td></tr>
-          <tr><td class="td-name">SELL</td><td>≥ 55 %</td><td class="td-desc">Position muss IN_POSITION sein</td></tr>
-          <tr><td class="td-name">HOLD</td><td>—</td><td class="td-desc">Kein Schwellwert; keine Order wird ausgeführt</td></tr>
+          <tr><td class="td-name">signal_vote</td><td>+1.0 / −1.0 / 0.0</td><td class="td-desc">BUY = +1, SELL = −1, HOLD = 0</td></tr>
+          <tr><td class="td-name">news_modifier</td><td>0.0 – 0.30</td><td class="td-desc">sentiment_score/100 × news_weight (Standard 30 %)</td></tr>
+          <tr><td class="td-name">regime_boost</td><td>−0.5 bis +0.3</td><td class="td-desc">BULL +0.3 | RANGING 0 | BEAR −0.3 | HIGH_VOL −0.5</td></tr>
+          <tr><td class="td-name">BUY-Schwelle</td><td>≥ 1.3</td><td class="td-desc">Zusätzlich: kein Veto, nicht HIGH_VOL, ≥ 2 grüne Signale</td></tr>
+          <tr><td class="td-name">SELL-Schwelle</td><td>≤ −0.8</td><td class="td-desc">Force-Sell (SL/TP) überspringt Matrix vollständig</td></tr>
         </tbody>
       </table>
     </div>
@@ -523,7 +541,9 @@
         <thead><tr><th>Funktion</th><th>Input</th><th>Output (JSON)</th><th>Timeout</th></tr></thead>
         <tbody>
           <tr><td class="td-name">analyze_with_claude</td><td class="td-desc">80-Zeilen Indikatortabelle + optionales Feedback aus letzter Iteration</td><td class="td-desc"><code>strategy_name, analysis, patterns_found, signals[], confidence</code></td><td>270 s</td></tr>
-          <tr><td class="td-name">get_live_signal</td><td class="td-desc">100 Kerzen + Position + letzte 10 Signale + Strategie-Kontext</td><td class="td-desc"><code>action, confidence, reason, stop_loss_pct, take_profit_pct</code></td><td>60 s</td></tr>
+          <tr><td class="td-name">get_live_signal</td><td class="td-desc">100 Kerzen + Position + Regime-Kontext + News-Score + RSI-Divergenz-Flags</td><td class="td-desc"><code>action, confidence, reason, stop_loss_pct, take_profit_pct</code></td><td>60 s</td></tr>
+          <tr><td class="td-name">get_regime</td><td class="td-desc">ADX, 1h+4h EMA-Vergleich, Fear &amp; Greed Index, Preisstruktur</td><td class="td-desc"><code>regime, strength, recommended_strategy, signal_weight_technical, signal_weight_news</code></td><td>45 s</td></tr>
+          <tr><td class="td-name">run_news_cycle</td><td class="td-desc">RSS + Whale Alert + F&amp;G Daten</td><td class="td-desc"><code>market_sentiment_score, symbol_scores{score, modifier, veto, reasoning}</code></td><td>90 s</td></tr>
           <tr><td class="td-name">scan_market</td><td class="td-desc">Kompakte Tabelle aller Symbole (Preis, ATR%, RSI, MACD-Richtung, Vol)</td><td class="td-desc"><code>best_symbol, ranking[], recommendation</code></td><td>90 s</td></tr>
           <tr><td class="td-name">test_connection</td><td class="td-desc">Minimaler Ping-Prompt</td><td class="td-desc"><code>ok: true</code></td><td>30 s</td></tr>
         </tbody>
@@ -546,6 +566,8 @@
         <span class="pill"><span class="pill-name">StochRSI</span> <span class="pill-param">Periode 14</span></span>
         <span class="pill"><span class="pill-name">Volume Ratio</span> <span class="pill-param">vs. SMA-20-Vol</span></span>
         <span class="pill"><span class="pill-name">Price Change</span> <span class="pill-param">1 / 4 / 12 Kerzen</span></span>
+        <span class="pill"><span class="pill-name">ADX</span> <span class="pill-param">Periode 14</span></span>
+        <span class="pill"><span class="pill-name">RSI Divergence</span> <span class="pill-param">Lookback 10</span></span>
       </div>
 
       <table class="table-doc">
@@ -554,9 +576,12 @@
           <tr><td class="td-name">RSI</td><td class="td-desc">&lt; 30 = überverkauft (Kaufsignal); &gt; 70 = überkauft (Verkaufssignal)</td></tr>
           <tr><td class="td-name">MACD / Histogramm</td><td class="td-desc">Positiv + steigend = bullish; negativ + fallend = bearish. Histogramm zeigt Momentum-Divergenz.</td></tr>
           <tr><td class="td-name">bb_pct (Bollinger)</td><td class="td-desc">0 = Preis am unteren Band (überverkauft); 1 = Preis am oberen Band (überkauft)</td></tr>
-          <tr><td class="td-name">ATR</td><td class="td-desc">Volatilitätsmaß in Preis-Einheiten. Hoher ATR = große Schwankungen → engere Stops empfehlenswert.</td></tr>
+          <tr><td class="td-name">ATR</td><td class="td-desc">Volatilitätsmaß in Preis-Einheiten. Basis für Risk Agent: SL = 1,5×ATR, TP = 2,5×ATR.</td></tr>
           <tr><td class="td-name">StochRSI</td><td class="td-desc">RSI des RSI, normiert 0–1. Sensitiver als RSI, reagiert früher auf Trendwenden.</td></tr>
           <tr><td class="td-name">Volume Ratio</td><td class="td-desc">&gt; 1.5 = überdurchschnittliches Volumen (bestätigt Bewegung); &lt; 0.5 = schwaches Signal.</td></tr>
+          <tr><td class="td-name">ADX</td><td class="td-desc">Average Directional Index (Wilder EWM, Periode 14). &lt; 25 = kein Trend; 25–50 = Trend; &gt; 50 = starker Trend. Basis für Regime Agent.</td></tr>
+          <tr><td class="td-name">rsi_bull_div</td><td class="td-desc">Boolean: Preis macht tieferes Tief, RSI macht höheres Tief über 10 Kerzen → bullische Divergenz.</td></tr>
+          <tr><td class="td-name">rsi_bear_div</td><td class="td-desc">Boolean: Preis macht höheres Hoch, RSI macht niedrigeres Hoch → bärische Divergenz.</td></tr>
         </tbody>
       </table>
     </div>
@@ -681,8 +706,9 @@
       <h3>Live Trading</h3>
       <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/start</span><span class="endpoint-desc"><code>{api_key, api_secret, symbol, interval, trade_amount_usdt, strategy_*}</code></span></div>
       <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/live/stop</span><span class="endpoint-desc">Stopp + live_states-Eintrag aus DB löschen</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/status</span><span class="endpoint-desc">running, position, symbol, next_check_ts, log[], trade_history</span></div>
-      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/chart-data</span><span class="endpoint-desc">Letzte 80 Kerzen + vollständige Trade-History</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/status</span><span class="endpoint-desc">running, position, symbol, next_check_ts, log[], last_regime, last_risk, last_news_score</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/live/chart-data</span><span class="endpoint-desc">Letzte 80 Kerzen + Trade-History (in-memory, für Chart-Marker)</span></div>
+      <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/trades/{username}/{symbol}</span><span class="endpoint-desc">Persistente Trade-Historie, paginiert. Query-Params: <code>limit</code> (1–200, default 20), <code>offset</code> (default 0). Antwortet mit <code>{trades[], total, has_more}</code>. Neueste zuerst.</span></div>
     </div>
 
     <div class="section" id="api-market">
@@ -736,6 +762,9 @@
           <tr><td class="td-name">core/patterns.json</td><td style="color:var(--red)">✗ Nur Admin-Promote</td><td style="color:var(--green)">✓ Alle Claudes</td><td class="td-desc">Globale Regeln, verifizierte Symbol-Patterns, Interval-Hinweise</td></tr>
           <tr><td class="td-name">users/{me}/patterns.json</td><td style="color:var(--green)">✓ Eigener Claude</td><td style="color:var(--green)">✓ Alle Claudes</td><td class="td-desc">Eigene Symbol/Interval-Patterns, Gewinn-/Verlustmuster</td></tr>
           <tr><td class="td-name">users/{me}/sim_log.json</td><td style="color:var(--green)">✓ Eigener Claude</td><td style="color:var(--green)">✓ Alle Claudes</td><td class="td-desc">Simulationshistorie für Regel-Destillation</td></tr>
+          <tr><td class="td-name">users/{me}/trades_{symbol}.json</td><td style="color:var(--green)">✓ System (nach Trade)</td><td style="color:var(--green)">✓ API-Endpoint</td><td class="td-desc">Persistente Trade-Historie; max. 10.000 Einträge, älteste werden getrimmt</td></tr>
+          <tr><td class="td-name">users/{me}/live_state_{symbol}.json</td><td style="color:var(--green)">✓ System (nach Trade)</td><td style="color:var(--green)">✓ _auto_resume_all</td><td class="td-desc">Position-Snapshot (buy_price, sl_pct, tp_pct) für Crash-Recovery</td></tr>
+          <tr><td class="td-name">users/{me}/live_regime_log.json</td><td style="color:var(--green)">✓ System (pro Kerze)</td><td style="color:var(--green)">✓ Admin</td><td class="td-desc">Regime-Verlauf der letzten 200 Kerzen pro User</td></tr>
         </tbody>
       </table>
 
@@ -834,7 +863,9 @@
         <thead><tr><th>Daten</th><th>Persistiert</th><th>Restart-Verhalten</th></tr></thead>
         <tbody>
           <tr><td class="td-name">Simulationsergebnisse</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">In SQLite (<code>simulations</code> + <code>simulation_details</code>); vollständig erhalten.</td></tr>
-          <tr><td class="td-name">Live-State (war aktiv)</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc"><code>_auto_resume_all()</code>: alle User mit <code>was_running=true</code> in <code>live_states</code> werden automatisch wiederaufgenommen.</td></tr>
+          <tr><td class="td-name">Live-State (war aktiv)</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc"><code>_auto_resume_all()</code>: alle User mit <code>was_running=true</code> werden wiederaufgenommen. Basis-Felder aus SQLite; SL/TP/buy_price aus JSON-Snapshot.</td></tr>
+          <tr><td class="td-name">Trade-Historie</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">Jedes BUY/SELL/SWAP wird in <code>knowledge/users/{username}/trades_{symbol}.json</code> angehängt. Max. 10.000 Einträge pro Symbol. API: <code>GET /api/trades/{username}/{symbol}</code>.</td></tr>
+          <tr><td class="td-name">Live-State-Snapshot</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">Nach jedem Trade als <code>knowledge/users/{username}/live_state_{symbol}.json</code> gespeichert. Enthält buy_price, sl_pct, tp_pct für Crash-Recovery.</td></tr>
           <tr><td class="td-name">User-Datenbank</td><td style="color:var(--green)">✓ Ja</td><td class="td-desc">SQLite <code>users</code>-Tabelle; Admin wird nur einmalig beim ersten Start angelegt.</td></tr>
           <tr><td class="td-name">In-Memory Sessions</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Alle Sessions verfallen → Re-Login erforderlich.</td></tr>
           <tr><td class="td-name">Laufende Simulationen</td><td style="color:var(--red)">✗ Nein</td><td class="td-desc">Werden abgebrochen. Bereits in DB gespeicherte Ergebnisse bleiben erhalten.</td></tr>
@@ -842,8 +873,10 @@
       </table>
 
       <div class="callout callout-green">
-        <strong>Einzige persistente Datei:</strong><br/>
-        <code>/app/data/crypto_pattern_ai.db</code> — SQLite-Datenbank (users, live_states, simulations, simulation_details)<br/><br/>
+        <strong>Persistente Dateien:</strong><br/>
+        <code>/app/data/crypto_pattern_ai.db</code> — SQLite (users, live_states, simulations, simulation_details)<br/>
+        <code>/app/knowledge/users/{username}/trades_{symbol}.json</code> — persistente Trade-Historie<br/>
+        <code>/app/knowledge/users/{username}/live_state_{symbol}.json</code> — Position-Snapshot<br/><br/>
         <strong>Migration zu PostgreSQL:</strong><br/>
         <code>DATABASE_URL=postgresql+psycopg2://user:pass@host/dbname</code> — kein weiterer Code-Änderungsbedarf.
       </div>

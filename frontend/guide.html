@@ -138,6 +138,7 @@
     <a class="nav-link" href="#live-start">Live Trading starten</a>
     <a class="nav-link" href="#live-lesen">Status verstehen</a>
     <a class="nav-link" href="#live-stopp">Stoppen</a>
+    <a class="nav-link" href="#trade-historie">Trade-Historie</a>
     <div class="nav-group-label">Simulation</div>
     <a class="nav-link" href="#sim-was">Was ist eine Simulation?</a>
     <a class="nav-link" href="#sim-start">Simulation starten</a>
@@ -442,6 +443,18 @@
             <td>Eine Position ist offen — der Bot hält Crypto und wartet auf ein Verkaufssignal.</td>
           </tr>
           <tr>
+            <td class="tn">Regime-Badge</td>
+            <td>Zeigt das aktuelle Marktregime farbcodiert: <strong style="color:#3fb950">BULL_TREND</strong>, <strong style="color:#f85149">BEAR_TREND</strong>, <strong style="color:#d29922">RANGING</strong>, <strong style="color:#e3b341">HIGH_VOLATILITY</strong>. Bei HIGH_VOLATILITY werden alle BUY-Signale blockiert.</td>
+          </tr>
+          <tr>
+            <td class="tn">News-Score</td>
+            <td>Sentiment-Score 0–100 für das aktuelle Symbol. Unter 20 oder mit Veto-Flag (🚫) werden BUY-Signale blockiert.</td>
+          </tr>
+          <tr>
+            <td class="tn">Agent-Panel</td>
+            <td>Zeigt Regime-Stärke, News-Score und die letzte Risk-Kalkulation (Positionsgröße, SL%, TP%) in Kurzform.</td>
+          </tr>
+          <tr>
             <td class="tn">Entscheidungsgrundlage</td>
             <td>Zeigt das aktive Symbol und die eingestellte KB/Markt-Gewichtung.</td>
           </tr>
@@ -451,29 +464,34 @@
           </tr>
           <tr>
             <td class="tn">Log-Einträge</td>
-            <td>Chronologische Protokollzeilen: Kerzenschlüsse, Signale von Claude, ausgeführte Orders, Fehler.</td>
+            <td>Chronologische Protokollzeilen: Kerzenschlüsse, Regime, Signale, Voting-Score, ausgeführte Orders, Fehler.</td>
           </tr>
         </tbody>
       </table>
 
-      <h3>Signal-Schwellwerte (automatisch)</h3>
+      <h3>Abstimmungsmatrix — wann wird ein Trade ausgeführt?</h3>
+      <p>Der Bot kombiniert drei Agenten-Ausgaben zu einem <strong>Gesamt-Score</strong>. Erst wenn dieser Score die Schwelle überschreitet, wird ein BUY oder SELL ausgeführt:</p>
       <table class="tbl">
-        <thead><tr><th>Aktion</th><th>Voraussetzung</th></tr></thead>
+        <thead><tr><th>Aktion</th><th>Score-Schwelle</th><th>Zusätzliche Blockierbedingungen</th></tr></thead>
         <tbody>
           <tr>
             <td><span class="badge-inline b-green">BUY</span></td>
-            <td>Claude sagt KAUFEN mit ≥ 60 % Konfidenz, und du bist FLAT</td>
+            <td>Gesamt-Score ≥ 1.3 und FLAT</td>
+            <td>Blockiert bei Regime = HIGH_VOLATILITY, News-Veto, oder weniger als 2 grüne Signale</td>
           </tr>
           <tr>
             <td><span class="badge-inline b-red">SELL</span></td>
-            <td>Claude sagt VERKAUFEN mit ≥ 55 % Konfidenz, und du hast eine offene Position</td>
+            <td>Gesamt-Score ≤ −0.8 und IN_POSITION</td>
+            <td>Stop-Loss und Take-Profit überspringen die Matrix (Force-Sell)</td>
           </tr>
           <tr>
             <td><span class="badge-inline b-yellow">HOLD</span></td>
+            <td>Score zwischen −0.8 und 1.3</td>
             <td>Kein ausreichendes Signal — keine Order wird ausgeführt</td>
           </tr>
         </tbody>
       </table>
+      <p style="font-size:12px;color:var(--text-muted)">Score = Signal-Vote (+1 / −1 / 0) + News-Modifier (0–0.3) + Regime-Boost (−0.5 bis +0.3). Details im Abschnitt <a href="#agenten" style="color:var(--blue)">4-Agenten-Architektur</a>.</p>
 
       <h3>Automatischer Symbol-Wechsel</h3>
       <p>Bei jedem Analysezyklus scannt der Bot den Markt und wechselt zum Symbol mit dem besten Handelspotenzial — jedoch nur wenn du gerade FLAT bist. Solange du eine Position hältst, bleibt der Bot beim aktuellen Symbol. Beim Wechsel versucht der Bot zunächst ein direktes Tauschpaar (z.B. XRPBTC) und fällt andernfalls über USDC um.</p>
@@ -509,7 +527,53 @@
       </div>
 
       <div class="callout callout-yellow">
-        <strong>Neustart:</strong> Falls der Server neu startet, setzt der Bot automatisch weiter, wenn er vorher lief. Das zuletzt gehandelte Symbol wird dabei beibehalten.
+        <strong>Neustart:</strong> Falls der Server neu startet, setzt der Bot automatisch weiter, wenn er vorher lief. Symbol, Kaufpreis, Stop-Loss und Take-Profit werden aus dem gespeicherten Snapshot wiederhergestellt.
+      </div>
+    </div>
+
+    <!-- TRADE-HISTORIE -->
+    <hr class="section-divider" />
+    <div class="section" id="trade-historie">
+      <h2><span class="section-icon ic-blue">📋</span>Trade-Historie</h2>
+      <p class="section-desc">
+        Alle ausgeführten BUY-, SELL- und SWAP-Trades werden dauerhaft gespeichert — auch über Neustarts hinaus.
+        Die Historie bleibt erhalten, solange der Bot läuft oder gestoppt ist.
+      </p>
+
+      <h3>Anzeige im Live-Trading-Tab</h3>
+      <p>Im Abschnitt <strong>Ausgeführte Trades</strong> werden die letzten 20 Trades angezeigt. Ältere Einträge können jederzeit nachgeladen werden:</p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Aktuelle Trades sehen</div>
+            <div class="step-desc">Die neuesten 20 Trades erscheinen automatisch, sobald der Live-Tab geladen wird — auch nach einem Neustart des Servers.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Ältere Trades laden</div>
+            <div class="step-desc">Klicke auf <strong>Ältere laden</strong> unterhalb der Tabelle, um die nächsten 20 Einträge anzuhängen. Der Button verschwindet, wenn alle Trades angezeigt werden.</div>
+          </div>
+        </div>
+      </div>
+
+      <table class="tbl">
+        <thead><tr><th>Spalte</th><th>Inhalt</th></tr></thead>
+        <tbody>
+          <tr><td class="tn">#</td><td>Laufende Nummer (neueste zuerst)</td></tr>
+          <tr><td class="tn">Symbol</td><td>Gehandeltes Paar, z.B. <code>BTCUSDC</code></td></tr>
+          <tr><td class="tn">Seite</td><td><span class="badge-inline b-green">BUY</span> / <span class="badge-inline b-red">SELL</span> / <span style="color:#d29922;font-weight:600">SWAP</span></td></tr>
+          <tr><td class="tn">Preis</td><td>Ausführungspreis in USD</td></tr>
+          <tr><td class="tn">Zeit</td><td>Lokale Uhrzeit des Trades</td></tr>
+          <tr><td class="tn">P&amp;L</td><td>Prozentualer Gewinn/Verlust des abgeschlossenen Trade-Paares. Beim BUY noch leer (—).</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-blue">
+        <strong>Maximale Einträge:</strong> Pro Symbol werden bis zu 10.000 Trades gespeichert. Ältere werden automatisch gelöscht, wenn das Limit erreicht ist.
       </div>
     </div>
 
@@ -862,7 +926,7 @@
         <li><strong>Backtests sind keine Zukunftsgarantie.</strong> Märkte ändern sich — eine Strategie, die historisch gut funktioniert hat, kann in Zukunft verlieren.</li>
         <li><strong>Claude kann falsch liegen.</strong> Die KI analysiert Chartmuster, hat aber keine perfekte Marktkenntnis. Signale sind Wahrscheinlichkeiten, keine Gewissheiten.</li>
         <li><strong>Nur Spot-Trading.</strong> Der Bot führt ausschließlich einfache Kauf- und Verkaufsorders aus — kein Margin, kein Hebel, keine Futures.</li>
-        <li><strong>Kein automatischer Stop-Loss.</strong> Der Bot hat keinen integrierten Stop-Loss. Eine offene Position bleibt offen, bis Claude ein SELL-Signal mit ausreichender Konfidenz gibt.</li>
+        <li><strong>ATR-basierter Stop-Loss.</strong> Der Risk Agent setzt SL und TP dynamisch aus dem ATR. Stop-Loss liegt bei 1,5 × ATR, Take-Profit bei 2,5 × ATR. Diese überschreiben Claudes Einschätzungen und werden als Force-Sell ausgeführt.</li>
         <li><strong>Verbindungsausfälle.</strong> Bei Netzwerkproblemen oder API-Fehlern wird kein Trade ausgeführt. Der Bot protokolliert den Fehler und wartet auf den nächsten Zyklus.</li>
       </ul>
     </div>
