@@ -42,6 +42,8 @@ from .user_store import (init_users, list_users, get_user, authenticate,
                          get_claude_api_key, get_claude_oauth_token,
                          uses_platform, uses_subscription,
                          save_binance_keys, get_binance_keys)
+from .knowledge_store import (append_trade_log, load_trade_log,
+                               save_live_state_snapshot, load_live_state_snapshot)
 
 def _floor_to_step(qty: float, step: float) -> float:
     """Floor qty to the nearest multiple of step (avoids LOT_SIZE filter errors)."""
@@ -210,6 +212,7 @@ async def _auto_resume_all():
         api_key, oauth_token = _claude_creds(username)
         session_token = str(uuid.uuid4())
         state = _get_live_state(username)
+        snapshot = load_live_state_snapshot(username, saved_symbol) if saved_symbol else None
         state.update({
             "running": True,
             "status": "active",
@@ -230,9 +233,9 @@ async def _auto_resume_all():
             "analysis_weight": req.analysis_weight,
             "trade_history": saved.get("trade_history", []),
             "live_candles": [],
-            "buy_price": reconciled_buy_price,
-            "sl_pct": None,
-            "tp_pct": None,
+            "buy_price": reconciled_buy_price or (snapshot or {}).get("buy_price"),
+            "sl_pct": (snapshot or saved).get("sl_pct"),
+            "tp_pct": (snapshot or saved).get("tp_pct"),
             "_session_token": session_token,
             "last_regime": None,
             "last_risk": None,
@@ -827,6 +830,15 @@ async def live_chart_data(request: Request):
     }
 
 
+@app.get("/api/trades/{username}/{symbol}")
+async def get_trade_history(username: str, symbol: str, request: Request,
+                            limit: int = 20, offset: int = 0):
+    current_user = _get_current_user(request)
+    if current_user["username"] != username and current_user.get("role") != "admin":
+        raise HTTPException(403, "Nicht berechtigt")
+    return load_trade_log(username, symbol.upper(), limit=limit, offset=offset)
+
+
 # ── Background tasks ───────────────────────────────────────────────────────────
 
 async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
@@ -1028,6 +1040,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 "order_id": str(order.get("orderId", "")), "pnl_pct": None,
             })
             _persist_trade_history(username, live_state)
+            append_trade_log(username, symbol, live_state["trade_history"][-1])
+            save_live_state_snapshot(username, symbol, live_state)
             _log(live_state, f"✅ KAUF {symbol} — {bought_qty:.6f} @ ${buy_price:,.4f} | Eingesetzt: ${actual_capital:.2f}")
             return True
         except Exception as e:
@@ -1093,6 +1107,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             })
             _log(live_state, f"✅ VERKAUF {position_symbol}{reason_str} @ ${cur_price:,.4f} | P&L: {pnl_pct:+.2f}% | Kapital: ${net_usdc:.2f} ({delta:+.2f}$)")
             _persist_trade_history(username, live_state)
+            append_trade_log(username, position_symbol, live_state["trade_history"][-1])
+            save_live_state_snapshot(username, position_symbol, live_state)
             return True, net_usdc
         except Exception as e:
             live_state["position"] = "IN_POSITION"
@@ -1276,6 +1292,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                                 "order_id": str(order.get("orderId", "")), "pnl_pct": None,
                             })
                             _persist_trade_history(username, live_state)
+                            append_trade_log(username, direct_pair, live_state["trade_history"][-1])
+                            save_live_state_snapshot(username, pending_switch, live_state)
                             _log(live_state, f"✅ SWAP {from_base}→{to_base} — {new_qty:.6f} {to_base} @ ${new_price:,.4f}")
                             switched = True
                     except Exception as e:

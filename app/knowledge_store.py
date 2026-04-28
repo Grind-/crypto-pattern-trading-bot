@@ -27,6 +27,7 @@ MAX_SIM_LOG      = 100
 MAX_WINNING      = 10
 MAX_LOSING       = 6
 MAX_GLOBAL_RULES = 8
+MAX_TRADE_LOG    = 10_000
 
 
 # ── I/O helpers ───────────────────────────────────────────────────────────────
@@ -76,6 +77,14 @@ def _user_patterns_path(username: str) -> str:
 
 def _user_sim_log_path(username: str) -> str:
     return f"{_user_dir(username)}/sim_log.json"
+
+
+def _user_trade_log_path(username: str, symbol: str) -> str:
+    return f"{_user_dir(username)}/trades_{symbol}.json"
+
+
+def _user_live_state_snapshot_path(username: str, symbol: str) -> str:
+    return f"{_user_dir(username)}/live_state_{symbol}.json"
 
 
 def load_user_patterns(username: str) -> dict:
@@ -173,6 +182,66 @@ def promote_rules_to_core(rules: list) -> None:
     core["global_rules"] = rules[:MAX_GLOBAL_RULES]
     core["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save(_CORE_PATTERNS, core)
+
+
+_SNAPSHOT_EXCLUDE = frozenset({
+    "signals", "log", "live_candles",
+    "api_key", "api_secret",
+    "_session_token", "_sell_fail_count",
+    "pending_symbol_switch",
+})
+
+
+def append_trade_log(username: str, symbol: str, trade_dict: dict) -> None:
+    """Append one trade entry to the persistent per-symbol log."""
+    if not symbol:
+        return
+    path = _user_trade_log_path(username, symbol)
+    log = _load(path, {"entries": []})
+    entries = log.get("entries", [])
+    entry = {**trade_dict, "recorded_at": datetime.now(timezone.utc).isoformat()}
+    entries.append(entry)
+    if len(entries) > MAX_TRADE_LOG:
+        entries = entries[-MAX_TRADE_LOG:]
+    log["entries"] = entries
+    _save(path, log)
+
+
+def load_trade_log(username: str, symbol: str, limit: int = 20, offset: int = 0) -> dict:
+    """Return paginated trade history newest-first."""
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    path = _user_trade_log_path(username, symbol)
+    log = _load(path, {"entries": []})
+    entries = list(reversed(log.get("entries", [])))
+    page = entries[offset:offset + limit]
+    return {
+        "trades": page,
+        "total": len(entries),
+        "limit": limit,
+        "offset": offset,
+        "has_more": (offset + limit) < len(entries),
+    }
+
+
+def save_live_state_snapshot(username: str, symbol: str, state: dict) -> None:
+    """Persist a stripped live_state snapshot for crash recovery."""
+    if not symbol:
+        return
+    snapshot = {k: v for k, v in state.items() if k not in _SNAPSHOT_EXCLUDE}
+    snapshot["_snapshot_at"] = datetime.now(timezone.utc).isoformat()
+    _save(_user_live_state_snapshot_path(username, symbol), snapshot)
+
+
+def load_live_state_snapshot(username: str, symbol: str) -> dict | None:
+    """Load snapshot; returns None on any error."""
+    if not symbol:
+        return None
+    try:
+        with open(_user_live_state_snapshot_path(username, symbol)) as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def append_live_regime_log(username: str, entry: dict) -> None:

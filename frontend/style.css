@@ -366,6 +366,16 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
 .sim-picker-row label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .sim-picker-row select { flex: 1; min-width: 180px; }
 .btn-sm { font-size: 12px !important; padding: 6px 14px !important; }
+.btn-secondary {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
 
 .badge-green {
   background: rgba(63,185,80,0.15);
