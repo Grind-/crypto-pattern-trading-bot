@@ -300,6 +300,7 @@
     <a class="nav-link" href="#live-vorbereitung"><span class="nl-icon" aria-hidden="true">📋</span>Vorbereitung</a>
     <a class="nav-link" href="#live-binance"><span class="nl-icon" aria-hidden="true">🔑</span>Binance API-Key</a>
     <a class="nav-link" href="#live-start"><span class="nl-icon" aria-hidden="true">▶</span>Live Trading starten</a>
+    <a class="nav-link" href="#live-params"><span class="nl-icon" aria-hidden="true">⚙</span>Algorithmus-Parameter</a>
     <a class="nav-link" href="#live-lesen"><span class="nl-icon" aria-hidden="true">📈</span>Status verstehen</a>
     <a class="nav-link" href="#live-stopp"><span class="nl-icon" aria-hidden="true">■</span>Stoppen</a>
     <a class="nav-link" href="#trade-historie"><span class="nl-icon" aria-hidden="true">🗒</span>Trade-Historie</a>
@@ -530,6 +531,18 @@
             <td class="tn">Wissensbasis vs. Marktanalyse</td>
             <td>Wie stark die gesammelten Simulations-Erfahrungen (Wissensbasis) gegenüber der reinen Echtzeit-Marktanalyse gewichtet werden. Empfehlung: 50–70 % Wissensbasis.</td>
           </tr>
+          <tr>
+            <td class="tn">Mindest-Konfidenz</td>
+            <td>BUY-Signale werden ignoriert, wenn Claude unter diesem Konfidenz-Wert liegt. Standard: 55 %. Details im Abschnitt <a href="#live-params" style="color:var(--blue)">Algorithmus-Parameter</a>.</td>
+          </tr>
+          <tr>
+            <td class="tn">Stop-Loss × ATR</td>
+            <td>ATR-Multiplikator für den automatischen Stop-Loss. Standard: 1,5×. Details im Abschnitt <a href="#live-params" style="color:var(--blue)">Algorithmus-Parameter</a>.</td>
+          </tr>
+          <tr>
+            <td class="tn">Take-Profit × ATR</td>
+            <td>ATR-Multiplikator für das automatische Take-Profit-Ziel. Standard: 2,5×. Details im Abschnitt <a href="#live-params" style="color:var(--blue)">Algorithmus-Parameter</a>.</td>
+          </tr>
         </tbody>
       </table>
 
@@ -590,6 +603,58 @@
       </div>
     </div>
 
+    <!-- ALGORITHMUS-PARAMETER -->
+    <hr class="section-divider" />
+    <div class="section" id="live-params">
+      <h2><span class="section-icon ic-purple">⚙</span>Algorithmus-Parameter</h2>
+      <p class="section-desc">
+        Drei Parameter steuern, wie aggressiv oder konservativ der Bot handelt. Alle Werte sind im Live-Trading-Tab einstellbar und werden bei einem Server-Neustart automatisch wiederhergestellt.
+      </p>
+
+      <h3>Mindest-Konfidenz (BUY)</h3>
+      <p>Claude bewertet jedes BUY-Signal mit einem Konfidenz-Wert von 0–100 %. Der Parameter legt fest, ab welchem Wert ein Signal tatsächlich ausgeführt wird. Liegt die Konfidenz darunter, wird das BUY zu HOLD — ohne den Trade auszuführen.</p>
+      <table class="tbl">
+        <thead><tr><th>Wert</th><th>Effekt</th><th>Empfohlen für</th></tr></thead>
+        <tbody>
+          <tr><td class="tn">40–50 %</td><td>Mehr Trades, höheres Risiko</td><td>Sehr aktiver Stil, höhere Toleranz für Fehlsignale</td></tr>
+          <tr><td class="tn">55 % (Standard)</td><td>Ausgewogene Signalqualität</td><td>Einsteiger, allgemeiner Betrieb</td></tr>
+          <tr><td class="tn">65–75 %</td><td>Seltenere, stärkere Signale</td><td>Konservativer Stil, weniger Trades</td></tr>
+          <tr><td class="tn">&gt; 75 %</td><td>Sehr wenige Trades</td><td>Nur bei sehr klaren Marktphasen sinnvoll</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Stop-Loss × ATR</h3>
+      <p>Der Stop-Loss wird dynamisch aus dem <strong>Average True Range (ATR)</strong> berechnet — einem Maß für die durchschnittliche Preisschwankung des Symbols. Der Multiplikator legt fest, wie weit der Kurs gegen die Position laufen darf, bevor automatisch verkauft wird.</p>
+      <p>Formel: <code>SL % = Multiplikator × ATR / Einstandspreis × 100</code></p>
+      <table class="tbl">
+        <thead><tr><th>Wert</th><th>Effekt</th><th>Empfohlen für</th></tr></thead>
+        <tbody>
+          <tr><td class="tn">0,5–1,0×</td><td>Enger Stop, viele Fehlauslösungen möglich</td><td>Niedrigvolatile Märkte</td></tr>
+          <tr><td class="tn">1,5× (Standard)</td><td>Ausgewogener Schutz</td><td>Normale Marktbedingungen</td></tr>
+          <tr><td class="tn">2,0–3,0×</td><td>Weiterer Stop, mehr Verlustpuffer</td><td>Volatile Märkte, längere Haltedauer</td></tr>
+        </tbody>
+      </table>
+      <div class="callout callout-yellow">
+        <strong>Achtung:</strong> Ist der berechnete SL-Prozentsatz größer als 5 %, blockiert der Risk Agent den Trade vollständig — unabhängig vom eingestellten Multiplikator.
+      </div>
+
+      <h3>Take-Profit × ATR</h3>
+      <p>Analog zum Stop-Loss wird auch das Take-Profit-Ziel aus dem ATR berechnet. Das Verhältnis von TP zu SL bestimmt das <strong>Risk/Reward-Verhältnis</strong>.</p>
+      <p>Formel: <code>TP % = Multiplikator × ATR / Einstandspreis × 100</code></p>
+      <table class="tbl">
+        <thead><tr><th>SL ×</th><th>TP ×</th><th>Risk/Reward</th><th>Min. Win-Rate für Break-even</th></tr></thead>
+        <tbody>
+          <tr><td>1,5 (Standard)</td><td>2,5 (Standard)</td><td>1 : 1,67</td><td>~38 %</td></tr>
+          <tr><td>1,5</td><td>3,0</td><td>1 : 2,0</td><td>~33 %</td></tr>
+          <tr><td>2,0</td><td>4,0</td><td>1 : 2,0</td><td>~33 %</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-blue">
+        <strong>Tipp:</strong> Halte das TP/SL-Verhältnis mindestens bei 1,5 : 1, damit der Bot auch bei einer Win-Rate unter 50 % profitabel arbeiten kann. Die Standard-Einstellung 1,5 / 2,5 ist ein bewährter Ausgangspunkt.
+      </div>
+    </div>
+
     <!-- LIVE STATUS LESEN -->
     <hr class="section-divider" />
     <div class="section" id="live-lesen">
@@ -636,14 +701,14 @@
       </table>
 
       <h3>Abstimmungsmatrix — wann wird ein Trade ausgeführt?</h3>
-      <p>Der Bot kombiniert drei Agenten-Ausgaben zu einem <strong>Gesamt-Score</strong>. Erst wenn dieser Score die Schwelle überschreitet, wird ein BUY oder SELL ausgeführt:</p>
+      <p>Der Bot kombiniert drei Agenten-Ausgaben zu einem <strong>Gesamt-Score</strong>. Die BUY-Schwelle ist <strong>regime-spezifisch</strong> — in einem Bullenmarkt reicht ein niedrigerer Score als in einem Bärenmarkt:</p>
       <table class="tbl">
         <thead><tr><th>Aktion</th><th>Score-Schwelle</th><th>Zusätzliche Blockierbedingungen</th></tr></thead>
         <tbody>
           <tr>
             <td><span class="badge-inline b-green">BUY</span></td>
-            <td>Gesamt-Score ≥ 1.3 und FLAT</td>
-            <td>Blockiert bei Regime = HIGH_VOLATILITY, News-Veto, oder weniger als 2 grüne Signale</td>
+            <td>BULL_TREND: ≥ 0.8 · RANGING: ≥ 1.0 · BEAR_TREND: ≥ 1.2 · und FLAT</td>
+            <td>Blockiert bei Regime = HIGH_VOLATILITY, News-Veto, Konfidenz unter Mindest-Schwelle oder weniger als 2 grüne Signale</td>
           </tr>
           <tr>
             <td><span class="badge-inline b-red">SELL</span></td>
@@ -652,7 +717,7 @@
           </tr>
           <tr>
             <td><span class="badge-inline b-yellow">HOLD</span></td>
-            <td>Score zwischen −0.8 und 1.3</td>
+            <td>Score unter BUY-Schwelle oder über −0.8 (bei SELL)</td>
             <td>Kein ausreichendes Signal — keine Order wird ausgeführt</td>
           </tr>
         </tbody>
@@ -706,25 +771,8 @@
         Die Historie bleibt erhalten, solange der Bot läuft oder gestoppt ist.
       </p>
 
-      <h3>Anzeige im Live-Trading-Tab</h3>
-      <p>Im Abschnitt <strong>Ausgeführte Trades</strong> werden die letzten 20 Trades angezeigt. Ältere Einträge können jederzeit nachgeladen werden:</p>
-
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">Aktuelle Trades sehen</div>
-            <div class="step-desc">Die neuesten 20 Trades erscheinen automatisch, sobald der Live-Tab geladen wird — auch nach einem Neustart des Servers.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">Ältere Trades laden</div>
-            <div class="step-desc">Klicke auf <strong>Ältere laden</strong> unterhalb der Tabelle, um die nächsten 20 Einträge anzuhängen. Der Button verschwindet, wenn alle Trades angezeigt werden.</div>
-          </div>
-        </div>
-      </div>
+      <h3>Anzeige im Performance-Tab</h3>
+      <p>Die Trade-Historie ist im <strong>Performance Chart</strong> (Live-Trading-Tab) unter dem Modus <strong>Trades</strong> einsehbar. Alle ausgeführten Orders werden dort chronologisch aufgelistet.</p>
 
       <table class="tbl">
         <thead><tr><th>Spalte</th><th>Inhalt</th></tr></thead>
@@ -991,7 +1039,8 @@
       <ul>
         <li><strong>HIGH_VOLATILITY-Regime:</strong> Jedes BUY-Signal wird automatisch zu HOLD — unabhängig vom Score.</li>
         <li><strong>News-Veto:</strong> Wenn der News Agent für das Symbol ein Veto setzt (Sentiment &lt; 20 oder kritische Warnung), wird BUY blockiert.</li>
-        <li><strong>Score &lt; 1.3:</strong> Wenn der Gesamt-Score unter 1.3 liegt, wird BUY zu HOLD.</li>
+        <li><strong>Score unter Regime-Schwelle:</strong> BULL_TREND ≥ 0.8 · RANGING ≥ 1.0 · BEAR_TREND ≥ 1.2. Liegt der Score darunter, wird BUY zu HOLD.</li>
+        <li><strong>Konfidenz unter Mindest-Schwelle:</strong> Liegt Claudes Konfidenz für das BUY-Signal unter dem eingestellten Wert (Standard 55 %), wird BUY zu HOLD.</li>
         <li><strong>Risk Agent blockiert:</strong> Wenn weniger als 2 von 4 Signalen grün sind oder die ATR-basierte SL &gt; 5 % liegt, setzt der Risk Agent die Positionsgröße auf 0 und blockiert den Trade.</li>
       </ul>
 
@@ -1022,11 +1071,12 @@
       </table>
 
       <h3>ATR-basierte Stop-Loss / Take-Profit</h3>
-      <p>Der Risk Agent berechnet SL und TP dynamisch aus dem Average True Range (ATR) des aktuellen Symbols:</p>
+      <p>Der Risk Agent berechnet SL und TP dynamisch aus dem Average True Range (ATR) des aktuellen Symbols. Die Multiplikatoren sind im Live-Trading-Tab konfigurierbar (Standard: SL 1,5× · TP 2,5×):</p>
       <ul>
-        <li><strong>Stop-Loss:</strong> 1.5 × ATR / Einstandspreis × 100 %</li>
-        <li><strong>Take-Profit:</strong> 2.5 × ATR / Einstandspreis × 100 %</li>
-        <li>Wenn kein ATR vorhanden ist, wird als Fallback 1.5 % des Einstandspreises verwendet.</li>
+        <li><strong>Stop-Loss:</strong> SL-Multiplikator × ATR / Einstandspreis × 100 %</li>
+        <li><strong>Take-Profit:</strong> TP-Multiplikator × ATR / Einstandspreis × 100 %</li>
+        <li>Wenn kein ATR vorhanden ist, wird als Fallback 1,5 % des Einstandspreises verwendet.</li>
+        <li>Übersteigt der berechnete SL-Prozentsatz 5 %, blockiert der Risk Agent den Trade vollständig.</li>
       </ul>
 
       <div class="callout callout-blue">
@@ -1137,8 +1187,8 @@
             <div class="ad-matrix-title">Voting Matrix</div>
             <div class="ad-matrix-formula">Signal-Vote &nbsp;+&nbsp; News-Modifier &nbsp;+&nbsp; Regime-Boost</div>
             <div class="ad-matrix-thresholds">
-              <span class="ad-threshold ad-threshold--buy">Score ≥ 1.3 → BUY</span>
-              <span class="ad-threshold ad-threshold--hold">−0.8 … 1.3 → HOLD</span>
+              <span class="ad-threshold ad-threshold--buy">BULL ≥ 0.8 · RANGE ≥ 1.0 · BEAR ≥ 1.2 → BUY</span>
+              <span class="ad-threshold ad-threshold--hold">unter BUY-Schwelle → HOLD</span>
               <span class="ad-threshold ad-threshold--sell">Score ≤ −0.8 → SELL</span>
             </div>
           </div>
@@ -1234,7 +1284,7 @@
         <li><strong>Backtests sind keine Zukunftsgarantie.</strong> Märkte ändern sich — eine Strategie, die historisch gut funktioniert hat, kann in Zukunft verlieren.</li>
         <li><strong>Claude kann falsch liegen.</strong> Die KI analysiert Chartmuster, hat aber keine perfekte Marktkenntnis. Signale sind Wahrscheinlichkeiten, keine Gewissheiten.</li>
         <li><strong>Nur Spot-Trading.</strong> Der Bot führt ausschließlich einfache Kauf- und Verkaufsorders aus — kein Margin, kein Hebel, keine Futures.</li>
-        <li><strong>ATR-basierter Stop-Loss.</strong> Der Risk Agent setzt SL und TP dynamisch aus dem ATR. Stop-Loss liegt bei 1,5 × ATR, Take-Profit bei 2,5 × ATR. Diese überschreiben Claudes Einschätzungen und werden als Force-Sell ausgeführt.</li>
+        <li><strong>ATR-basierter Stop-Loss.</strong> Der Risk Agent setzt SL und TP dynamisch aus dem ATR. Standardmäßig liegt Stop-Loss bei 1,5 × ATR und Take-Profit bei 2,5 × ATR — beide Multiplikatoren sind im Live-Tab konfigurierbar. Diese Levels überschreiben Claudes Einschätzungen und werden als Force-Sell ausgeführt.</li>
         <li><strong>Verbindungsausfälle.</strong> Bei Netzwerkproblemen oder API-Fehlern wird kein Trade ausgeführt. Der Bot protokolliert den Fehler und wartet auf den nächsten Zyklus.</li>
       </ul>
     </div>

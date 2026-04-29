@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=10" />
+  <link rel="stylesheet" href="/static/style.css?v=11" />
 </head>
 <body>
   <header>
@@ -213,19 +213,28 @@
           </div>
         </div>
         <div class="field">
-          <label>Mindest-Konfidenz (BUY) <span style="color:var(--text-muted);font-weight:400">%</span></label>
+          <label>Mindest-Konfidenz (BUY) <span style="color:var(--text-muted);font-weight:400">%</span><button type="button" class="field-hint-btn" onclick="toggleHint('hint-conf')" aria-label="Mehr Info">?</button></label>
           <input id="live-min-confidence" type="number" value="55" min="30" max="90" step="5" onchange="saveUserSettings()" />
           <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Signal wird ignoriert, falls Claude unter diesem Wert liegt.</div>
+          <div class="field-hint-detail" id="hint-conf" hidden>
+            <strong>Was ist Konfidenz?</strong> Claude bewertet jedes BUY-Signal mit 0–100 %. Mit dem Standardwert 55 % werden nur Signale mit über 55 % Überzeugung weitergegeben. <strong>Niedriger</strong> = mehr Trades, höheres Risiko. <strong>Höher</strong> = seltenere, qualitativ stärkere Signale. Empfehlung: 50–65 %.
+          </div>
         </div>
         <div class="field">
-          <label>Stop-Loss <span style="color:var(--text-muted);font-weight:400">× ATR</span></label>
+          <label>Stop-Loss <span style="color:var(--text-muted);font-weight:400">× ATR</span><button type="button" class="field-hint-btn" onclick="toggleHint('hint-sl')" aria-label="Mehr Info">?</button></label>
           <input id="live-sl-mult" type="number" value="1.5" min="0.5" max="4.0" step="0.5" onchange="saveUserSettings()" />
           <div style="font-size:11px;color:var(--text-muted);margin-top:3px">ATR-Multiplikator für Stop-Loss-Abstand.</div>
+          <div class="field-hint-detail" id="hint-sl" hidden>
+            <strong>ATR (Average True Range)</strong> misst die durchschnittliche Preisschwankung. 1,5 × ATR = der Kurs darf 1,5-mal die normale Volatilität gegen dich laufen, bevor automatisch verkauft wird. <strong>Kleiner</strong> = engerer Stop, mehr Fehlauslösungen. <strong>Größer</strong> = mehr Spielraum, aber größerer potentieller Verlust pro Trade.
+          </div>
         </div>
         <div class="field">
-          <label>Take-Profit <span style="color:var(--text-muted);font-weight:400">× ATR</span></label>
+          <label>Take-Profit <span style="color:var(--text-muted);font-weight:400">× ATR</span><button type="button" class="field-hint-btn" onclick="toggleHint('hint-tp')" aria-label="Mehr Info">?</button></label>
           <input id="live-tp-mult" type="number" value="2.5" min="1.0" max="8.0" step="0.5" onchange="saveUserSettings()" />
           <div style="font-size:11px;color:var(--text-muted);margin-top:3px">ATR-Multiplikator für Take-Profit-Ziel.</div>
+          <div class="field-hint-detail" id="hint-tp" hidden>
+            <strong>Risk/Reward:</strong> Standard-SL 1,5 × ATR + TP 2,5 × ATR = Verhältnis 1:1,67. Damit reicht eine Win-Rate von ~38 %, um break-even zu sein. <strong>Kleiner</strong> = schnellerer Gewinn, geringerer Betrag. <strong>Größer</strong> = mehr Geduld nötig, aber höherer Gewinn pro Trade.
+          </div>
         </div>
       </div>
       <div class="btn-row">
@@ -417,6 +426,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -151,6 +151,27 @@ knowledge/
 
 ---
 
+## Konfigurierbare Algorithmus-Parameter
+
+Alle drei Parameter werden in `live_states` gespeichert und beim Auto-Resume wiederhergestellt:
+
+| Parameter | Default | Beschreibung |
+|---|---|---|
+| `min_confidence` | 55 % | BUY-Signal wird zu HOLD, wenn Claudes Konfidenz darunter liegt |
+| `sl_atr_mult` | 1.5 | Stop-Loss = sl_atr_mult × ATR / Einstandspreis |
+| `tp_atr_mult` | 2.5 | Take-Profit = tp_atr_mult × ATR / Einstandspreis |
+
+**Voting-Matrix BUY-Schwellen (regime-spezifisch):**
+
+| Regime | BUY-Schwelle |
+|---|---|
+| BULL_TREND | ≥ 0.8 |
+| RANGING | ≥ 1.0 |
+| BEAR_TREND | ≥ 1.2 |
+| HIGH_VOLATILITY | geblockt (999) |
+
+---
+
 ## Auto-Resume nach Neustart
 
 Beim Start (`_auto_resume_all`):
@@ -158,7 +179,7 @@ Beim Start (`_auto_resume_all`):
 2. Prüft `live_states.was_running = True`
 3. Lädt Binance-Keys aus `users.binance_api_key/secret` (Fallback: `live_states`)
 4. Validiert Keys gegen Binance-API
-5. Startet `_live_loop` als asyncio-Task
+5. Startet `_live_loop` als asyncio-Task mit gespeicherten Algo-Parametern
 6. Bei Validierungsfehler: `was_running = False` setzen, Keys bleiben erhalten
 
 ---

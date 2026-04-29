@@ -1089,6 +1089,11 @@ function useSym(symbol, interval) {
   if (interval) document.getElementById('live-interval').value = interval;
 }
 
+function toggleHint(id) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = !el.hidden;
+}
+
 // ── Page init ─────────────────────────────────────────────────────────────────
 
 function switchTab(name) {
