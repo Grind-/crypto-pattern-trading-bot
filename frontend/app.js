@@ -471,6 +471,30 @@ async function submitTopup() {
   }
 }
 
+async function triggerAnalysis() {
+  const btn = document.getElementById('btn-live-trigger');
+  const res = document.getElementById('trigger-result');
+  btn.disabled = true;
+  res.textContent = '…';
+  try {
+    const r = await fetch('/api/live/trigger', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = '✓ Analyse gestartet';
+      res.style.color = 'var(--green)';
+    } else {
+      res.textContent = d.reason === 'cycle_running' ? 'Analyse läuft bereits' : 'Nicht bereit';
+      res.style.color = 'var(--text-muted)';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    res.textContent = 'Fehler';
+    res.style.color = 'var(--red)';
+    btn.disabled = false;
+  }
+  setTimeout(() => { res.textContent = ''; if (btn.disabled) btn.disabled = false; }, 4000);
+}
+
 let liveNextCheckTs = null;
 let countdownTick = null;
 
@@ -601,6 +625,9 @@ async function pollLive() {
 
   renderLastDecision(state.last_decision, state.calibration_meta);
   loadPerformance();
+
+  const triggerBtn = document.getElementById('btn-live-trigger');
+  if (triggerBtn) triggerBtn.disabled = !!state.cycle_running;
 
   if (!state.running && livePolling) {
     clearInterval(livePolling);

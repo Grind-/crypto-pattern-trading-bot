@@ -285,6 +285,7 @@ def _default_live_state() -> dict:
         "sl_pct": None, "tp_pct": None,
         "last_regime": None, "last_risk": None, "last_news_score": None,
         "calibrated_thresholds": {},
+        "_cycle_running": False,
     }
 
 
@@ -799,6 +800,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "trade_history": [], "live_candles": [], "buy_price": None,
         "_session_token": session_token,
         "_username": username,
+        "_cycle_running": False,
     })
     save_live_state(username, {
         "was_running": True,
@@ -880,6 +882,21 @@ async def topup_live(req: TopupRequest, request: Request):
     return {"ok": True, "new_capital": new_capital}
 
 
+@app.post("/api/live/trigger")
+async def trigger_live(request: Request):
+    user = _get_current_user(request)
+    live_state = _get_live_state(user["username"])
+    if not live_state.get("running"):
+        raise HTTPException(400, "Live Trading nicht aktiv")
+    if live_state.get("_cycle_running"):
+        return {"ok": False, "reason": "cycle_running"}
+    ev = live_state.get("_trigger_event")
+    if ev is None:
+        return {"ok": False, "reason": "loop_not_ready"}
+    ev.set()
+    return {"ok": True}
+
+
 @app.get("/api/live/credentials")
 async def get_live_credentials(request: Request):
     user = _get_current_user(request)
@@ -929,6 +946,7 @@ async def live_status(request: Request):
               if k not in ("api_key", "api_secret", "live_candles")
               and not k.startswith("_")}
     result["calibration_meta"] = calibration_meta(live_state.get("trade_history", []))
+    result["cycle_running"] = bool(live_state.get("_cycle_running"))
     return result
 
 
@@ -1275,6 +1293,8 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
 async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                      oauth_token: str = "", session_token: str = ""):
     live_state = _get_live_state(username)
+    trigger_event = asyncio.Event()
+    live_state["_trigger_event"] = trigger_event
 
     def _still_active() -> bool:
         return live_state["running"] and live_state.get("_session_token") == session_token
@@ -1558,19 +1578,29 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 _log(live_state, f"Nächste Analyse: {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
                 first_run = False
 
+            manual_trigger = False
             if wait_secs > 0:
                 slept = 0.0
                 while slept < wait_secs and _still_active():
                     chunk = min(30.0, wait_secs - slept)
-                    await asyncio.sleep(chunk)
-                    slept += chunk
+                    try:
+                        await asyncio.wait_for(trigger_event.wait(), timeout=chunk)
+                        manual_trigger = True
+                        trigger_event.clear()
+                        break
+                    except asyncio.TimeoutError:
+                        slept += chunk
 
             if not _still_active():
                 break
 
-            live_state["candle_count"] += 1
-            _log(live_state, f"\n── Kerze #{live_state['candle_count']} ({_fmt_ts(next_close_ts)}) ──")
+            if manual_trigger:
+                _log(live_state, "\n🖱 Manueller Trigger — Analyse läuft…")
+            else:
+                live_state["candle_count"] += 1
+                _log(live_state, f"\n── Kerze #{live_state['candle_count']} ({_fmt_ts(next_close_ts)}) ──")
 
+            live_state["_cycle_running"] = True
             _log(live_state, "🔍 Marktcheck…")
             current_symbol = await _scan_and_maybe_switch(
                 req.interval, current_symbol, live_state["position"],
@@ -1885,6 +1915,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             live_state["next_check_ts"] = next2 + CLOSE_BUFFER
             live_state["next_check_str"] = _fmt_ts(next2)
             _log(live_state, f"Nächste Analyse: {_fmt_ts(next2)} (in {_fmt_wait(next2 - time.time())})")
+            live_state["_cycle_running"] = False
 
     except Exception as e:
         live_state["status"] = "error"
@@ -1895,6 +1926,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
         live_state["next_check_ts"] = None
         live_state["next_check_str"] = None
         live_state["status"] = "stopped"
+        live_state["_cycle_running"] = False
+        live_state["_trigger_event"] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

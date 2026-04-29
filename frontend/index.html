@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=12" />
+  <link rel="stylesheet" href="/static/style.css?v=13" />
 </head>
 <body>
   <header>
@@ -289,6 +289,11 @@
           <div class="countdown-time" id="live-countdown">—</div>
         </div>
 
+        <div class="trigger-row" style="margin-top:8px">
+          <button id="btn-live-trigger" class="btn btn-secondary" onclick="triggerAnalysis()">⚡ Jetzt analysieren</button>
+          <span id="trigger-result" class="trigger-result"></span>
+        </div>
+
         <!-- Knowledge basis + agent summary chips -->
         <div id="live-basis-row" class="live-basis-row">
           <span class="live-basis-label">Basis</span>
@@ -429,6 +434,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=12"></script>
+  <script src="/static/app.js?v=13"></script>
 </body>
 </html>

@@ -1067,3 +1067,5 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
   background: rgba(255,255,255,0.5);
   border-radius: 1px;
 }
+.trigger-row { display:flex; align-items:center; gap:10px; }
+.trigger-result { font-size:12px; color:var(--text-muted); }
