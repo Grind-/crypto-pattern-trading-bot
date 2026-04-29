@@ -66,6 +66,10 @@ async function toggleApiKeyReveal() {
 let priceChart = null;
 let portfolioChart = null;
 let liveChart = null;
+let perfChart = null;
+let _perfMode = 'capital';
+let _perfData = null;
+let _perfLastFetch = 0;
 
 function mkChart(id, type, data, options) {
   const ctx = document.getElementById(id).getContext('2d');
@@ -437,6 +441,11 @@ async function stopLive() {
   // hide topup row on stop
   const tr = document.getElementById('topup-row');
   if (tr) tr.style.display = 'none';
+  // reset performance chart
+  if (perfChart) { perfChart.destroy(); perfChart = null; }
+  _perfData = null; _perfLastFetch = 0;
+  const pc = document.getElementById('live-perf-card');
+  if (pc) pc.style.display = 'none';
 }
 
 function toggleTopup() {
@@ -632,6 +641,8 @@ async function pollLive() {
     }
   }
 
+  loadPerformance();
+
   if (!state.running && livePolling) {
     clearInterval(livePolling);
     if (countdownTick) clearInterval(countdownTick);
@@ -790,6 +801,116 @@ function updateLiveChart(data) {
   liveChart.data.datasets[1].data = buys;
   liveChart.data.datasets[2].data = sells;
   liveChart.update();
+}
+
+// ── Performance chart ─────────────────────────────────────────────────────────
+
+async function loadPerformance(force = false) {
+  const now = Date.now();
+  if (!force && now - _perfLastFetch < 30_000) return;
+  _perfLastFetch = now;
+  try {
+    const data = await fetch('/api/live/performance').then(r => r.json());
+    _perfData = data;
+    renderPerfChart(data, _perfMode);
+  } catch {}
+}
+
+function setPerfMode(mode) {
+  _perfMode = mode;
+  document.querySelectorAll('.perf-mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  if (_perfData) renderPerfChart(_perfData, mode);
+}
+
+function renderPerfChart(data, mode) {
+  const card = document.getElementById('live-perf-card');
+  if (!card) return;
+  card.style.display = 'block';
+
+  const summaryRow = document.getElementById('perf-summary-row');
+  const emptyEl    = document.getElementById('perf-empty');
+  const wrapEl     = document.getElementById('perf-chart-wrap');
+
+  // Summary bar
+  if (data.summary) {
+    const s = data.summary;
+    const sign = v => v >= 0 ? '+' : '';
+    const col  = v => v >= 0 ? 'var(--green)' : 'var(--red)';
+    summaryRow.innerHTML =
+      `<div class="perf-stat"><span class="perf-stat-label">Start</span><span class="perf-stat-value">$${s.start_capital.toFixed(2)}</span></div>` +
+      `<div class="perf-stat"><span class="perf-stat-label">Aktuell</span><span class="perf-stat-value">$${s.current_capital.toFixed(2)}</span></div>` +
+      `<div class="perf-stat"><span class="perf-stat-label">Bot Return</span><span class="perf-stat-value" style="color:${col(s.bot_pct)}">${sign(s.bot_pct)}${s.bot_pct.toFixed(2)}%</span></div>` +
+      (s.btc_pct != null
+        ? `<div class="perf-stat"><span class="perf-stat-label">BTC Benchmark</span><span class="perf-stat-value" style="color:${col(s.btc_pct)}">${sign(s.btc_pct)}${s.btc_pct.toFixed(2)}%</span></div>`
+        : '') +
+      `<div class="perf-stat"><span class="perf-stat-label">Trades</span><span class="perf-stat-value">${s.num_sells}</span></div>`;
+    summaryRow.style.display = 'flex';
+  }
+
+  if (perfChart) { perfChart.destroy(); perfChart = null; }
+
+  const fmtTs = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  const fmtDay = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric'});
+
+  if (mode === 'capital') {
+    const series = data.capital_series || [];
+    if (series.length < 2) { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; return; }
+    emptyEl.style.display = 'none'; wrapEl.style.display = '';
+    const first = series[0].usdc, last = series[series.length - 1].usdc;
+    const lineCol = last >= first ? '#3fb950' : '#f85149';
+    const fillCol = last >= first ? 'rgba(63,185,80,0.1)' : 'rgba(248,81,73,0.1)';
+    perfChart = mkChart('perf-chart', 'line', {
+      labels: series.map(p => fmtTs(p.ts)),
+      datasets: [{
+        label: 'Kapital (USDC)', data: series.map(p => p.usdc),
+        borderColor: lineCol, borderWidth: 2,
+        pointRadius: series.length <= 6 ? 4 : 2,
+        fill: true, backgroundColor: fillCol, tension: 0, stepped: 'after',
+      }],
+    }, { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
+        ticks: { color: '#8b949e', font: {size:10}, callback: v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) }
+    }}});
+
+  } else if (mode === 'pct') {
+    const bot = data.bot_pct_series || [];
+    const btc = data.btc_pct_series || [];
+    if (bot.length < 2 && !btc.length) { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; return; }
+    emptyEl.style.display = 'none'; wrapEl.style.display = '';
+    const pctOpts = { ...chartDefaults, scales: {
+      x: { type: 'linear', ticks: { color:'#8b949e', font:{size:10}, maxTicksLimit:8, callback: v => fmtDay(v) }, grid: {color:'#21262d'} },
+      y: { ticks: { color:'#8b949e', font:{size:10}, callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' }, grid: {color:'#21262d'} },
+    }};
+    perfChart = mkChart('perf-chart', 'line', { datasets: [
+      { label: 'Bot', data: bot.map(p => ({x: p.ts, y: p.pct})), parsing: false,
+        borderColor: '#58a6ff', borderWidth: 2, pointRadius: bot.length <= 6 ? 4 : 1,
+        fill: false, tension: 0, stepped: 'after' },
+      ...(btc.length ? [{ label: 'BTC Benchmark', data: btc.map(p => ({x: p.ts, y: p.pct})), parsing: false,
+        borderColor: '#f0a500', borderWidth: 1.5, borderDash: [5,4], pointRadius: 0,
+        fill: false, tension: 0.1 }] : []),
+    ]}, pctOpts);
+
+  } else if (mode === 'trades') {
+    const pnl = data.trade_pnl || [];
+    if (!pnl.length) { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; return; }
+    emptyEl.style.display = 'none'; wrapEl.style.display = '';
+    perfChart = mkChart('perf-chart', 'bar', {
+      labels: pnl.map((_, i) => `#${i+1}`),
+      datasets: [{
+        label: 'P&L %', data: pnl.map(t => t.pct),
+        backgroundColor: pnl.map(t => t.pct >= 0 ? 'rgba(63,185,80,0.75)' : 'rgba(248,81,73,0.75)'),
+        borderColor:     pnl.map(t => t.pct >= 0 ? '#3fb950' : '#f85149'),
+        borderWidth: 1, borderRadius: 3,
+      }],
+    }, { ...chartDefaults, plugins: { ...chartDefaults.plugins,
+        tooltip: { callbacks: { label: ctx => {
+          const t = pnl[ctx.dataIndex];
+          return `${t.symbol}: ${t.pct >= 0 ? '+' : ''}${t.pct.toFixed(2)}%`;
+        }}}},
+      scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
+        ticks: { color:'#8b949e', font:{size:10}, callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' }
+    }}});
+  }
 }
 
 async function loadLiveTradeHistory(username, symbol, reset = false) {
@@ -1214,6 +1335,7 @@ async function initPage() {
 
       livePolling = setInterval(pollLive, 5000);
       pollLive();
+      loadPerformance(true);
     }
   } catch (e) {}
 

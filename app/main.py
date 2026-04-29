@@ -908,6 +908,83 @@ async def live_status(request: Request):
             if k not in ("api_key", "api_secret", "live_candles")}
 
 
+@app.get("/api/live/performance")
+async def live_performance(request: Request):
+    user = _get_current_user(request)
+    live_state = _get_live_state(user["username"])
+
+    trade_history = live_state.get("trade_history", [])
+    trade_amount = float(live_state.get("trade_amount") or 50.0)
+    current_capital = float(live_state.get("current_capital") or trade_amount)
+    compounding_mode = live_state.get("compounding_mode", "compound")
+    now_ms = int(time.time() * 1000)
+
+    sorted_trades = sorted(trade_history, key=lambda x: x.get("timestamp", 0))
+    start_ts = sorted_trades[0]["timestamp"] if sorted_trades else (now_ms - 86_400_000)
+
+    # Capital series — step function at each completed sell
+    capital_series = [{"ts": start_ts, "usdc": trade_amount}]
+    running_cap = trade_amount
+    for t in sorted_trades:
+        if t["type"] == "SELL" and t.get("pnl_pct") is not None:
+            pnl = t["pnl_pct"]
+            if compounding_mode == "fixed":
+                running_cap = trade_amount
+            elif compounding_mode == "compound_wins":
+                new_cap = round(running_cap * (1 + pnl / 100), 2)
+                running_cap = max(new_cap, trade_amount)
+            else:
+                running_cap = round(running_cap * (1 + pnl / 100), 2)
+            capital_series.append({"ts": t["timestamp"], "usdc": running_cap})
+    capital_series.append({"ts": now_ms, "usdc": current_capital})
+
+    # Normalised % series for bot
+    bot_pct_series = [
+        {"ts": p["ts"], "pct": round((p["usdc"] / trade_amount - 1) * 100, 2)}
+        for p in capital_series
+    ]
+
+    # Per-trade P&L bars
+    trade_pnl = [
+        {"ts": t["timestamp"], "pct": round(t["pnl_pct"], 2), "symbol": t.get("symbol", "")}
+        for t in sorted_trades
+        if t["type"] == "SELL" and t.get("pnl_pct") is not None
+    ]
+
+    # BTC benchmark (1d candles from start date)
+    btc_pct_series: list = []
+    try:
+        btc_raw = await fetch_latest_klines("BTCUSDC", "1d", limit=200)
+        if btc_raw:
+            relevant = [c for c in btc_raw if c["timestamp"] >= start_ts]
+            if not relevant:
+                relevant = btc_raw[-30:]
+            ref_price = relevant[0]["close"]
+            btc_pct_series = [
+                {"ts": c["timestamp"], "pct": round((c["close"] / ref_price - 1) * 100, 2)}
+                for c in relevant
+            ]
+    except Exception as exc:
+        logger.warning(f"BTC benchmark fetch failed [{user['username']}]: {exc}")
+
+    bot_total_pct = round((current_capital / trade_amount - 1) * 100, 2) if trade_amount else 0
+    btc_total_pct = btc_pct_series[-1]["pct"] if btc_pct_series else None
+
+    return {
+        "capital_series": capital_series,
+        "bot_pct_series": bot_pct_series,
+        "btc_pct_series": btc_pct_series,
+        "trade_pnl": trade_pnl,
+        "summary": {
+            "start_capital": trade_amount,
+            "current_capital": current_capital,
+            "bot_pct": bot_total_pct,
+            "btc_pct": btc_total_pct,
+            "num_sells": len(trade_pnl),
+        },
+    }
+
+
 @app.get("/api/live/chart-data")
 async def live_chart_data(request: Request):
     user = _get_current_user(request)
