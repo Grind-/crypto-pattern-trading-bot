@@ -939,9 +939,10 @@ async def live_performance(request: Request):
 
     sorted_trades = sorted(trade_history, key=lambda x: x.get("timestamp", 0))
     start_ts = sorted_trades[0]["timestamp"] if sorted_trades else (now_ms - 86_400_000)
+    duration_h = (now_ms - start_ts) / 3_600_000
 
-    # Capital series — step function at each completed sell
-    capital_series = [{"ts": start_ts, "usdc": trade_amount}]
+    # Resolved SELL checkpoints (step-function anchors)
+    sell_checkpoints: dict[int, float] = {}  # ts → cumulative capital
     running_cap = trade_amount
     for t in sorted_trades:
         if t["type"] == "SELL" and t.get("pnl_pct") is not None:
@@ -949,12 +950,42 @@ async def live_performance(request: Request):
             if compounding_mode == "fixed":
                 running_cap = trade_amount
             elif compounding_mode == "compound_wins":
-                new_cap = round(running_cap * (1 + pnl / 100), 2)
-                running_cap = max(new_cap, trade_amount)
+                running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
             else:
                 running_cap = round(running_cap * (1 + pnl / 100), 2)
-            capital_series.append({"ts": t["timestamp"], "usdc": running_cap})
-    capital_series.append({"ts": now_ms, "usdc": current_capital})
+            sell_checkpoints[t["timestamp"]] = running_cap
+
+    # Capital series — enrich with mark-to-market points from live_candles
+    # so the chart shows unrealized P&L while IN_POSITION, not just a flat line
+    live_candles = live_state.get("live_candles", [])
+    position = live_state.get("position", "FLAT")
+    buy_price = live_state.get("buy_price")
+
+    # Build a map: ts → realised capital (step function value at that point in time)
+    # Then for candles inside an open position, overlay mark-to-market value
+    cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
+
+    last_realised = trade_amount
+    last_sell_ts = start_ts
+    for ts_sell, cap_after in sorted(sell_checkpoints.items()):
+        cap_series_raw.append((ts_sell, cap_after))
+        last_realised = cap_after
+        last_sell_ts = ts_sell
+
+    # If currently IN_POSITION with known buy_price, add intra-position candle points
+    if position == "IN_POSITION" and buy_price and buy_price > 0 and live_candles:
+        committed = live_state.get("current_capital") or trade_amount
+        for c in live_candles:
+            c_ts = c.get("timestamp", 0)
+            if c_ts <= last_sell_ts:
+                continue  # before or at last sell — skip
+            mtm_cap = round(last_realised - committed + committed * (c["close"] / buy_price), 2)
+            cap_series_raw.append((c_ts, mtm_cap))
+
+    cap_series_raw.append((now_ms, current_capital))
+    cap_series_raw.sort(key=lambda x: x[0])
+
+    capital_series = [{"ts": ts, "usdc": cap} for ts, cap in cap_series_raw]
 
     # Normalised % series for bot
     bot_pct_series = [
@@ -969,23 +1000,28 @@ async def live_performance(request: Request):
         if t["type"] == "SELL" and t.get("pnl_pct") is not None
     ]
 
-    # BTC benchmark — normalized to bot's start_ts so both series share the same baseline
+    # BTC benchmark — interval chosen by duration for appropriate granularity
+    # <2d → 1h | <14d → 4h | else → 1d
+    if duration_h <= 48:
+        btc_interval, btc_limit = "1h", 500
+    elif duration_h <= 336:
+        btc_interval, btc_limit = "4h", 500
+    else:
+        btc_interval, btc_limit = "1d", 500
+
     btc_pct_series: list = []
     try:
-        btc_raw = await fetch_latest_klines("BTCUSDC", "1d", limit=200)
+        btc_raw = await fetch_latest_klines("BTCUSDC", btc_interval, limit=btc_limit)
         if btc_raw:
-            # Reference: last daily candle whose open is at or before start_ts
             candles_before = [c for c in btc_raw if c["timestamp"] <= start_ts]
             ref_candle = candles_before[-1] if candles_before else btc_raw[0]
             ref_price = ref_candle["close"]
-            # Series: from ref candle onward (first point anchored at start_ts so it's visible)
             series_src = [c for c in btc_raw if c["timestamp"] >= ref_candle["timestamp"]]
             btc_pct_series = [
                 {"ts": start_ts if i == 0 else c["timestamp"],
                  "pct": round((c["close"] / ref_price - 1) * 100, 2)}
                 for i, c in enumerate(series_src)
             ]
-            # Extend to now so the line reaches the right edge of the chart
             if btc_pct_series and btc_pct_series[-1]["ts"] < now_ms:
                 btc_pct_series.append({
                     "ts": now_ms,
