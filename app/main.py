@@ -969,19 +969,28 @@ async def live_performance(request: Request):
         if t["type"] == "SELL" and t.get("pnl_pct") is not None
     ]
 
-    # BTC benchmark (1d candles from start date)
+    # BTC benchmark — normalized to bot's start_ts so both series share the same baseline
     btc_pct_series: list = []
     try:
         btc_raw = await fetch_latest_klines("BTCUSDC", "1d", limit=200)
         if btc_raw:
-            relevant = [c for c in btc_raw if c["timestamp"] >= start_ts]
-            if not relevant:
-                relevant = btc_raw[-30:]
-            ref_price = relevant[0]["close"]
+            # Reference: last daily candle whose open is at or before start_ts
+            candles_before = [c for c in btc_raw if c["timestamp"] <= start_ts]
+            ref_candle = candles_before[-1] if candles_before else btc_raw[0]
+            ref_price = ref_candle["close"]
+            # Series: from ref candle onward (first point anchored at start_ts so it's visible)
+            series_src = [c for c in btc_raw if c["timestamp"] >= ref_candle["timestamp"]]
             btc_pct_series = [
-                {"ts": c["timestamp"], "pct": round((c["close"] / ref_price - 1) * 100, 2)}
-                for c in relevant
+                {"ts": start_ts if i == 0 else c["timestamp"],
+                 "pct": round((c["close"] / ref_price - 1) * 100, 2)}
+                for i, c in enumerate(series_src)
             ]
+            # Extend to now so the line reaches the right edge of the chart
+            if btc_pct_series and btc_pct_series[-1]["ts"] < now_ms:
+                btc_pct_series.append({
+                    "ts": now_ms,
+                    "pct": round((btc_raw[-1]["close"] / ref_price - 1) * 100, 2),
+                })
     except Exception as exc:
         logger.warning(f"BTC benchmark fetch failed [{user['username']}]: {exc}")
 
