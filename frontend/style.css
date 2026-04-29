@@ -327,64 +327,60 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 .log-box .log-head { color: var(--blue); font-weight: bold; }
 
 .chart-wrap { position: relative; height: 260px; }
-.perf-chart-wrap { height: 210px; }
+.perf-chart-wrap { height: 230px; }
 
 /* ── Performance card ──────────────────────────────────────────────────── */
 .perf-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   gap: 10px;
   flex-wrap: wrap;
 }
-.perf-title {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-}
 
-/* Segmented control */
+/* Mode buttons — match btn-tiny / badge style used elsewhere in the app */
 .perf-mode-group {
   display: flex;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
+  gap: 4px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .perf-mode-btn {
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--border);
+  background: var(--surface2);
+  border: 1px solid var(--border);
   color: var(--text-muted);
-  padding: 7px 14px;
-  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: background .15s, color .15s;
+  transition: color .15s, border-color .15s, background .15s;
   white-space: nowrap;
-  line-height: 1;
+  line-height: 1.6;
 }
-.perf-mode-btn:last-child { border-right: none; }
-.perf-mode-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
-.perf-mode-btn.active { background: var(--blue); color: #0d1117; }
+.perf-mode-btn:hover { color: var(--text); border-color: rgba(139,148,158,0.5); }
+.perf-mode-btn.active {
+  background: rgba(88,166,255,0.12);
+  border-color: rgba(88,166,255,0.4);
+  color: var(--blue);
+}
 
-/* KPI grid */
+/* KPI grid — aligned with .metric sizing used in sim tab */
 .perf-kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
-  gap: 8px;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
 }
 .perf-kpi {
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 11px;
+  border-radius: 6px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .perf-kpi-label {
   font-size: 10px;
@@ -397,18 +393,18 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
   text-overflow: ellipsis;
 }
 .perf-kpi-value {
-  font-size: 17px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
+  line-height: 1.2;
   white-space: nowrap;
 }
-.perf-kpi-value.sm { font-size: 13px; font-weight: 700; }
+.perf-kpi-value.sm { font-size: 13px; }
 
 /* Custom legend */
 .perf-legend-row {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   margin-bottom: 8px;
   flex-wrap: wrap;
 }
@@ -427,23 +423,16 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
   flex-shrink: 0;
 }
 .perf-legend-line--dashed {
-  background: repeating-linear-gradient(
-    to right,
-    currentColor 0, currentColor 4px,
-    transparent 4px, transparent 8px
-  );
+  background: none;
   height: 0;
   border-top: 2px dashed currentColor;
 }
 .perf-empty { padding: 32px 0; }
 
 @media (max-width: 540px) {
-  .perf-header { flex-direction: column; align-items: stretch; }
-  .perf-mode-group { width: 100%; }
-  .perf-mode-btn { flex: 1; text-align: center; padding: 8px 4px; }
-  .perf-chart-wrap { height: 180px; }
-  .perf-kpi-value { font-size: 15px; }
-  .perf-kpi { padding: 8px 9px; }
+  .perf-chart-wrap { height: 170px; }
+  .perf-kpi-value { font-size: 13px; }
+  .perf-kpi { padding: 7px 8px; }
 }
 
 .empty-state {
