@@ -102,6 +102,14 @@ class BinanceTrader:
                         return float(f["stepSize"])
         return 1e-8  # safe fallback
 
+    async def get_my_trades(self, symbol: str, limit: int = 10) -> list:
+        params = {"symbol": symbol, "limit": limit, "timestamp": int(time.time() * 1000)}
+        params["signature"] = _sign(params, self.api_secret)
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{BINANCE_BASE}/api/v3/myTrades", params=params, headers=self.headers)
+            r.raise_for_status()
+            return r.json()
+
     async def validate_keys(self) -> bool:
         try:
             await self.get_account()

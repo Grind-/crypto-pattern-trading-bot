@@ -950,6 +950,24 @@ async def live_performance(request: Request):
         except Exception:
             pass
 
+    # If buy_price is missing (e.g. crash before it was saved), reconstruct from
+    # Binance trade history so mark-to-market works correctly
+    if position == "IN_POSITION" and not buy_price and current_symbol:
+        try:
+            bkey = live_state.get("api_key", "")
+            bsec = live_state.get("api_secret", "")
+            if bkey and bsec:
+                _trader = BinanceTrader(bkey, bsec)
+                my_trades = await _trader.get_my_trades(current_symbol, limit=10)
+                last_buy = next((t for t in reversed(my_trades)
+                                 if t.get("isBuyer", False)), None)
+                if last_buy:
+                    buy_price = float(last_buy["price"])
+                    live_state["buy_price"] = buy_price
+                    save_live_state(user["username"], {"buy_price": buy_price})
+        except Exception:
+            pass
+
     # current_capital: mark-to-market when IN_POSITION, otherwise stored value
     if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
         latest_price = symbol_candles[-1]["close"]
@@ -1315,6 +1333,13 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             _persist_trade_history(username, live_state)
             append_trade_log(username, symbol, live_state["trade_history"][-1])
             save_live_state_snapshot(username, symbol, live_state)
+            # Persist buy_price + position to DB so it survives container restarts
+            save_live_state(username, {
+                "position": "IN_POSITION", "symbol": symbol,
+                "buy_price": buy_price, "current_capital": actual_capital,
+                "position_qty": bought_qty,
+                "trade_history": live_state.get("trade_history", []),
+            })
             _log(live_state, f"✅ KAUF {symbol} — {bought_qty:.6f} @ ${buy_price:,.4f} | Eingesetzt: ${actual_capital:.2f}")
             return True
         except Exception as e:
