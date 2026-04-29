@@ -184,6 +184,7 @@ async def _auto_resume_all():
             compounding_mode=saved.get("compounding_mode", "compound"),
             analysis_weight=int(saved.get("analysis_weight") or 70),
             min_confidence=int(saved.get("min_confidence") or 55),
+            min_confidence_sell=int(saved.get("min_confidence_sell") or 40),
             sl_atr_mult=float(saved.get("sl_atr_mult") or 1.5),
             tp_atr_mult=float(saved.get("tp_atr_mult") or 2.5),
         )
@@ -325,6 +326,8 @@ class SimRequest(BaseModel):
     fee_tier: str = "standard"
     compounding_mode: str = "compound"   # "fixed" | "compound" | "compound_wins"
     analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
+    min_confidence: int = 55             # minimum confidence % to execute BUY signals
+    min_confidence_sell: int = 40        # minimum confidence % to execute SELL signals
 
 
 class LiveRequest(BaseModel):
@@ -336,6 +339,7 @@ class LiveRequest(BaseModel):
     compounding_mode: str = "compound"   # "fixed" | "compound" | "compound_wins"
     analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
     min_confidence: int = 55             # minimum Claude confidence % to act on BUY
+    min_confidence_sell: int = 40        # minimum Claude confidence % to act on SELL
     sl_atr_mult: float = 1.5             # stop-loss = sl_atr_mult × ATR
     tp_atr_mult: float = 2.5             # take-profit = tp_atr_mult × ATR
 
@@ -786,6 +790,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
         "analysis_weight": req.analysis_weight,
         "min_confidence": req.min_confidence,
+        "min_confidence_sell": req.min_confidence_sell,
         "sl_atr_mult": req.sl_atr_mult,
         "tp_atr_mult": req.tp_atr_mult,
         "trade_history": [], "live_candles": [], "buy_price": None,
@@ -800,6 +805,7 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "position_qty": 0, "compounding_mode": req.compounding_mode, "position": "FLAT",
         "analysis_weight": req.analysis_weight,
         "min_confidence": req.min_confidence,
+        "min_confidence_sell": req.min_confidence_sell,
         "sl_atr_mult": req.sl_atr_mult,
         "tp_atr_mult": req.tp_atr_mult,
         "trade_history": [], "buy_price": None,
@@ -1050,6 +1056,20 @@ async def _sim_loop(req: SimRequest, fee_pct: float, username: str,
         signals = analysis.get("signals", [])
         _log(sim_state, f"Signals: {len(signals)} | Confidence: {analysis.get('confidence', 0)}%")
         _log(sim_state, f"Patterns: {', '.join(analysis.get('patterns_found', []))}")
+
+        # Apply confidence gates (same as live trading)
+        before = len(signals)
+        signals = [
+            s for s in signals
+            if not (
+                (s.get("action", "").upper() == "BUY"  and s.get("confidence", 0) < req.min_confidence)
+                or
+                (s.get("action", "").upper() == "SELL" and s.get("confidence", 0) < req.min_confidence_sell)
+            )
+        ]
+        dropped = before - len(signals)
+        if dropped:
+            _log(sim_state, f"Konfidenz-Filter: {dropped} Signal(e) entfernt (BUY<{req.min_confidence}% / SELL<{req.min_confidence_sell}%)")
 
         sim_result = run_simulation(
             candles=enriched, signals=signals,
@@ -1635,7 +1655,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 news_veto  = news_score.get("veto", False)
                 news_w     = regime_result.get("signal_weight_news", 30) / 100.0
                 vote = 1.0 if action == "BUY" else (-1.0 if action == "SELL" else 0.0)
-                news_mod = (news_sent / 100.0) * news_w
+                news_mod = ((news_sent / 100.0) - 0.5) * 2.0 * news_w   # bipolar: −news_w … +news_w
                 regime_boost = {"BULL_TREND": 0.3, "RANGING": 0.0, "BEAR_TREND": -0.3, "HIGH_VOLATILITY": -0.5}.get(regime_str, 0.0)
                 total_score = vote + news_mod + regime_boost
                 _d_vote, _d_news_mod, _d_regime_boost, _d_total = vote, news_mod, regime_boost, total_score
@@ -1663,21 +1683,19 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
 
             # ── Mindest-Konfidenz-Filter ──────────────────────────────────────────
             min_conf = live_state.get("min_confidence") or req.min_confidence
+            min_conf_sell = live_state.get("min_confidence_sell") or req.min_confidence_sell
             if action == "BUY" and not force_sell and confidence < min_conf:
                 action = "HOLD"
                 _d_overrides.append(f"BUY→HOLD: Konfidenz {confidence}% unter Mindest-Schwelle {min_conf}%")
                 _log(live_state, f"→ HOLD: Konfidenz {confidence}% < {min_conf}%")
+            if action == "SELL" and not force_sell and confidence < min_conf_sell:
+                action = "HOLD"
+                _d_overrides.append(f"SELL→HOLD: Konfidenz {confidence}% unter Mindest-Schwelle {min_conf_sell}%")
+                _log(live_state, f"→ HOLD: SELL Konfidenz {confidence}% < {min_conf_sell}%")
 
             # ── Agent 4: Risk sizing ─────────────────────────────────────────────
             risk_result = None
             if action == "BUY" and live_state["position"] == "FLAT":
-                regime_str = regime_result.get("regime", "RANGING")
-                news_sent  = news_score.get("sentiment_score", 50)
-                vote = 1.0 if action == "BUY" else (-1.0 if action == "SELL" else 0.0)
-                news_w     = regime_result.get("signal_weight_news", 30) / 100.0
-                news_mod = (news_sent / 100.0) * news_w
-                regime_boost = {"BULL_TREND": 0.3, "RANGING": 0.0, "BEAR_TREND": -0.3, "HIGH_VOLATILITY": -0.5}.get(regime_str, 0.0)
-                total_score = vote + news_mod + regime_boost
                 green = sum([
                     vote > 0,
                     news_sent >= 50,
@@ -1697,7 +1715,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     _log(live_state, f"🚫 Risk Agent blockiert ({green}/4 Signale grün)")
 
             # ── Execute signal ───────────────────────────────────────────────────
-            if action == "BUY" and live_state["position"] == "FLAT" and confidence >= 0:
+            if action == "BUY" and live_state["position"] == "FLAT":
                 capital = live_state.get("current_capital") or req.trade_amount_usdt
                 if risk_result and not risk_result["blocked"]:
                     sized_capital = round(capital * risk_result["position_size_pct"] / 100.0, 2)
@@ -1712,7 +1730,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 else:
                     _log(live_state, f"⚠ sized_capital {sized_capital:.2f} < $10 — kein Kauf")
 
-            elif action == "SELL" and live_state["position"] == "IN_POSITION" and (force_sell or confidence >= 0):
+            elif action == "SELL" and live_state["position"] == "IN_POSITION":
                 await _do_sell(force=force_sell, force_reason=force_sell_reason)
 
             elif action == "HOLD":
