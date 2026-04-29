@@ -183,6 +183,9 @@ async def _auto_resume_all():
             trade_amount_usdt=saved["trade_amount"],
             compounding_mode=saved.get("compounding_mode", "compound"),
             analysis_weight=int(saved.get("analysis_weight") or 70),
+            min_confidence=int(saved.get("min_confidence") or 55),
+            sl_atr_mult=float(saved.get("sl_atr_mult") or 1.5),
+            tp_atr_mult=float(saved.get("tp_atr_mult") or 2.5),
         )
         trader = BinanceTrader(bkey, bsec)
         valid = await trader.validate_keys()
@@ -332,6 +335,9 @@ class LiveRequest(BaseModel):
     trade_amount_usdt: float = 50.0
     compounding_mode: str = "compound"   # "fixed" | "compound" | "compound_wins"
     analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
+    min_confidence: int = 55             # minimum Claude confidence % to act on BUY
+    sl_atr_mult: float = 1.5             # stop-loss = sl_atr_mult × ATR
+    tp_atr_mult: float = 2.5             # take-profit = tp_atr_mult × ATR
 
 
 class TopupRequest(BaseModel):
@@ -779,6 +785,9 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "api_key": bkey, "api_secret": bsec,
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
         "analysis_weight": req.analysis_weight,
+        "min_confidence": req.min_confidence,
+        "sl_atr_mult": req.sl_atr_mult,
+        "tp_atr_mult": req.tp_atr_mult,
         "trade_history": [], "live_candles": [], "buy_price": None,
         "_session_token": session_token,
         "_username": username,
@@ -790,6 +799,9 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "trade_amount": req.trade_amount_usdt, "current_capital": req.trade_amount_usdt,
         "position_qty": 0, "compounding_mode": req.compounding_mode, "position": "FLAT",
         "analysis_weight": req.analysis_weight,
+        "min_confidence": req.min_confidence,
+        "sl_atr_mult": req.sl_atr_mult,
+        "tp_atr_mult": req.tp_atr_mult,
         "trade_history": [], "buy_price": None,
         "last_regime": None, "last_risk": None, "last_news_score": None,
     })
@@ -1649,6 +1661,13 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             else:
                 _d_overrides.append(f"Zwangsverkauf: {force_sell_reason}")
 
+            # ── Mindest-Konfidenz-Filter ──────────────────────────────────────────
+            min_conf = live_state.get("min_confidence") or req.min_confidence
+            if action == "BUY" and not force_sell and confidence < min_conf:
+                action = "HOLD"
+                _d_overrides.append(f"BUY→HOLD: Konfidenz {confidence}% unter Mindest-Schwelle {min_conf}%")
+                _log(live_state, f"→ HOLD: Konfidenz {confidence}% < {min_conf}%")
+
             # ── Agent 4: Risk sizing ─────────────────────────────────────────────
             risk_result = None
             if action == "BUY" and live_state["position"] == "FLAT":
@@ -1667,7 +1686,9 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 ])
                 _d_green = green
                 capital = live_state.get("current_capital") or req.trade_amount_usdt
-                risk_result = calculate_risk_params(enriched, capital, regime_str, green)
+                sl_mult = live_state.get("sl_atr_mult") or req.sl_atr_mult
+                tp_mult = live_state.get("tp_atr_mult") or req.tp_atr_mult
+                risk_result = calculate_risk_params(enriched, capital, regime_str, green, sl_mult, tp_mult)
                 live_state["last_risk"] = risk_result
                 _log(live_state, f"Risk: {risk_result['position_size_pct']}% Kapital | SL {risk_result['stop_loss_pct']:.2f}% | TP {risk_result['take_profit_pct']:.2f}%")
                 if risk_result["blocked"]:

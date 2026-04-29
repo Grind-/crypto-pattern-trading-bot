@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=9" />
+  <link rel="stylesheet" href="/static/style.css?v=10" />
 </head>
 <body>
   <header>
@@ -212,6 +212,21 @@
             Simulation gibt Einstiegsregeln vor, Marktanalyse filtert ungünstige Situationen.
           </div>
         </div>
+        <div class="field">
+          <label>Mindest-Konfidenz (BUY) <span style="color:var(--text-muted);font-weight:400">%</span></label>
+          <input id="live-min-confidence" type="number" value="55" min="30" max="90" step="5" onchange="saveUserSettings()" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Signal wird ignoriert, falls Claude unter diesem Wert liegt.</div>
+        </div>
+        <div class="field">
+          <label>Stop-Loss <span style="color:var(--text-muted);font-weight:400">× ATR</span></label>
+          <input id="live-sl-mult" type="number" value="1.5" min="0.5" max="4.0" step="0.5" onchange="saveUserSettings()" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">ATR-Multiplikator für Stop-Loss-Abstand.</div>
+        </div>
+        <div class="field">
+          <label>Take-Profit <span style="color:var(--text-muted);font-weight:400">× ATR</span></label>
+          <input id="live-tp-mult" type="number" value="2.5" min="1.0" max="8.0" step="0.5" onchange="saveUserSettings()" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">ATR-Multiplikator für Take-Profit-Ziel.</div>
+        </div>
       </div>
       <div class="btn-row">
         <button id="btn-live-start" class="btn btn-primary" onclick="startLive()">▶ Live Trading starten</button>
@@ -402,6 +417,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>

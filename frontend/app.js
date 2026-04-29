@@ -379,6 +379,9 @@ async function startLive() {
     trade_amount_usdt: parseFloat(document.getElementById('live-amount').value),
     compounding_mode: document.getElementById('live-compounding-mode').value,
     analysis_weight: rawWeight,
+    min_confidence: parseInt(document.getElementById('live-min-confidence')?.value ?? '55', 10),
+    sl_atr_mult: parseFloat(document.getElementById('live-sl-mult')?.value ?? '1.5'),
+    tp_atr_mult: parseFloat(document.getElementById('live-tp-mult')?.value ?? '2.5'),
   };
   const keyEl = document.getElementById('live-api-key');
   const secEl = document.getElementById('live-api-secret');
@@ -1163,6 +1166,9 @@ function saveUserSettings() {
       live_amount:           parseFloat(document.getElementById('live-amount')?.value) || 50,
       live_compounding_mode: document.getElementById('live-compounding-mode')?.value,
       live_analysis_weight:  parseInt(document.getElementById('live-analysis-weight')?.value) || 30,
+      live_min_confidence:   parseInt(document.getElementById('live-min-confidence')?.value) || 55,
+      live_sl_mult:          parseFloat(document.getElementById('live-sl-mult')?.value) || 1.5,
+      live_tp_mult:          parseFloat(document.getElementById('live-tp-mult')?.value) || 2.5,
       sim_symbol:            document.getElementById('symbol')?.value,
       sim_interval:          document.getElementById('interval')?.value,
       sim_days:              parseInt(document.getElementById('days')?.value) || 30,
@@ -1190,6 +1196,9 @@ async function loadUserSettings() {
     set('live-compounding-mode',  s.live_compounding_mode);
     set('live-analysis-weight',   s.live_analysis_weight);
     if (s.live_analysis_weight != null) updateWeightLabel(s.live_analysis_weight);
+    set('live-min-confidence',    s.live_min_confidence);
+    set('live-sl-mult',           s.live_sl_mult);
+    set('live-tp-mult',           s.live_tp_mult);
     set('symbol',                 s.sim_symbol);
     set('interval',               s.sim_interval);
     set('days',                   s.sim_days);
