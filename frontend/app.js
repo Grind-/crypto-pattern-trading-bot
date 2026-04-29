@@ -65,7 +65,6 @@ async function toggleApiKeyReveal() {
 // ── Chart instances ───────────────────────────────────────────────────────────
 let priceChart = null;
 let portfolioChart = null;
-let liveChart = null;
 let perfChart = null;
 let _perfMode = 'capital';
 let _perfData = null;
@@ -105,18 +104,6 @@ function initCharts() {
     datasets: [
       { label: 'Portfolio (USDT)', data: [], borderColor: '#bc8cff', borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: 'rgba(188,140,255,0.07)', tension: 0.1 },
       { label: 'Buy & Hold', data: [], borderColor: '#d29922', borderWidth: 1, borderDash: [4, 3], pointRadius: 0, tension: 0.1 },
-    ],
-  }, { ...chartDefaults });
-}
-
-function initLiveChart() {
-  if (liveChart) liveChart.destroy();
-  liveChart = mkChart('live-price-chart', 'line', {
-    labels: [],
-    datasets: [
-      { label: 'Live Preis', data: [], borderColor: '#58a6ff', borderWidth: 1.5, pointRadius: 0, tension: 0.1 },
-      { label: 'BUY', data: [], type: 'scatter', pointBackgroundColor: '#3fb950', pointRadius: 7, pointStyle: 'triangle' },
-      { label: 'SELL', data: [], type: 'scatter', pointBackgroundColor: '#f85149', pointRadius: 7, pointStyle: 'triangle' },
     ],
   }, { ...chartDefaults });
 }
@@ -350,10 +337,6 @@ let livePolling = null;
 let lastLiveLogLen = 0;
 let viewedSim = null;
 let _currentUsername = null;
-let _liveTradeOffset = 0;
-let _liveTradeHasMore = false;
-let _liveTradeSymbol = null;
-let _liveTradeTotal = 0;
 
 async function validateBinanceKeys() {
   const btn = document.getElementById('btn-validate-keys');
@@ -404,13 +387,6 @@ async function startLive() {
   if (!keyOk || !secOk) { alert('Bitte API Key und Secret eingeben.'); return; }
 
   lastLiveLogLen = 0;
-  _liveTradeOffset = 0;
-  _liveTradeSymbol = null;
-  _liveTradeTotal = 0;
-  document.getElementById('live-trade-tbody').innerHTML = '';
-  document.getElementById('no-live-trades').style.display = 'block';
-  document.getElementById('live-trade-table-wrap').style.display = 'none';
-  document.getElementById('btn-load-more-trades').style.display = 'none';
   document.getElementById('live-log-box').textContent = '';
 
   const r = await fetch('/api/live/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -425,9 +401,7 @@ async function startLive() {
   document.getElementById('btn-live-start').disabled = true;
   document.getElementById('btn-live-stop').disabled = false;
   document.getElementById('live-active-section').style.display = 'block';
-  document.getElementById('live-chart-title').textContent = `Live Preischart — ${body.symbol}`;
 
-  initLiveChart();
   livePolling = setInterval(pollLive, 5000);
 }
 
@@ -518,10 +492,7 @@ function startCountdown(ts) {
 }
 
 async function pollLive() {
-  const [state, chartData] = await Promise.all([
-    fetch('/api/live/status').then(r => r.json()),
-    fetch('/api/live/chart-data').then(r => r.json()).catch(() => null),
-  ]);
+  const state = await fetch('/api/live/status').then(r => r.json());
 
   document.getElementById('live-status-text').textContent = state.status || 'idle';
 
@@ -626,21 +597,6 @@ async function pollLive() {
   }
 
   renderLastDecision(state.last_decision);
-
-  if (chartData) {
-    updateLiveChart(chartData);
-    if (state.symbol && _currentUsername) {
-      const symbolChanged = state.symbol !== _liveTradeSymbol;
-      const newTradesArrived = !symbolChanged && (chartData.trade_history || []).length !== _liveTradeTotal;
-      if (symbolChanged || newTradesArrived) {
-        loadLiveTradeHistory(_currentUsername, state.symbol, true);
-      }
-    }
-    if (state.symbol) {
-      document.getElementById('live-chart-title').textContent = `Live Preischart — ${state.symbol}`;
-    }
-  }
-
   loadPerformance();
 
   if (!state.running && livePolling) {
@@ -771,36 +727,6 @@ function renderLastDecision(d) {
   } else {
     riskSec.style.display = 'none';
   }
-}
-
-function updateLiveChart(data) {
-  if (!liveChart) return;
-  const candles = data.candles || [];
-  if (candles.length === 0) return;
-
-  const labels = candles.map(c => new Date(c.timestamp).toLocaleDateString('de-DE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
-  const prices = candles.map(c => c.close);
-
-  // Map trade markers to candle indices by closest timestamp
-  const buys = [];
-  const sells = [];
-  (data.trade_history || []).forEach(t => {
-    let bestIdx = 0;
-    let bestDiff = Infinity;
-    candles.forEach((c, i) => {
-      const diff = Math.abs(c.timestamp - t.timestamp);
-      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-    });
-    const pt = { x: bestIdx, y: t.price };
-    if (t.type === 'BUY') buys.push(pt);
-    else if (t.type === 'SELL') sells.push(pt);
-  });
-
-  liveChart.data.labels = labels;
-  liveChart.data.datasets[0].data = prices;
-  liveChart.data.datasets[1].data = buys;
-  liveChart.data.datasets[2].data = sells;
-  liveChart.update();
 }
 
 // ── Performance chart ─────────────────────────────────────────────────────────
@@ -965,66 +891,6 @@ function renderPerfChart(data, mode) {
       },
     });
   }
-}
-
-async function loadLiveTradeHistory(username, symbol, reset = false) {
-  if (!username || !symbol) return;
-  if (reset) {
-    _liveTradeOffset = 0;
-    _liveTradeSymbol = symbol;
-    document.getElementById('live-trade-tbody').innerHTML = '';
-  }
-  const url = `/api/trades/${encodeURIComponent(username)}/${encodeURIComponent(symbol)}?limit=20&offset=${_liveTradeOffset}`;
-  let data;
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return;
-    data = await r.json();
-  } catch { return; }
-
-  const trades = data.trades || [];
-  _liveTradeHasMore = data.has_more === true;
-
-  if (trades.length === 0 && _liveTradeOffset === 0) {
-    document.getElementById('no-live-trades').style.display = 'block';
-    document.getElementById('live-trade-table-wrap').style.display = 'none';
-    document.getElementById('btn-load-more-trades').style.display = 'none';
-    return;
-  }
-
-  document.getElementById('no-live-trades').style.display = 'none';
-  document.getElementById('live-trade-table-wrap').style.display = 'block';
-
-  const tbody = document.getElementById('live-trade-tbody');
-  const startIdx = _liveTradeOffset;
-  trades.forEach((t, i) => {
-    const tr = document.createElement('tr');
-    const pnl = t.pnl_pct;
-    const pnlCell = pnl != null
-      ? `<td class="${pnl >= 0 ? 'pnl-pos' : 'pnl-neg'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%</td>`
-      : '<td style="color:var(--text-muted)">—</td>';
-    const time = new Date(t.timestamp).toLocaleString('de-DE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-    tr.innerHTML = `
-      <td>${startIdx + i + 1}</td>
-      <td>${t.symbol || '—'}</td>
-      <td style="color:${t.type === 'BUY' ? '#3fb950' : t.type === 'SELL' ? '#f85149' : '#d29922'};font-weight:600">${t.type}</td>
-      <td>$${t.price.toFixed(2)}</td>
-      <td style="color:var(--text-muted);font-size:11px">${time}</td>
-      ${pnlCell}
-    `;
-    tbody.appendChild(tr);
-  });
-
-  _liveTradeOffset += trades.length;
-  _liveTradeTotal = data.total;
-
-  const btn = document.getElementById('btn-load-more-trades');
-  if (btn) btn.style.display = _liveTradeHasMore ? 'block' : 'none';
-}
-
-async function loadMoreTrades() {
-  if (!_liveTradeHasMore) return;
-  await loadLiveTradeHistory(_currentUsername, _liveTradeSymbol, false);
 }
 
 // ── Market scanner ────────────────────────────────────────────────────────────
@@ -1373,18 +1239,6 @@ async function initPage() {
         const kbPct = 100 - w;
         const weightTag = `<span style="color:var(--text-muted);font-size:11px;margin-left:6px">${kbPct}% KB · ${w}% Markt</span>`;
         basisEl.innerHTML = `<span style="color:var(--blue);font-weight:600">Wissensbasis</span>${weightTag}`;
-      }
-
-      document.getElementById('live-chart-title').textContent = `Live Preischart — ${state.symbol || ''}`;
-      initLiveChart();
-
-      // Load initial chart data
-      const chartData = await fetch('/api/live/chart-data').then(r => r.json()).catch(() => null);
-      if (chartData) {
-        updateLiveChart(chartData);
-        if (state.symbol && _currentUsername) {
-          loadLiveTradeHistory(_currentUsername, state.symbol, true);
-        }
       }
 
       livePolling = setInterval(pollLive, 5000);

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=8" />
+  <link rel="stylesheet" href="/static/style.css?v=9" />
 </head>
 <body>
   <header>
@@ -347,31 +347,6 @@
         <div id="perf-empty" class="empty-state perf-empty" style="display:none">Noch keine abgeschlossenen Trades.</div>
       </div>
 
-      <div class="card">
-        <h2 id="live-chart-title">Live Preischart</h2>
-        <div class="chart-wrap">
-          <canvas id="live-price-chart"></canvas>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Ausgeführte Trades</h2>
-        <div id="no-live-trades" class="empty-state">Noch keine Trades ausgeführt.</div>
-        <div class="table-wrap" id="live-trade-table-wrap" style="display:none">
-          <table>
-            <thead>
-              <tr><th>#</th><th>Symbol</th><th>Seite</th><th>Preis</th><th>Zeit</th><th>P&amp;L</th></tr>
-            </thead>
-            <tbody id="live-trade-tbody"></tbody>
-          </table>
-        </div>
-        <div style="text-align:center;margin-top:10px">
-          <button id="btn-load-more-trades" class="btn btn-secondary btn-sm"
-                  onclick="loadMoreTrades()" style="display:none">
-            Ältere laden
-          </button>
-        </div>
-      </div>
     </div>
 
 
@@ -427,6 +402,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>
