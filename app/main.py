@@ -933,9 +933,29 @@ async def live_performance(request: Request):
 
     trade_history = live_state.get("trade_history", [])
     trade_amount = float(live_state.get("trade_amount") or 50.0)
-    current_capital = float(live_state.get("current_capital") or trade_amount)
     compounding_mode = live_state.get("compounding_mode", "compound")
     now_ms = int(time.time() * 1000)
+    position = live_state.get("position", "FLAT")
+    buy_price = live_state.get("buy_price")
+    committed = float(live_state.get("current_capital") or trade_amount)
+    current_symbol = live_state.get("symbol", "")
+
+    # Mark-to-market: fetch recent candles for the held symbol so the chart
+    # shows unrealized P&L even right after a restart (live_candles may be empty)
+    symbol_candles: list = live_state.get("live_candles", [])
+    if position == "IN_POSITION" and current_symbol and len(symbol_candles) < 2:
+        try:
+            symbol_candles = await fetch_latest_klines(current_symbol,
+                live_state.get("interval", "1h"), limit=100)
+        except Exception:
+            pass
+
+    # current_capital: mark-to-market when IN_POSITION, otherwise stored value
+    if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
+        latest_price = symbol_candles[-1]["close"]
+        current_capital = round(committed * (latest_price / buy_price), 2)
+    else:
+        current_capital = committed
 
     sorted_trades = sorted(trade_history, key=lambda x: x.get("timestamp", 0))
     start_ts = sorted_trades[0]["timestamp"] if sorted_trades else (now_ms - 86_400_000)
@@ -957,10 +977,6 @@ async def live_performance(request: Request):
 
     # Capital series — enrich with mark-to-market points from live_candles
     # so the chart shows unrealized P&L while IN_POSITION, not just a flat line
-    live_candles = live_state.get("live_candles", [])
-    position = live_state.get("position", "FLAT")
-    buy_price = live_state.get("buy_price")
-
     # Build a map: ts → realised capital (step function value at that point in time)
     # Then for candles inside an open position, overlay mark-to-market value
     cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
@@ -973,9 +989,8 @@ async def live_performance(request: Request):
         last_sell_ts = ts_sell
 
     # If currently IN_POSITION with known buy_price, add intra-position candle points
-    if position == "IN_POSITION" and buy_price and buy_price > 0 and live_candles:
-        committed = live_state.get("current_capital") or trade_amount
-        for c in live_candles:
+    if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
+        for c in symbol_candles:
             c_ts = c.get("timestamp", 0)
             if c_ts <= last_sell_ts:
                 continue  # before or at last sell — skip
