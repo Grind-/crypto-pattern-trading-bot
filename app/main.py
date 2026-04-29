@@ -31,6 +31,7 @@ from .news_analyst import run_news_cycle, get_news_intelligence
 from .risk_agent import calculate_risk_params
 from .news_analyst import get_news_score_for_symbol
 from .simulator import run_simulation, FEE_TIERS
+from .calibration import calibrate_thresholds, calibration_meta
 from .binance_trader import BinanceTrader
 from .state_store import (save_live_state, load_live_state, clear_live_state,
                           deactivate_live_state, update_position)
@@ -251,6 +252,7 @@ async def _auto_resume_all():
             "last_regime": None,
             "last_risk": None,
             "last_news_score": None,
+            "calibrated_thresholds": saved.get("calibrated_thresholds") or {},
         })
         update_position(username, reconciled_position)
         asyncio.create_task(_live_loop(req, username, api_key, oauth_token, session_token))
@@ -282,6 +284,7 @@ def _default_live_state() -> dict:
         "trade_history": [], "live_candles": [], "buy_price": None,
         "sl_pct": None, "tp_pct": None,
         "last_regime": None, "last_risk": None, "last_news_score": None,
+        "calibrated_thresholds": {},
     }
 
 
@@ -922,8 +925,11 @@ async def validate_binance_keys(req: BinanceValidateRequest, request: Request):
 async def live_status(request: Request):
     user = _get_current_user(request)
     live_state = _get_live_state(user["username"])
-    return {k: v for k, v in live_state.items()
-            if k not in ("api_key", "api_secret", "live_candles")}
+    result = {k: v for k, v in live_state.items()
+              if k not in ("api_key", "api_secret", "live_candles")
+              and not k.startswith("_")}
+    result["calibration_meta"] = calibration_meta(live_state.get("trade_history", []))
+    return result
 
 
 @app.get("/api/live/performance")
@@ -1340,6 +1346,12 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 "position_qty": bought_qty,
                 "trade_history": live_state.get("trade_history", []),
             })
+            # Annotate the BUY trade record with the voting context for calibration
+            for t in reversed(live_state["trade_history"]):
+                if t["type"] == "BUY" and t.get("voting_score") is None:
+                    t["voting_score"]  = live_state.get("_last_buy_voting_score")
+                    t["voting_regime"] = live_state.get("_last_buy_voting_regime")
+                    break
             _log(live_state, f"✅ KAUF {symbol} — {bought_qty:.6f} @ ${buy_price:,.4f} | Eingesetzt: ${actual_capital:.2f}")
             return True
         except Exception as e:
@@ -1730,13 +1742,12 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 live_state["signals"] = live_state["signals"][-500:]
 
             # ── Voting matrix ────────────────────────────────────────────────────
-            # Regime-specific BUY threshold: in RANGING the max score with 100% news is
-            # 1.0+0.30+0.0=1.30, so a flat 1.3 was unreachable with any real news (<100%).
             _BUY_THRESHOLDS = {"BULL_TREND": 0.8, "RANGING": 1.0, "BEAR_TREND": 1.2, "HIGH_VOLATILITY": 999.0}
             buy_threshold = 1.0  # default, overridden below after regime_str is set
             if not force_sell:
                 regime_str = regime_result.get("regime", "RANGING")
-                buy_threshold = _BUY_THRESHOLDS.get(regime_str, 1.0)
+                calibrated = live_state.get("calibrated_thresholds") or {}
+                buy_threshold = calibrated.get(regime_str) or _BUY_THRESHOLDS.get(regime_str, 1.0)
                 news_sent  = news_score.get("sentiment_score", 50)
                 news_veto  = news_score.get("veto", False)
                 news_w     = regime_result.get("signal_weight_news", 30) / 100.0
@@ -1781,6 +1792,10 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
 
             # ── Agent 4: Risk sizing ─────────────────────────────────────────────
             risk_result = None
+            # Stash voting context so _do_buy can annotate the trade record
+            live_state["_last_buy_voting_score"]  = _d_total
+            live_state["_last_buy_voting_regime"] = regime_str if not force_sell else None
+
             if action == "BUY" and live_state["position"] == "FLAT":
                 green = sum([
                     vote > 0,
@@ -1817,7 +1832,14 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     _log(live_state, f"⚠ sized_capital {sized_capital:.2f} < $10 — kein Kauf")
 
             elif action == "SELL" and live_state["position"] == "IN_POSITION":
-                await _do_sell(force=force_sell, force_reason=force_sell_reason)
+                sold, _ = await _do_sell(force=force_sell, force_reason=force_sell_reason)
+                if sold:
+                    new_thresholds = calibrate_thresholds(live_state.get("trade_history", []))
+                    if new_thresholds:
+                        live_state["calibrated_thresholds"] = new_thresholds
+                        save_live_state(username, {"calibrated_thresholds": new_thresholds,
+                                                   "trade_history": live_state.get("trade_history", [])})
+                        _log(live_state, f"📐 Kalibrierung aktualisiert: {new_thresholds}")
 
             elif action == "HOLD":
                 _log(live_state, f"→ HALTEN (Konfidenz: {confidence}%, Position: {live_state['position']})")

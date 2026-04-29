@@ -7,19 +7,26 @@ from sqlalchemy import delete, insert, select, update
 from .database import engine, live_states
 
 
+_JSON_LIST_FIELDS = ("strategy_patterns", "trade_history")
+_JSON_DICT_FIELDS = ("calibrated_thresholds",)
+
+
 def _serialize(config: dict) -> dict:
-    """Convert list fields to JSON strings for storage."""
+    """Convert list/dict fields to JSON strings for storage."""
     row = dict(config)
-    for key in ("strategy_patterns", "trade_history"):
+    for key in _JSON_LIST_FIELDS:
         if key in row and not isinstance(row[key], str):
             row[key] = json.dumps(row[key])
+    for key in _JSON_DICT_FIELDS:
+        if key in row and not isinstance(row[key], str):
+            row[key] = json.dumps(row[key]) if row[key] is not None else None
     return row
 
 
 def _deserialize(row: dict) -> dict:
     """Convert JSON string fields back to Python objects."""
     result = dict(row)
-    for key in ("strategy_patterns", "trade_history"):
+    for key in _JSON_LIST_FIELDS:
         val = result.get(key)
         if isinstance(val, str):
             try:
@@ -28,6 +35,15 @@ def _deserialize(row: dict) -> dict:
                 result[key] = []
         elif val is None:
             result[key] = []
+    for key in _JSON_DICT_FIELDS:
+        val = result.get(key)
+        if isinstance(val, str):
+            try:
+                result[key] = json.loads(val)
+            except Exception:
+                result[key] = {}
+        elif val is None:
+            result[key] = {}
     return result
 
 

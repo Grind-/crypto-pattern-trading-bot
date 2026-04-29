@@ -57,9 +57,10 @@ live_states = Table(
     Column("trade_history",      Text),   # JSON list
     Column("current_capital",    Float),  # dynamic: grows/shrinks with each trade
     Column("position_qty",       Float),  # exact crypto qty bought by the bot (not full wallet)
-    Column("compounding_mode",   Text),   # "fixed" | "compound" | "compound_wins"
-    Column("analysis_weight",    Integer, default=70),
-    Column("updated_at",         Text),
+    Column("compounding_mode",       Text),   # "fixed" | "compound" | "compound_wins"
+    Column("analysis_weight",        Integer, default=70),
+    Column("calibrated_thresholds",  Text),   # JSON dict {regime: threshold}
+    Column("updated_at",             Text),
 )
 
 simulations = Table(
@@ -109,7 +110,10 @@ def _migrate_add_columns() -> None:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} TEXT"))
             except Exception:
                 pass  # column already exists
-        for live_col in ("current_capital REAL", "position_qty REAL", "compounding_mode TEXT", "analysis_weight INTEGER"):
+        for live_col in ("current_capital REAL", "position_qty REAL", "compounding_mode TEXT",
+                         "analysis_weight INTEGER", "calibrated_thresholds TEXT",
+                         "buy_price REAL", "min_confidence INTEGER", "min_confidence_sell INTEGER",
+                         "sl_atr_mult REAL", "tp_atr_mult REAL"):
             try:
                 conn.execute(text(f"ALTER TABLE live_states ADD COLUMN {live_col}"))
             except Exception:

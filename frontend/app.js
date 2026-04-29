@@ -599,7 +599,7 @@ async function pollLive() {
     lastLiveLogLen = log.length;
   }
 
-  renderLastDecision(state.last_decision);
+  renderLastDecision(state.last_decision, state.calibration_meta);
   loadPerformance();
 
   if (!state.running && livePolling) {
@@ -613,7 +613,58 @@ async function pollLive() {
   }
 }
 
-function renderLastDecision(d) {
+function renderCalibration(el, meta, currentScore, currentRegime) {
+  if (!meta) { el.innerHTML = ''; return; }
+  const { active, paired_trades, by_regime, defaults, min_total } = meta;
+  const label = active
+    ? `<span style="font-size:10px;font-weight:700;color:#58a6ff;border:1px solid #58a6ff;border-radius:4px;padding:1px 6px">KALIBRIERT</span>`
+    : `<span style="font-size:10px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:1px 6px">STANDARD</span>`;
+  const need = Math.max(0, min_total - paired_trades);
+  const progressNote = !active
+    ? `<span style="font-size:11px;color:var(--text-muted)">Noch ${need} Trade${need===1?'':'s'} bis zur ersten Kalibrierung</span>`
+    : `<span style="font-size:11px;color:var(--text-muted)">Basierend auf ${paired_trades} abgeschlossenen Trades</span>`;
+
+  const regimeNames = {BULL_TREND:'Bull',RANGING:'Ranging',BEAR_TREND:'Bear',HIGH_VOLATILITY:'High Vol'};
+  const rows = Object.entries(defaults)
+    .filter(([r]) => r !== 'HIGH_VOLATILITY')
+    .map(([regime, def]) => {
+      const info = by_regime?.[regime];
+      const calib = info?.threshold;
+      const samples = info?.samples || 0;
+      const wr = info?.win_rate;
+      const isCurrent = regime === currentRegime;
+      const thresh = calib ?? def;
+      const passes = currentScore != null && currentScore >= thresh;
+      const calibHtml = calib != null
+        ? `<span style="color:#58a6ff;font-weight:600">${calib.toFixed(2)}</span><span style="font-size:10px;color:var(--text-muted)"> (${samples}T, ${wr}% W)</span>`
+        : `<span style="color:var(--text-muted)">—</span><span style="font-size:10px;color:var(--text-muted)"> (${samples}/${meta.min_samples} nötig)</span>`;
+      const highlight = isCurrent ? 'background:rgba(88,166,255,0.07);border-radius:4px;' : '';
+      const passIcon = isCurrent && currentScore != null
+        ? `<span style="margin-left:4px;font-size:10px;color:${passes?'#3fb950':'#f85149'}">${passes?'✓':'✗'}</span>` : '';
+      return `<tr style="${highlight}">
+        <td style="padding:2px 6px;font-size:11px;color:${isCurrent?'var(--text)':'var(--text-muted)'}${isCurrent?';font-weight:600':''}">${regimeNames[regime]||regime}${passIcon}</td>
+        <td style="padding:2px 6px;font-size:11px;color:var(--text-muted);text-align:right">${def.toFixed(2)}</td>
+        <td style="padding:2px 8px;font-size:11px;text-align:right">${calibHtml}</td>
+      </tr>`;
+    }).join('');
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Schwellenwert-Kalibrierung</span>
+      ${label}
+    </div>
+    ${progressNote}
+    <table style="width:100%;border-collapse:collapse;margin-top:8px">
+      <thead><tr>
+        <th style="font-size:10px;color:var(--text-muted);font-weight:500;text-align:left;padding:0 6px 4px">Regime</th>
+        <th style="font-size:10px;color:var(--text-muted);font-weight:500;text-align:right;padding:0 6px 4px">Standard</th>
+        <th style="font-size:10px;color:var(--text-muted);font-weight:500;text-align:right;padding:0 8px 4px">Kalibriert</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderLastDecision(d, calibMeta) {
   const card = document.getElementById('live-decision-card');
   if (!card) return;
   if (!d) { card.style.display = 'none'; return; }
@@ -705,6 +756,10 @@ function renderLastDecision(d) {
   } else {
     voteSection.style.display = 'none';
   }
+
+  // Calibration info
+  const calibSec = document.getElementById('dec-calibration-section');
+  if (calibSec) renderCalibration(calibSec, calibMeta, d?.voting?.total_score, d?.regime?.type);
 
   // Overrides
   const overSec = document.getElementById('dec-overrides-section');
