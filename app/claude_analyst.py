@@ -52,12 +52,16 @@ REGIME_AGENT_SYSTEM = (
 
 
 def _format_data(candles: List[Dict], max_rows: int = 80) -> str:
-    step = max(1, len(candles) // max_rows)
-    sampled = candles[::step][:max_rows]
+    n = len(candles)
+    step = max(1, n // max_rows)
+    # Sample evenly then keep the LAST max_rows entries so the most recent
+    # candles are always included and rolling-indicator NaN warmup rows
+    # (first ~20) are dropped from the visible window.
+    all_sampled = [(i, candles[i]) for i in range(0, n, step)]
+    sampled_pairs = all_sampled[-max_rows:]
 
     rows = ["idx  | close    | rsi   | macd     | bb_pct | vol_x | ch4h%", "-" * 65]
-    for i, entry in enumerate(sampled):
-        orig_idx = i * step
+    for orig_idx, entry in sampled_pairs:
         close = entry.get("close", 0)
         rsi   = entry.get("rsi")
         macd  = entry.get("macd")

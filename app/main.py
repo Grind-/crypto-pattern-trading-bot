@@ -1147,14 +1147,23 @@ async def _scan_and_maybe_switch(interval: str, current_symbol: str, position: s
             return current_symbol or "BTCUSDC"
         if position == "FLAT":
             if best != current_symbol:
-                if current_symbol:
-                    _log(live_state, f"🔄 Wechsel: {current_symbol} → {best} | {rec[:100]}")
+                # Require 2 consecutive scans picking the same candidate before
+                # switching — prevents ping-pong between near-equal symbols.
+                prev = live_state.get("_scanner_candidate")
+                if prev == best:
+                    live_state["_scanner_candidate"] = None
+                    if current_symbol:
+                        _log(live_state, f"🔄 Wechsel: {current_symbol} → {best} | {rec[:100]}")
+                    else:
+                        _log(live_state, f"🤖 Agent wählt: {best} | {rec[:100]}")
+                    live_state["symbol"] = best
+                    update_position(username, "FLAT")
+                    return best
                 else:
-                    _log(live_state, f"🤖 Agent wählt: {best} | {rec[:100]}")
-                live_state["symbol"] = best
-                update_position(username, "FLAT")
-                return best
+                    live_state["_scanner_candidate"] = best
+                    _log(live_state, f"👀 Scanner favorisiert {best} — warte auf Bestätigung nächste Kerze")
             else:
+                live_state["_scanner_candidate"] = None
                 _log(live_state, f"✓ Scanner bestätigt {current_symbol} als bestes Setup")
         else:
             if best != position_symbol:
