@@ -1612,8 +1612,13 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 live_state["signals"] = live_state["signals"][-500:]
 
             # ── Voting matrix ────────────────────────────────────────────────────
+            # Regime-specific BUY threshold: in RANGING the max score with 100% news is
+            # 1.0+0.30+0.0=1.30, so a flat 1.3 was unreachable with any real news (<100%).
+            _BUY_THRESHOLDS = {"BULL_TREND": 0.8, "RANGING": 1.0, "BEAR_TREND": 1.2, "HIGH_VOLATILITY": 999.0}
+            buy_threshold = 1.0  # default, overridden below after regime_str is set
             if not force_sell:
                 regime_str = regime_result.get("regime", "RANGING")
+                buy_threshold = _BUY_THRESHOLDS.get(regime_str, 1.0)
                 news_sent  = news_score.get("sentiment_score", 50)
                 news_veto  = news_score.get("veto", False)
                 news_w     = regime_result.get("signal_weight_news", 30) / 100.0
@@ -1622,7 +1627,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 regime_boost = {"BULL_TREND": 0.3, "RANGING": 0.0, "BEAR_TREND": -0.3, "HIGH_VOLATILITY": -0.5}.get(regime_str, 0.0)
                 total_score = vote + news_mod + regime_boost
                 _d_vote, _d_news_mod, _d_regime_boost, _d_total = vote, news_mod, regime_boost, total_score
-                _log(live_state, f"Vote: Signal={vote:+.1f} News={news_mod:+.2f} Regime={regime_boost:+.1f} → {total_score:+.2f}")
+                _log(live_state, f"Vote: Signal={vote:+.1f} News={news_mod:+.2f} Regime={regime_boost:+.1f} → {total_score:+.2f} (Schwelle {buy_threshold:.1f} für {regime_str})")
 
                 if regime_str == "HIGH_VOLATILITY" and action == "BUY":
                     action = "HOLD"
@@ -1632,10 +1637,10 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     action = "HOLD"
                     _d_overrides.append("BUY blockiert: News-Veto")
                     _log(live_state, f"🚫 BUY blockiert: News-Veto")
-                if action == "BUY" and total_score < 1.3:
+                if action == "BUY" and total_score < buy_threshold:
                     action = "HOLD"
-                    _d_overrides.append(f"BUY→HOLD: Voting-Score {total_score:.2f} unter Schwellenwert 1.3")
-                    _log(live_state, f"→ HOLD: Score {total_score:.2f} < 1.3")
+                    _d_overrides.append(f"BUY→HOLD: Voting-Score {total_score:.2f} unter Schwellenwert {buy_threshold:.1f} ({regime_str})")
+                    _log(live_state, f"→ HOLD: Score {total_score:.2f} < {buy_threshold:.1f} ({regime_str})")
                 if action == "SELL" and live_state["position"] == "IN_POSITION" and total_score > -0.8:
                     if not force_sell:
                         action = "HOLD"
@@ -1658,7 +1663,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     vote > 0,
                     news_sent >= 50,
                     regime_str not in ("BEAR_TREND", "HIGH_VOLATILITY"),
-                    total_score >= 1.3,
+                    total_score >= buy_threshold,
                 ])
                 _d_green = green
                 capital = live_state.get("current_capital") or req.trade_amount_usdt
