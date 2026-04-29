@@ -330,41 +330,29 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 .perf-chart-wrap { height: 230px; }
 
 /* ── Performance card ──────────────────────────────────────────────────── */
-.perf-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 
-/* Mode buttons — match btn-tiny / badge style used elsewhere in the app */
+/* Mini tab bar — same visual language as the main .tabs navigation */
 .perf-mode-group {
   display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin: -4px 0 14px;
 }
 .perf-mode-btn {
-  background: var(--surface2);
-  border: 1px solid var(--border);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   color: var(--text-muted);
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 7px 14px 7px 0;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: color .15s, border-color .15s, background .15s;
+  transition: color .15s, border-bottom-color .15s;
   white-space: nowrap;
-  line-height: 1.6;
 }
-.perf-mode-btn:hover { color: var(--text); border-color: rgba(139,148,158,0.5); }
-.perf-mode-btn.active {
-  background: rgba(88,166,255,0.12);
-  border-color: rgba(88,166,255,0.4);
-  color: var(--blue);
-}
+.perf-mode-btn + .perf-mode-btn { padding-left: 14px; }
+.perf-mode-btn:hover { color: var(--text); }
+.perf-mode-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
 
 /* KPI grid — aligned with .metric sizing used in sim tab */
 .perf-kpi-row {
@@ -430,6 +418,7 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 .perf-empty { padding: 32px 0; }
 
 @media (max-width: 540px) {
+  .perf-mode-group { margin-top: -2px; }
   .perf-chart-wrap { height: 170px; }
   .perf-kpi-value { font-size: 13px; }
   .perf-kpi { padding: 7px 8px; }

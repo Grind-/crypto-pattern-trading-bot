@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=7" />
+  <link rel="stylesheet" href="/static/style.css?v=8" />
 </head>
 <body>
   <header>
@@ -333,13 +333,11 @@
 
       <!-- Performance Chart -->
       <div class="card" id="live-perf-card" style="display:none">
-        <div class="perf-header">
-          <h2 style="margin:0">Performance</h2>
-          <div class="perf-mode-group">
-            <button class="perf-mode-btn active" data-mode="capital" onclick="setPerfMode('capital')">Kapital</button>
-            <button class="perf-mode-btn" data-mode="pct" onclick="setPerfMode('pct')">% vs. BTC</button>
-            <button class="perf-mode-btn" data-mode="trades" onclick="setPerfMode('trades')">Trades</button>
-          </div>
+        <h2>Performance</h2>
+        <div class="perf-mode-group">
+          <button class="perf-mode-btn active" data-mode="capital" onclick="setPerfMode('capital')">Kapital</button>
+          <button class="perf-mode-btn" data-mode="pct" onclick="setPerfMode('pct')">% vs. BTC</button>
+          <button class="perf-mode-btn" data-mode="trades" onclick="setPerfMode('trades')">Trades</button>
         </div>
         <div id="perf-kpi-row" class="perf-kpi-row" style="display:none"></div>
         <div id="perf-legend-row" class="perf-legend-row" style="display:none"></div>
@@ -429,6 +427,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>
