@@ -828,88 +828,142 @@ function renderPerfChart(data, mode) {
   if (!card) return;
   card.style.display = 'block';
 
-  const summaryRow = document.getElementById('perf-summary-row');
-  const emptyEl    = document.getElementById('perf-empty');
-  const wrapEl     = document.getElementById('perf-chart-wrap');
+  const kpiRow    = document.getElementById('perf-kpi-row');
+  const legendRow = document.getElementById('perf-legend-row');
+  const emptyEl   = document.getElementById('perf-empty');
+  const wrapEl    = document.getElementById('perf-chart-wrap');
 
-  // Summary bar
+  // ── KPI cards ──────────────────────────────────────────────────────────
   if (data.summary) {
     const s = data.summary;
     const sign = v => v >= 0 ? '+' : '';
     const col  = v => v >= 0 ? 'var(--green)' : 'var(--red)';
-    summaryRow.innerHTML =
-      `<div class="perf-stat"><span class="perf-stat-label">Start</span><span class="perf-stat-value">$${s.start_capital.toFixed(2)}</span></div>` +
-      `<div class="perf-stat"><span class="perf-stat-label">Aktuell</span><span class="perf-stat-value">$${s.current_capital.toFixed(2)}</span></div>` +
-      `<div class="perf-stat"><span class="perf-stat-label">Bot Return</span><span class="perf-stat-value" style="color:${col(s.bot_pct)}">${sign(s.bot_pct)}${s.bot_pct.toFixed(2)}%</span></div>` +
+    const kpi  = (label, val, cls = '') =>
+      `<div class="perf-kpi"><span class="perf-kpi-label">${label}</span>` +
+      `<span class="perf-kpi-value ${cls}">${val}</span></div>`;
+    const delta = s.current_capital - s.start_capital;
+    const deltaStr = `${delta >= 0 ? '+' : ''}$${Math.abs(delta).toFixed(2)}`;
+    kpiRow.innerHTML =
+      kpi('Start', `$${s.start_capital.toFixed(2)}`) +
+      kpi('Aktuell', `$${s.current_capital.toFixed(2)}`) +
+      kpi('P&L', `<span style="color:${col(delta)}">${deltaStr}</span>`) +
+      kpi('Return', `<span style="color:${col(s.bot_pct)}">${sign(s.bot_pct)}${s.bot_pct.toFixed(2)}%</span>`) +
       (s.btc_pct != null
-        ? `<div class="perf-stat"><span class="perf-stat-label">BTC Benchmark</span><span class="perf-stat-value" style="color:${col(s.btc_pct)}">${sign(s.btc_pct)}${s.btc_pct.toFixed(2)}%</span></div>`
+        ? kpi('BTC', `<span style="color:${col(s.btc_pct)}">${sign(s.btc_pct)}${s.btc_pct.toFixed(2)}%</span>`)
         : '') +
-      `<div class="perf-stat"><span class="perf-stat-label">Trades</span><span class="perf-stat-value">${s.num_sells}</span></div>`;
-    summaryRow.style.display = 'flex';
+      kpi('Trades', String(s.num_sells), 'sm');
+    kpiRow.style.display = 'grid';
   }
 
   if (perfChart) { perfChart.destroy(); perfChart = null; }
+  legendRow.innerHTML = ''; legendRow.style.display = 'none';
 
-  const fmtTs = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  const fmtTs  = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
   const fmtDay = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric'});
+  const noLegend = { plugins: { legend: { display: false } } };
 
+  const showEmpty = () => { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; };
+  const showChart = () => { emptyEl.style.display = 'none';  wrapEl.style.display = ''; };
+
+  // ── Mode: Kapitalwert ─────────────────────────────────────────────────
   if (mode === 'capital') {
     const series = data.capital_series || [];
-    if (series.length < 2) { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; return; }
-    emptyEl.style.display = 'none'; wrapEl.style.display = '';
+    if (series.length < 2) { showEmpty(); return; }
+    showChart();
     const first = series[0].usdc, last = series[series.length - 1].usdc;
-    const lineCol = last >= first ? '#3fb950' : '#f85149';
-    const fillCol = last >= first ? 'rgba(63,185,80,0.1)' : 'rgba(248,81,73,0.1)';
+    const up = last >= first;
+    const lineCol = up ? '#3fb950' : '#f85149';
+    const fillCol = up ? 'rgba(63,185,80,0.08)' : 'rgba(248,81,73,0.08)';
     perfChart = mkChart('perf-chart', 'line', {
       labels: series.map(p => fmtTs(p.ts)),
       datasets: [{
-        label: 'Kapital (USDC)', data: series.map(p => p.usdc),
-        borderColor: lineCol, borderWidth: 2,
-        pointRadius: series.length <= 6 ? 4 : 2,
-        fill: true, backgroundColor: fillCol, tension: 0, stepped: 'after',
+        label: 'Kapital', data: series.map(p => p.usdc),
+        borderColor: lineCol, borderWidth: 2.5,
+        pointRadius: series.length <= 8 ? 4 : 0,
+        pointHoverRadius: 5,
+        fill: true, backgroundColor: fillCol,
+        tension: 0, stepped: 'after',
       }],
-    }, { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
-        ticks: { color: '#8b949e', font: {size:10}, callback: v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) }
-    }}});
+    }, { ...chartDefaults, ...noLegend,
+      scales: { ...chartDefaults.scales,
+        y: { ticks: { color:'#8b949e', font:{size:10},
+              callback: v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) },
+             grid: { color:'#21262d' } },
+      },
+      plugins: { ...noLegend.plugins,
+        tooltip: { callbacks: {
+          label: ctx => `$${ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`,
+        }},
+      },
+    });
 
+  // ── Mode: % vs. BTC ───────────────────────────────────────────────────
   } else if (mode === 'pct') {
     const bot = data.bot_pct_series || [];
     const btc = data.btc_pct_series || [];
-    if (bot.length < 2 && !btc.length) { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; return; }
-    emptyEl.style.display = 'none'; wrapEl.style.display = '';
-    const pctOpts = { ...chartDefaults, scales: {
-      x: { type: 'linear', ticks: { color:'#8b949e', font:{size:10}, maxTicksLimit:8, callback: v => fmtDay(v) }, grid: {color:'#21262d'} },
-      y: { ticks: { color:'#8b949e', font:{size:10}, callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' }, grid: {color:'#21262d'} },
-    }};
+    if (bot.length < 2 && !btc.length) { showEmpty(); return; }
+    showChart();
+    // custom legend
+    legendRow.innerHTML =
+      `<div class="perf-legend-item"><div class="perf-legend-line" style="background:#58a6ff"></div>Bot</div>` +
+      (btc.length ? `<div class="perf-legend-item"><div class="perf-legend-line" style="border-top:2px dashed #f0a500;background:none"></div>BTC</div>` : '');
+    legendRow.style.display = 'flex';
     perfChart = mkChart('perf-chart', 'line', { datasets: [
-      { label: 'Bot', data: bot.map(p => ({x: p.ts, y: p.pct})), parsing: false,
-        borderColor: '#58a6ff', borderWidth: 2, pointRadius: bot.length <= 6 ? 4 : 1,
+      { label: 'Bot',
+        data: bot.map(p => ({x: p.ts, y: p.pct})), parsing: false,
+        borderColor: '#58a6ff', borderWidth: 2.5,
+        pointRadius: bot.length <= 8 ? 4 : 0, pointHoverRadius: 5,
         fill: false, tension: 0, stepped: 'after' },
-      ...(btc.length ? [{ label: 'BTC Benchmark', data: btc.map(p => ({x: p.ts, y: p.pct})), parsing: false,
-        borderColor: '#f0a500', borderWidth: 1.5, borderDash: [5,4], pointRadius: 0,
+      ...(btc.length ? [{
+        label: 'BTC',
+        data: btc.map(p => ({x: p.ts, y: p.pct})), parsing: false,
+        borderColor: '#f0a500', borderWidth: 1.5, borderDash: [5,4],
+        pointRadius: 0, pointHoverRadius: 4,
         fill: false, tension: 0.1 }] : []),
-    ]}, pctOpts);
+    ]}, { ...chartDefaults, ...noLegend,
+      scales: {
+        x: { type:'linear', ticks:{ color:'#8b949e', font:{size:10}, maxTicksLimit:6,
+              callback: v => fmtDay(v) }, grid:{color:'#21262d'} },
+        y: { ticks:{ color:'#8b949e', font:{size:10},
+              callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' },
+             grid:{ color: ctx => ctx.tick.value === 0 ? 'rgba(139,148,158,0.4)' : '#21262d' } },
+      },
+      plugins: { ...noLegend.plugins,
+        tooltip: { callbacks: {
+          label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}%`,
+        }},
+      },
+    });
 
+  // ── Mode: Trade P&L ───────────────────────────────────────────────────
   } else if (mode === 'trades') {
     const pnl = data.trade_pnl || [];
-    if (!pnl.length) { emptyEl.style.display = 'block'; wrapEl.style.display = 'none'; return; }
-    emptyEl.style.display = 'none'; wrapEl.style.display = '';
+    if (!pnl.length) { showEmpty(); return; }
+    showChart();
     perfChart = mkChart('perf-chart', 'bar', {
-      labels: pnl.map((_, i) => `#${i+1}`),
+      labels: pnl.map((t, i) => `#${i + 1}`),
       datasets: [{
-        label: 'P&L %', data: pnl.map(t => t.pct),
+        label: 'P&L',
+        data: pnl.map(t => t.pct),
         backgroundColor: pnl.map(t => t.pct >= 0 ? 'rgba(63,185,80,0.75)' : 'rgba(248,81,73,0.75)'),
         borderColor:     pnl.map(t => t.pct >= 0 ? '#3fb950' : '#f85149'),
-        borderWidth: 1, borderRadius: 3,
+        borderWidth: 1, borderRadius: 4,
       }],
-    }, { ...chartDefaults, plugins: { ...chartDefaults.plugins,
-        tooltip: { callbacks: { label: ctx => {
-          const t = pnl[ctx.dataIndex];
-          return `${t.symbol}: ${t.pct >= 0 ? '+' : ''}${t.pct.toFixed(2)}%`;
-        }}}},
-      scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
-        ticks: { color:'#8b949e', font:{size:10}, callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' }
-    }}});
+    }, { ...chartDefaults, ...noLegend,
+      scales: { ...chartDefaults.scales,
+        y: { ticks:{ color:'#8b949e', font:{size:10},
+              callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' },
+             grid:{ color: ctx => ctx.tick.value === 0 ? 'rgba(139,148,158,0.4)' : '#21262d' } },
+      },
+      plugins: { ...noLegend.plugins,
+        tooltip: { callbacks: {
+          label: ctx => {
+            const t = pnl[ctx.dataIndex];
+            return `${t.symbol}: ${t.pct >= 0 ? '+' : ''}${t.pct.toFixed(2)}%`;
+          },
+        }},
+      },
+    });
   }
 }
 

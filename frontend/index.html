@@ -336,16 +336,17 @@
         <div class="perf-header">
           <span class="perf-title">Performance</span>
           <div class="perf-mode-group">
-            <button class="perf-mode-btn active" data-mode="capital" onclick="setPerfMode('capital')">Kapitalwert</button>
+            <button class="perf-mode-btn active" data-mode="capital" onclick="setPerfMode('capital')">Kapital</button>
             <button class="perf-mode-btn" data-mode="pct" onclick="setPerfMode('pct')">% vs. BTC</button>
-            <button class="perf-mode-btn" data-mode="trades" onclick="setPerfMode('trades')">Trade P&amp;L</button>
+            <button class="perf-mode-btn" data-mode="trades" onclick="setPerfMode('trades')">Trades</button>
           </div>
         </div>
-        <div id="perf-summary-row" class="perf-summary-row" style="display:none"></div>
+        <div id="perf-kpi-row" class="perf-kpi-row" style="display:none"></div>
+        <div id="perf-legend-row" class="perf-legend-row" style="display:none"></div>
         <div id="perf-chart-wrap" class="chart-wrap perf-chart-wrap">
           <canvas id="perf-chart"></canvas>
         </div>
-        <div id="perf-empty" class="empty-state" style="display:none;padding:30px 0">Noch keine abgeschlossenen Trades.</div>
+        <div id="perf-empty" class="empty-state perf-empty" style="display:none">Noch keine abgeschlossenen Trades.</div>
       </div>
 
       <div class="card">
@@ -428,6 +429,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=5"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>
