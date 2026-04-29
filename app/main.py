@@ -1236,7 +1236,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 _log(live_state, f"⚠ Kauf: executedQty=0 — bleibt FLAT")
                 live_state["position"] = "FLAT"
                 return False
-            buy_price = candles[-1]["close"] if candles else actual_capital / bought_qty
+            cumm_quote = float(order.get("cummulativeQuoteQty", 0))
+            buy_price = (cumm_quote / bought_qty) if bought_qty > 0 else (actual_capital / bought_qty)
             position_symbol = symbol
             live_state["position"]        = "IN_POSITION"
             live_state["symbol"]          = symbol
