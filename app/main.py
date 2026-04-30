@@ -2913,7 +2913,10 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                         action     = signal.get("action", "HOLD")
                         confidence = signal.get("confidence", 0)
                         if action != "BUY" or confidence < min_buy:
-                            _log(live_state, f"⏭ {sym}: {action} {confidence}% (Min {min_buy}%) — kein Kauf")
+                            if action != "BUY":
+                                _log(live_state, f"⏭ {sym}: Agent sagt {action} — kein Kauf")
+                            else:
+                                _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {min_buy}% — kein Kauf")
                             continue
 
                         # Confidence-tier sizing
