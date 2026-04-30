@@ -1335,7 +1335,8 @@ async def live_performance(request: Request):
     live_state = _get_live_state(user["username"])
 
     trade_history = live_state.get("trade_history", [])
-    trade_amount = float(live_state.get("trade_amount") or 50.0)
+    _raw_ta = live_state.get("trade_amount")
+    trade_amount = float(_raw_ta) if _raw_ta else 50.0
     compounding_mode = live_state.get("compounding_mode", "compound")
     now_ms = int(time.time() * 1000)
     position = live_state.get("position", "FLAT")
@@ -2588,7 +2589,17 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 detected += 1
                 _log(live_state, f"✓ Erkannt: {amt:.6f} {asset} (~${value:.2f}) — als Position übernommen")
             _persist_trade_history(username, live_state)
-            live_state["portfolio_free_usdc"] = balances.get("USDC", 0.0)
+            free_usdc_start = balances.get("USDC", 0.0)
+            live_state["portfolio_free_usdc"] = free_usdc_start
+            # Compute real starting capital = free USDC + all position values
+            pos_value = sum(
+                float(s.get("position_qty", 0)) * float(s.get("current_price") or s.get("buy_price") or 0)
+                for s in live_state["portfolio_positions"].values()
+            )
+            real_start = round(free_usdc_start + pos_value, 2)
+            if real_start > 0:
+                live_state["trade_amount"] = real_start
+            _log(live_state, f"💰 Startkapital: ${real_start:.2f} USDC (frei: ${free_usdc_start:.2f}, Positionen: ${pos_value:.2f})")
             if detected == 0:
                 _log(live_state, "Keine bestehenden Positionen erkannt — warte auf Signale")
         except Exception as e:
