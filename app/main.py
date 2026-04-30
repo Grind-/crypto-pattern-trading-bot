@@ -341,18 +341,20 @@ def _default_live_state() -> dict:
 def _add_synthetic_buy_if_needed(live_state: dict, username: str, symbol: str,
                                   price: float, qty: float) -> None:
     """Add a synthetic BUY record when startup detects existing crypto holdings.
-    Only adds if no unmatched BUY already exists in trade_history (avoids duplicates)."""
+    Only adds if no unmatched BUY for this symbol already exists in trade_history."""
     hist = live_state.get("trade_history", [])
-    # Check if the most recent relevant entry is already an unmatched BUY
+    # Check symbol-specific: scan history for the most recent BUY/SELL pair for this symbol
     pending_buy = None
     for t in reversed(hist):
+        if t.get("symbol") != symbol:
+            continue
         if t.get("type") == "BUY":
             pending_buy = t
             break
         if t.get("type") == "SELL":
-            break  # found a sell before any buy — no pending BUY
+            break  # found a sell before any buy for this symbol — no pending BUY
     if pending_buy is not None:
-        return  # already have an open BUY
+        return  # already have an open BUY for this symbol
     hist.append({
         "type": "BUY", "symbol": symbol,
         "price": price, "timestamp": int(time.time() * 1000),
@@ -2383,6 +2385,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
     trader = BinanceTrader(req.api_key, req.api_secret)
     interval_seconds = _interval_to_seconds(req.interval)
     CLOSE_BUFFER = 10
+    from .news_fetcher import _fetch_fear_greed  # local import shared by both phases
 
     def _next_close() -> float:
         now = time.time()
@@ -2466,9 +2469,9 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             fees  = sum(float(f["commission"]) for f in order.get("fills", [])
                         if f.get("commissionAsset", "").upper() == "USDC")
             net   = (gross - fees) if gross > 0 else 0.0
-            sell_price = (gross / qty) if qty > 0 and gross > 0 else 0.0
+            sell_price = (gross / qty) if qty > 0 and gross > 0 else slot.get("current_price") or 0.0
             buy_p = float(slot.get("buy_price") or sell_price or 1.0)
-            pnl_pct = (sell_price - buy_p) / buy_p * 100 if buy_p else 0.0
+            pnl_pct = (sell_price - buy_p) / buy_p * 100 if (buy_p and sell_price > 0) else None
             reason_str = f" [{force_reason}]" if force_reason else ""
             live_state["trade_history"].append({
                 "type": "SELL", "symbol": symbol,
@@ -2568,15 +2571,63 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
 
             live_state["_cycle_running"] = True
 
-            # ── Update free USDC for UI ──────────────────────────────────
+            # ── Per-cycle reconciliation: sync portfolio_positions with Binance ─
             try:
                 balances = await trader.get_balances()
                 live_state["portfolio_free_usdc"] = balances.get("USDC", 0.0)
-            except Exception:
+
+                # Remove positions where the asset is no longer held on Binance
+                for sym in list(live_state["portfolio_positions"].keys()):
+                    base = sym.replace("USDC", "").replace("USDT", "")
+                    actual_qty = float(balances.get(base, 0.0))
+                    expected_qty = float(live_state["portfolio_positions"][sym].get("position_qty") or 0)
+                    if actual_qty < max(expected_qty * 0.1, 0.0001):
+                        _log(live_state, f"↩ {sym}: nicht mehr auf Account (erwartet {expected_qty:.6f}, "
+                             f"vorhanden {actual_qty:.6f}) — aus Portfolio entfernt")
+                        live_state["portfolio_positions"].pop(sym, None)
+                    else:
+                        live_state["portfolio_positions"][sym]["position_qty"] = actual_qty
+
+                # Detect newly-held assets not yet in portfolio_positions
+                for asset, amt in balances.items():
+                    if asset in ("USDC", "USDT") or float(amt) <= 0:
+                        continue
+                    sym = f"{asset}USDC"
+                    if sym in live_state["portfolio_positions"]:
+                        continue
+                    if len(live_state["portfolio_positions"]) >= PORTFOLIO_MAX_POSITIONS:
+                        continue
+                    try:
+                        sym_exists = await trader.symbol_exists(sym)
+                    except Exception:
+                        sym_exists = False
+                    if not sym_exists:
+                        continue
+                    try:
+                        cur_price = await trader.get_price(sym)
+                    except Exception:
+                        cur_price = 0.0
+                    value = float(amt) * cur_price
+                    if value < PORTFOLIO_MIN_ORDER_USDC:
+                        continue
+                    live_state["portfolio_positions"][sym] = {
+                        "symbol": sym, "position_qty": float(amt),
+                        "buy_price": cur_price, "current_price": cur_price,
+                        "entry_ts": int(time.time() * 1000),
+                        "sl_pct": None, "tp_pct": None,
+                        "sl_price": None, "tp_price": None,
+                        "allocated_usdc": value,
+                        "order_id": "cycle_detected",
+                        "last_signal": "", "last_confidence": 0,
+                    }
+                    _add_synthetic_buy_if_needed(live_state, username, sym, cur_price, float(amt))
+                    _persist_trade_history(username, live_state)
+                    _log(live_state, f"↺ {sym}: neu erkannt ({float(amt):.6f} ~${value:.2f}) — in Portfolio aufgenommen")
+            except Exception as e:
+                _log(live_state, f"⚠ Portfolio-Abgleich fehlgeschlagen: {e}")
                 balances = {}
 
             # ── Phase 1: review existing positions ────────────────────────
-            from .news_fetcher import _fetch_fear_greed
             for sym in list(live_state["portfolio_positions"].keys()):
                 slot = live_state["portfolio_positions"].get(sym)
                 if not slot:
@@ -2589,6 +2640,26 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 except Exception as e:
                     _log(live_state, f"⚠ {sym}: Daten-Fetch fehlgeschlagen ({e})")
                     continue
+
+                # Calculate SL/TP from candles if not set (startup/cycle-detected positions)
+                if enriched and slot.get("sl_pct") is None:
+                    try:
+                        risk_default = calculate_risk_params(
+                            enriched, float(slot.get("allocated_usdc") or 50),
+                            "RANGING",
+                            signals_count_green=3,
+                            sl_atr_mult=(live_state.get("sl_atr_mult") or req.sl_atr_mult),
+                            tp_atr_mult=(live_state.get("tp_atr_mult") or req.tp_atr_mult),
+                        )
+                        if not risk_default.get("blocked"):
+                            bp = float(slot.get("buy_price") or price)
+                            slot["sl_pct"] = risk_default["stop_loss_pct"]
+                            slot["tp_pct"] = risk_default["take_profit_pct"]
+                            slot["sl_price"] = round(bp * (1 - risk_default["stop_loss_pct"] / 100), 8)
+                            slot["tp_price"] = round(bp * (1 + risk_default["take_profit_pct"] / 100), 8)
+                            _log(live_state, f"ℹ {sym}: SL/TP berechnet — SL {slot['sl_pct']:.2f}% / TP {slot['tp_pct']:.2f}%")
+                    except Exception:
+                        pass
 
                 # SL/TP check
                 buy_p = float(slot.get("buy_price") or 0)
@@ -2628,10 +2699,12 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                               "recommended_strategy": "mean_revert",
                               "signal_weight_technical": 70, "signal_weight_news": 30}
                 news_score = get_news_score_for_symbol(sym)
+                sym_history = [t for t in live_state.get("trade_history", [])
+                               if t.get("symbol") == sym or not t.get("symbol")]
                 signal = await get_live_signal(
                     symbol=sym, interval=req.interval, candles=enriched,
                     current_position="IN_POSITION", username=username,
-                    signal_history=[], trade_history=live_state.get("trade_history", []),
+                    signal_history=[], trade_history=sym_history,
                     analysis_weight=req.analysis_weight,
                     api_key=api_key, oauth_token=oauth_token,
                     regime=regime, news_score=news_score,
@@ -2708,10 +2781,12 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             _log(live_state, f"⏭ {sym}: News-Veto — übersprungen")
                             continue
 
+                        sym_history = [t for t in live_state.get("trade_history", [])
+                                       if t.get("symbol") == sym or not t.get("symbol")]
                         signal = await get_live_signal(
                             symbol=sym, interval=req.interval, candles=enriched,
                             current_position="FLAT", username=username,
-                            signal_history=[], trade_history=live_state.get("trade_history", []),
+                            signal_history=[], trade_history=sym_history,
                             analysis_weight=req.analysis_weight,
                             api_key=api_key, oauth_token=oauth_token,
                             regime=regime, news_score=news_score,

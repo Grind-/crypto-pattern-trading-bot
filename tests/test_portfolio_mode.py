@@ -478,11 +478,11 @@ class TestFrontendSourcePortfolio(unittest.TestCase):
 
     def test_version_bumped_css(self):
         html = self._html()
-        self.assertIn("style.css?v=16", html)
+        self.assertIn("style.css?v=17", html)
 
     def test_version_bumped_js(self):
         html = self._html()
-        self.assertIn("app.js?v=16", html)
+        self.assertIn("app.js?v=17", html)
 
     def test_start_button_has_label_span(self):
         html = self._html()
