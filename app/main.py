@@ -2788,6 +2788,12 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             if slots_free <= 0:
                 _log(live_state, f"Portfolio voll ({open_count}/{PORTFOLIO_MAX_POSITIONS}) — keine neuen Käufe")
             else:
+                # Re-fetch USDC balance — Phase 1 sells may have freed capital
+                try:
+                    bal_p2 = await trader.get_balances()
+                    live_state["portfolio_free_usdc"] = bal_p2.get("USDC", 0.0)
+                except Exception:
+                    pass
                 free_usdc = live_state.get("portfolio_free_usdc", 0.0)
 
                 # ── Scan always runs first to get candidates ──────────────
