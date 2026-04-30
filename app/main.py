@@ -43,7 +43,7 @@ from .user_store import (init_users, list_users, get_user, authenticate,
                          update_claude_config, set_platform_access,
                          get_claude_api_key, get_claude_oauth_token,
                          uses_platform, uses_subscription,
-                         save_binance_keys, get_binance_keys)
+                         save_binance_keys, get_binance_keys, set_email)
 from .knowledge_store import (append_trade_log, load_trade_log,
                                save_live_state_snapshot, load_live_state_snapshot,
                                load_user_settings, save_user_settings,
@@ -176,10 +176,13 @@ async def _auto_resume_all():
             continue
 
         saved_symbol = saved.get("symbol") or ""
+        saved_mode = (saved.get("strategy_name") or "single").strip()
+        if saved_mode not in ("single", "portfolio"):
+            saved_mode = "single"
         req = LiveRequest(
             api_key=bkey,
             api_secret=bsec,
-            symbol=saved_symbol,
+            symbol="" if saved_mode == "portfolio" else saved_symbol,
             interval=saved["interval"],
             trade_amount_usdt=saved["trade_amount"],
             compounding_mode=saved.get("compounding_mode", "compound"),
@@ -188,6 +191,8 @@ async def _auto_resume_all():
             min_confidence_sell=int(saved.get("min_confidence_sell") or 40),
             sl_atr_mult=float(saved.get("sl_atr_mult") or 1.5),
             tp_atr_mult=float(saved.get("tp_atr_mult") or 2.5),
+            mode=saved_mode,
+            max_per_position=float(saved.get("max_per_position") or 0.0),
         )
         trader = BinanceTrader(bkey, bsec)
         valid = await trader.validate_keys()
@@ -195,67 +200,108 @@ async def _auto_resume_all():
             deactivate_live_state(username)
             continue
 
-        # Reconcile state against actual Binance holdings (only when symbol is known)
-        reconciled_position = saved.get("position", "FLAT")
-        reconciled_qty = saved.get("position_qty") or 0
-        reconciled_buy_price = saved.get("buy_price")
-        if saved_symbol:
-            try:
-                balances = await trader.get_balances()
-                usdc = balances.get("USDC", 0.0)
-                base_asset = saved_symbol.replace("USDC", "").replace("USDT", "")
-                crypto_held = balances.get(base_asset, 0.0)
-                if reconciled_position == "IN_POSITION" and crypto_held <= 0:
-                    logger.warning(f"[{username}] Resume desync: saved=IN_POSITION but {base_asset}=0 → FLAT")
-                    reconciled_position = "FLAT"
-                    reconciled_qty = 0
-                    reconciled_buy_price = None
-                elif reconciled_position == "FLAT" and crypto_held > 0 and usdc < 10.0:
-                    logger.info(f"[{username}] Resume: found {crypto_held} {base_asset}, no USDC → IN_POSITION")
-                    reconciled_position = "IN_POSITION"
-                    reconciled_qty = crypto_held
-            except Exception as e:
-                logger.warning(f"[{username}] Could not reconcile on resume: {e}")
-
         api_key, oauth_token = _claude_creds(username)
         session_token = str(uuid.uuid4())
         state = _get_live_state(username)
-        snapshot = load_live_state_snapshot(username, saved_symbol) if saved_symbol else None
         resumed_log = load_live_log(username)
         resumed_log.append("── Bot neu gestartet, Trading fortgesetzt ──")
-        state.update({
-            "running": True,
-            "status": "active",
-            "position": reconciled_position,
-            "symbol": saved_symbol,
-            "interval": req.interval,
-            "trade_amount": req.trade_amount_usdt,
-            "current_capital": saved.get("current_capital") or req.trade_amount_usdt,
-            "position_qty": reconciled_qty,
-            "compounding_mode": req.compounding_mode,
-            "signals": [],
-            "log": resumed_log,
-            "api_key": req.api_key,
-            "api_secret": req.api_secret,
-            "next_check_ts": None,
-            "next_check_str": None,
-            "candle_count": 0,
-            "analysis_weight": req.analysis_weight,
-            "trade_history": saved.get("trade_history", []),
-            "live_candles": [],
-            "buy_price": reconciled_buy_price or (snapshot or {}).get("buy_price"),
-            "sl_pct": (snapshot or saved).get("sl_pct"),
-            "tp_pct": (snapshot or saved).get("tp_pct"),
-            "_session_token": session_token,
-            "_username": username,
-            "_is_resume": True,
-            "last_regime": None,
-            "last_risk": None,
-            "last_news_score": None,
-            "calibrated_thresholds": saved.get("calibrated_thresholds") or {},
-        })
-        update_position(username, reconciled_position)
-        asyncio.create_task(_live_loop(req, username, api_key, oauth_token, session_token))
+
+        if saved_mode == "portfolio":
+            state.update({
+                "running": True,
+                "status": "active",
+                "position": "FLAT",
+                "symbol": "",
+                "interval": req.interval,
+                "trade_amount": req.trade_amount_usdt,
+                "current_capital": saved.get("current_capital") or req.trade_amount_usdt,
+                "position_qty": 0,
+                "compounding_mode": req.compounding_mode,
+                "signals": [],
+                "log": resumed_log,
+                "api_key": req.api_key,
+                "api_secret": req.api_secret,
+                "next_check_ts": None,
+                "next_check_str": None,
+                "candle_count": 0,
+                "analysis_weight": req.analysis_weight,
+                "min_confidence": req.min_confidence,
+                "min_confidence_sell": req.min_confidence_sell,
+                "sl_atr_mult": req.sl_atr_mult,
+                "tp_atr_mult": req.tp_atr_mult,
+                "trade_history": saved.get("trade_history", []),
+                "live_candles": [],
+                "buy_price": None,
+                "_session_token": session_token,
+                "_username": username,
+                "_is_resume": True,
+                "last_regime": None,
+                "last_risk": None,
+                "last_news_score": None,
+                "calibrated_thresholds": saved.get("calibrated_thresholds") or {},
+                "mode": "portfolio",
+                "portfolio_positions": {},  # loop will rebuild from balances
+                "max_per_position": req.max_per_position,
+            })
+            asyncio.create_task(_portfolio_loop(req, username, api_key, oauth_token, session_token))
+        else:
+            # Single mode: reconcile state against actual Binance holdings
+            reconciled_position = saved.get("position", "FLAT")
+            reconciled_qty = saved.get("position_qty") or 0
+            reconciled_buy_price = saved.get("buy_price")
+            if saved_symbol:
+                try:
+                    balances = await trader.get_balances()
+                    usdc = balances.get("USDC", 0.0)
+                    base_asset = saved_symbol.replace("USDC", "").replace("USDT", "")
+                    crypto_held = balances.get(base_asset, 0.0)
+                    if reconciled_position == "IN_POSITION" and crypto_held <= 0:
+                        logger.warning(f"[{username}] Resume desync: saved=IN_POSITION but {base_asset}=0 → FLAT")
+                        reconciled_position = "FLAT"
+                        reconciled_qty = 0
+                        reconciled_buy_price = None
+                    elif reconciled_position == "FLAT" and crypto_held > 0 and usdc < 10.0:
+                        logger.info(f"[{username}] Resume: found {crypto_held} {base_asset}, no USDC → IN_POSITION")
+                        reconciled_position = "IN_POSITION"
+                        reconciled_qty = crypto_held
+                except Exception as e:
+                    logger.warning(f"[{username}] Could not reconcile on resume: {e}")
+
+            snapshot = load_live_state_snapshot(username, saved_symbol) if saved_symbol else None
+            state.update({
+                "running": True,
+                "status": "active",
+                "position": reconciled_position,
+                "symbol": saved_symbol,
+                "interval": req.interval,
+                "trade_amount": req.trade_amount_usdt,
+                "current_capital": saved.get("current_capital") or req.trade_amount_usdt,
+                "position_qty": reconciled_qty,
+                "compounding_mode": req.compounding_mode,
+                "signals": [],
+                "log": resumed_log,
+                "api_key": req.api_key,
+                "api_secret": req.api_secret,
+                "next_check_ts": None,
+                "next_check_str": None,
+                "candle_count": 0,
+                "analysis_weight": req.analysis_weight,
+                "trade_history": saved.get("trade_history", []),
+                "live_candles": [],
+                "buy_price": reconciled_buy_price or (snapshot or {}).get("buy_price"),
+                "sl_pct": (snapshot or saved).get("sl_pct"),
+                "tp_pct": (snapshot or saved).get("tp_pct"),
+                "_session_token": session_token,
+                "_username": username,
+                "_is_resume": True,
+                "last_regime": None,
+                "last_risk": None,
+                "last_news_score": None,
+                "calibrated_thresholds": saved.get("calibrated_thresholds") or {},
+                "mode": "single",
+            })
+            update_position(username, reconciled_position)
+            asyncio.create_task(_live_loop(req, username, api_key, oauth_token, session_token))
 
 
 # ── Per-user state ────────────────────────────────────────────────────────────
@@ -286,7 +332,86 @@ def _default_live_state() -> dict:
         "last_regime": None, "last_risk": None, "last_news_score": None,
         "calibrated_thresholds": {},
         "_cycle_running": False,
+        "mode": "single",
+        "portfolio_positions": {},
+        "max_per_position": 0.0,
     }
+
+
+def _add_synthetic_buy_if_needed(live_state: dict, username: str, symbol: str,
+                                  price: float, qty: float) -> None:
+    """Add a synthetic BUY record when startup detects existing crypto holdings.
+    Only adds if no unmatched BUY already exists in trade_history (avoids duplicates)."""
+    hist = live_state.get("trade_history", [])
+    # Check if the most recent relevant entry is already an unmatched BUY
+    pending_buy = None
+    for t in reversed(hist):
+        if t.get("type") == "BUY":
+            pending_buy = t
+            break
+        if t.get("type") == "SELL":
+            break  # found a sell before any buy — no pending BUY
+    if pending_buy is not None:
+        return  # already have an open BUY
+    hist.append({
+        "type": "BUY", "symbol": symbol,
+        "price": price, "timestamp": int(time.time() * 1000),
+        "order_id": "startup_detected", "pnl_pct": None, "qty": qty,
+    })
+    live_state["trade_history"] = hist
+
+
+def _build_capital_series(
+    sorted_trades: list,
+    trade_amount: float,
+    compounding_mode: str,
+    position: str,
+    buy_price,
+    committed: float,
+    symbol_candles: list,
+    now_ms: int,
+    current_capital: float,
+    start_ts: int,
+) -> tuple[list[tuple[int, float]], dict[int, float]]:
+    sell_checkpoints: dict[int, float] = {}
+    running_cap = trade_amount
+    for t in sorted_trades:
+        if t["type"] == "SELL" and t.get("pnl_pct") is not None:
+            pnl = t["pnl_pct"]
+            if compounding_mode == "fixed":
+                running_cap = trade_amount
+            elif compounding_mode == "compound_wins":
+                running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
+            else:
+                running_cap = round(running_cap * (1 + pnl / 100), 2)
+            sell_checkpoints[t["timestamp"]] = running_cap
+
+    cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
+    last_realised = trade_amount
+    last_sell_ts = start_ts
+    for ts_sell, cap_after in sorted(sell_checkpoints.items()):
+        cap_series_raw.append((ts_sell, cap_after))
+        last_realised = cap_after
+        last_sell_ts = ts_sell
+
+    if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
+        for c in symbol_candles:
+            c_ts = c.get("timestamp", 0)
+            if c_ts <= last_sell_ts:
+                continue
+            mtm_cap = round(last_realised - committed + committed * (c["close"] / buy_price), 2)
+            cap_series_raw.append((c_ts, mtm_cap))
+
+    cap_series_raw.append((now_ms, current_capital))
+    cap_series_raw.sort(key=lambda x: x[0])
+
+    # Deduplicate: keep last value per timestamp (later = more accurate)
+    deduped: dict[int, float] = {}
+    for ts, cap in cap_series_raw:
+        deduped[ts] = cap
+    cap_series_raw = sorted(deduped.items())
+
+    return cap_series_raw, sell_checkpoints
 
 
 def _claude_creds(username: str) -> tuple[Optional[str], str]:
@@ -346,6 +471,8 @@ class LiveRequest(BaseModel):
     min_confidence_sell: int = 40        # minimum Claude confidence % to act on SELL
     sl_atr_mult: float = 1.5             # stop-loss = sl_atr_mult × ATR
     tp_atr_mult: float = 2.5             # take-profit = tp_atr_mult × ATR
+    mode: str = "single"                 # "single" | "portfolio"
+    max_per_position: float = 0.0        # 0 = no per-position cap
 
 
 class TopupRequest(BaseModel):
@@ -382,6 +509,26 @@ async def do_logout(request: Request, response: Response):
     _SESSIONS.pop(token, None)
     response.delete_cookie("session")
     return RedirectResponse("/login", status_code=302)
+
+
+@app.post("/api/admin/switch-user")
+async def admin_switch_user(body: dict, request: Request, response: Response):
+    """Admin-only: create a session for another user without needing their password."""
+    admin = _require_admin(request)
+    target = (body.get("username") or "").strip().lower()
+    if not target:
+        raise HTTPException(400, "username erforderlich")
+    target_user = get_user(target)
+    if not target_user or not target_user.get("enabled"):
+        raise HTTPException(404, "User nicht gefunden oder deaktiviert")
+    # Invalidate old session
+    old_token = request.cookies.get("session", "")
+    _SESSIONS.pop(old_token, None)
+    # Create new session for target user
+    new_token = secrets.token_hex(32)
+    _SESSIONS[new_token] = {"username": target, "expiry": time.time() + _SESSION_TTL}
+    response.set_cookie("session", new_token, httponly=True, samesite="lax", secure=True, max_age=_SESSION_TTL)
+    return {"ok": True, "username": target, "switched_from": admin["username"]}
 
 
 # ── Page routes ────────────────────────────────────────────────────────────────
@@ -424,12 +571,16 @@ async def guide_page(request: Request):
 @app.get("/api/user/profile")
 async def get_profile(request: Request):
     user = _get_current_user(request)
+    owner = user.get("owner")
     return {
         "username": user["username"],
         "role": user["role"],
         "claude_mode": user.get("claude_mode", "api_key"),
         "has_api_key": bool(user.get("claude_api_key")),
         "has_oauth_token": bool(user.get("claude_oauth_token")),
+        "email": user.get("email"),
+        "owner": owner,
+        "is_subaccount": owner is not None,
     }
 
 
@@ -498,13 +649,15 @@ async def admin_list_users(request: Request):
             "claude_mode": udata.get("claude_mode", "api_key"),
             "has_api_key": bool(udata.get("claude_api_key")),
             "has_oauth_token": bool(udata.get("claude_oauth_token")),
+            "owner": udata.get("owner"),
+            "email": udata.get("email"),
         })
     return {"users": safe}
 
 
 @app.post("/api/admin/users")
 async def admin_create_user(body: dict, request: Request):
-    _require_admin(request)
+    admin = _require_admin(request)
     username = (body.get("username") or "").strip().lower()
     password = body.get("password", "")
     role = body.get("role", "user")
@@ -515,7 +668,11 @@ async def admin_create_user(body: dict, request: Request):
         raise HTTPException(400, "Passwort zu kurz (min. 6 Zeichen)")
     if role not in ("user", "admin"):
         raise HTTPException(400, "Ungültige Rolle")
-    if not create_user(username, password, role=role, claude_mode=claude_mode):
+    # Sub-account inherits creator's email so they appear in the same switcher group
+    creator_data = get_user(admin["username"])
+    creator_email = creator_data.get("email") if creator_data else None
+    if not create_user(username, password, role=role, claude_mode=claude_mode,
+                       owner=admin["username"], email=creator_email):
         raise HTTPException(409, f"User '{username}' existiert bereits")
     return {"ok": True}
 
@@ -548,6 +705,70 @@ async def admin_update_user(username: str, body: dict, request: Request):
         api_key = body.get("claude_api_key")
         if not update_claude_config(username, mode, api_key=api_key):
             raise HTTPException(404, "User nicht gefunden")
+    if "email" in body:
+        ok, conflict = set_email(username, (body["email"] or "").strip().lower())
+        if not ok:
+            raise HTTPException(409, f"E-Mail wird bereits von '{conflict}' verwendet")
+    return {"ok": True}
+
+
+@app.post("/api/user/email")
+async def update_own_email(body: dict, request: Request):
+    user = _get_current_user(request)
+    if user.get("email"):
+        raise HTTPException(409, "E-Mail-Adresse ist bereits gesetzt und kann nicht geändert werden.")
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "E-Mail-Adresse darf nicht leer sein.")
+    ok, conflict = set_email(user["username"], email)
+    if not ok:
+        raise HTTPException(409, "Diese E-Mail-Adresse ist bereits einem anderen Account zugeordnet.")
+    return {"ok": True}
+
+
+# ── Sub-account self-service ───────────────────────────────────────────────────
+
+@app.get("/api/user/subaccounts")
+async def list_own_subaccounts(request: Request):
+    user = _get_current_user(request)
+    all_users = list_users()
+    subs = [
+        {"username": uname, "enabled": udata.get("enabled", True),
+         "created_at": udata.get("created_at", "")}
+        for uname, udata in all_users.items()
+        if udata.get("owner") == user["username"]
+    ]
+    return {"subaccounts": subs, "email": user.get("email")}
+
+
+@app.post("/api/user/subaccounts")
+async def create_own_subaccount(body: dict, request: Request):
+    user = _get_current_user(request)
+    email = user.get("email")
+    if not email:
+        raise HTTPException(400, "Bitte zuerst eine E-Mail-Adresse in den Einstellungen hinterlegen.")
+    username = (body.get("username") or "").strip().lower()
+    password = body.get("password", "")
+    if not username or not password:
+        raise HTTPException(400, "Username und Passwort erforderlich")
+    if len(username) < 2:
+        raise HTTPException(400, "Username zu kurz (min. 2 Zeichen)")
+    if len(password) < 6:
+        raise HTTPException(400, "Passwort zu kurz (min. 6 Zeichen)")
+    if not create_user(username, password, role="user",
+                       owner=user["username"], email=email):
+        raise HTTPException(409, f"Username '{username}' ist bereits vergeben")
+    return {"ok": True}
+
+
+@app.delete("/api/user/subaccounts/{username}")
+async def delete_own_subaccount(username: str, request: Request):
+    user = _get_current_user(request)
+    target = get_user(username)
+    if not target or target.get("owner") != user["username"]:
+        raise HTTPException(403, "Kein Zugriff auf diesen Account")
+    if not delete_user(username):
+        raise HTTPException(404, "User nicht gefunden")
     return {"ok": True}
 
 
@@ -618,6 +839,17 @@ SCAN_SYMBOLS = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
     "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "DOTUSDC", "LINKUSDC",
 ]
+
+PORTFOLIO_MAX_POSITIONS = 4
+PORTFOLIO_MIN_ORDER_USDC = 10.0
+
+
+def _portfolio_allocation_pct(confidence: int) -> float:
+    """Confidence-tier allocation: signal confidence → fraction of free USDC committed."""
+    if confidence >= 85: return 0.40
+    if confidence >= 70: return 0.30
+    if confidence >= 55: return 0.20
+    return 0.0  # below min_confidence threshold; should not happen in caller
 
 
 async def _fetch_scan_summaries(interval: str, symbols: list = None) -> list:
@@ -770,26 +1002,61 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
 
     save_binance_keys(username, bkey, bsec)
 
+    mode = req.mode if req.mode in ("single", "portfolio") else "single"
+
+    # Rebuild req (sanitize) — keeps existing single-pair behavior identical
     req = LiveRequest(
         api_key=bkey, api_secret=bsec,
-        symbol="", interval=req.interval,
+        symbol="" if mode == "portfolio" else req.symbol,
+        interval=req.interval,
         trade_amount_usdt=req.trade_amount_usdt,
         compounding_mode=req.compounding_mode,
         analysis_weight=req.analysis_weight,
+        min_confidence=req.min_confidence,
+        min_confidence_sell=req.min_confidence_sell,
+        sl_atr_mult=req.sl_atr_mult,
+        tp_atr_mult=req.tp_atr_mult,
+        mode=mode,
+        max_per_position=req.max_per_position,
+    )
+
+    # Preserve trade history and accumulated capital across stop/start cycles
+    saved_state = load_live_state(username)
+    existing_history = (
+        live_state.get("trade_history")
+        or (saved_state.get("trade_history") if saved_state else None)
+        or []
+    )
+    existing_capital = (
+        (live_state.get("current_capital") or (saved_state.get("current_capital") if saved_state else None))
+        if existing_history
+        else None
+    ) or req.trade_amount_usdt
+    existing_calibration = (
+        live_state.get("calibrated_thresholds")
+        or (saved_state.get("calibrated_thresholds") if saved_state else None)
+        or {}
     )
 
     kb_pct = 100 - req.analysis_weight
     weight_note = f"Wissensbasis {kb_pct}% / Markt {req.analysis_weight}%"
     session_token = str(uuid.uuid4())
+
+    if mode == "portfolio":
+        start_log = (f"Portfolio Trading gestartet — {req.interval}, max {PORTFOLIO_MAX_POSITIONS} "
+                     f"Positionen, max ${req.max_per_position or 0:.0f}/Pos | {weight_note}")
+    else:
+        start_log = f"Live Trading gestartet — {req.interval}, ${req.trade_amount_usdt} USDC | {weight_note}"
+
     live_state.update({
         "running": True, "status": "active", "position": "FLAT",
         "symbol": "", "interval": req.interval,
         "trade_amount": req.trade_amount_usdt,
-        "current_capital": req.trade_amount_usdt,
+        "current_capital": existing_capital,
         "position_qty": 0,
         "compounding_mode": req.compounding_mode,
         "signals": [],
-        "log": [f"Live Trading gestartet — {req.interval}, ${req.trade_amount_usdt} USDC | {weight_note}"],
+        "log": [start_log],
         "api_key": bkey, "api_secret": bsec,
         "next_check_ts": None, "next_check_str": None, "candle_count": 0,
         "analysis_weight": req.analysis_weight,
@@ -797,7 +1064,11 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "min_confidence_sell": req.min_confidence_sell,
         "sl_atr_mult": req.sl_atr_mult,
         "tp_atr_mult": req.tp_atr_mult,
-        "trade_history": [], "live_candles": [], "buy_price": None,
+        "trade_history": existing_history, "live_candles": [], "buy_price": None,
+        "calibrated_thresholds": existing_calibration,
+        "mode": mode,
+        "portfolio_positions": {},
+        "max_per_position": req.max_per_position,
         "_session_token": session_token,
         "_username": username,
         "_cycle_running": False,
@@ -806,17 +1077,24 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
         "was_running": True,
         "api_key": bkey, "api_secret": bsec,
         "symbol": "", "interval": req.interval,
-        "trade_amount": req.trade_amount_usdt, "current_capital": req.trade_amount_usdt,
+        "trade_amount": req.trade_amount_usdt, "current_capital": existing_capital,
         "position_qty": 0, "compounding_mode": req.compounding_mode, "position": "FLAT",
         "analysis_weight": req.analysis_weight,
         "min_confidence": req.min_confidence,
         "min_confidence_sell": req.min_confidence_sell,
         "sl_atr_mult": req.sl_atr_mult,
         "tp_atr_mult": req.tp_atr_mult,
-        "trade_history": [], "buy_price": None,
+        "trade_history": existing_history, "buy_price": None,
+        "calibrated_thresholds": existing_calibration,
+        "strategy_name": mode,   # repurpose existing column for mode
+        "max_per_position": req.max_per_position,
         "last_regime": None, "last_risk": None, "last_news_score": None,
     })
-    background_tasks.add_task(_live_loop, req, username, api_key, oauth_token, session_token)
+
+    if mode == "portfolio":
+        background_tasks.add_task(_portfolio_loop, req, username, api_key, oauth_token, session_token)
+    else:
+        background_tasks.add_task(_live_loop, req, username, api_key, oauth_token, session_token)
     return {"ok": True}
 
 
@@ -897,6 +1175,37 @@ async def trigger_live(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/live/reset-position")
+async def reset_live_position(request: Request):
+    user = _get_current_user(request)
+    username = user["username"]
+    live_state = _get_live_state(username)
+    if not live_state.get("running"):
+        raise HTTPException(400, "Live Trading ist nicht aktiv")
+    if live_state.get("mode") == "portfolio":
+        n = len(live_state.get("portfolio_positions") or {})
+        live_state["portfolio_positions"] = {}
+        live_state["position"] = "FLAT"
+        live_state["position_qty"] = 0
+        live_state["buy_price"] = None
+        live_state["sl_pct"] = None
+        live_state["tp_pct"] = None
+        update_position(username, "FLAT")
+        _log(live_state, f"🔄 Portfolio: {n} Position(en) intern auf FLAT zurückgesetzt (kein Binance-Order)")
+        return {"ok": True, "position": "FLAT", "cleared": n}
+    # Single-pair: existing behavior
+    old_pos = live_state.get("position", "FLAT")
+    live_state["position"] = "FLAT"
+    live_state["position_qty"] = 0
+    live_state["buy_price"] = None
+    live_state["sl_pct"] = None
+    live_state["tp_pct"] = None
+    update_position(username, "FLAT")
+    _log(live_state, f"🔄 Position manuell zurückgesetzt: {old_pos} → FLAT (kein Binance-Order)")
+    save_live_state_snapshot(username, live_state.get("symbol", ""), live_state)
+    return {"ok": True, "position": "FLAT"}
+
+
 @app.get("/api/live/credentials")
 async def get_live_credentials(request: Request):
     user = _get_current_user(request)
@@ -947,7 +1256,75 @@ async def live_status(request: Request):
               and not k.startswith("_")}
     result["calibration_meta"] = calibration_meta(live_state.get("trade_history", []))
     result["cycle_running"] = bool(live_state.get("_cycle_running"))
+    # Portfolio aggregates (only meaningful in portfolio mode)
+    if live_state.get("mode") == "portfolio":
+        positions = live_state.get("portfolio_positions") or {}
+        total_value = 0.0
+        for slot in positions.values():
+            qty   = float(slot.get("position_qty") or 0)
+            price = float(slot.get("current_price") or slot.get("buy_price") or 0)
+            total_value += qty * price
+        result["portfolio_total_value"] = round(total_value, 2)
+        result["portfolio_open_count"] = len(positions)
+        result["portfolio_max_positions"] = PORTFOLIO_MAX_POSITIONS
+        # free_usdc is updated by the loop on each cycle
+        result["portfolio_free_usdc"] = float(live_state.get("portfolio_free_usdc") or 0.0)
     return result
+
+
+@app.get("/api/live/holdings")
+async def live_holdings(request: Request):
+    user = _get_current_user(request)
+    live_state = _get_live_state(user["username"])
+
+    if not live_state.get("running"):
+        return {"ok": False, "reason": "not_running"}
+
+    api_key = live_state.get("api_key") or ""
+    api_secret = live_state.get("api_secret") or ""
+    symbol = live_state.get("symbol") or ""
+
+    if not api_key or not symbol:
+        return {"ok": False, "reason": "no_keys"}
+
+    # Parse base/quote from symbol (e.g. BTCUSDC → BTC + USDC)
+    quote, base = None, None
+    for q in ("USDC", "USDT", "BTC", "ETH", "BNB"):
+        if symbol.endswith(q):
+            quote = q
+            base = symbol[:-len(q)]
+            break
+
+    if not base or not quote:
+        return {"ok": False, "reason": "unknown_symbol"}
+
+    trader = BinanceTrader(api_key, api_secret)
+    try:
+        balances, current_price = await asyncio.gather(
+            trader.get_balances(),
+            trader.get_price(symbol),
+            return_exceptions=True,
+        )
+        if isinstance(balances, Exception):
+            raise balances
+        if isinstance(current_price, Exception):
+            current_price = None
+
+        base_amount = balances.get(base, 0.0)
+        quote_amount = balances.get(quote, 0.0)
+        base_value = (base_amount * current_price) if (base_amount > 0 and current_price) else 0.0
+
+        return {
+            "ok": True,
+            "base": base,
+            "quote": quote,
+            "base_amount": base_amount,
+            "quote_amount": quote_amount,
+            "current_price": current_price,
+            "base_value_in_quote": base_value,
+        }
+    except Exception as e:
+        return {"ok": False, "reason": str(e)}
 
 
 @app.get("/api/live/performance")
@@ -964,84 +1341,63 @@ async def live_performance(request: Request):
     committed = float(live_state.get("current_capital") or trade_amount)
     current_symbol = live_state.get("symbol", "")
 
-    # Mark-to-market: fetch recent candles for the held symbol so the chart
-    # shows unrealized P&L even right after a restart (live_candles may be empty)
-    symbol_candles: list = live_state.get("live_candles", [])
-    if position == "IN_POSITION" and current_symbol and len(symbol_candles) < 2:
-        try:
-            symbol_candles = await fetch_latest_klines(current_symbol,
-                live_state.get("interval", "1h"), limit=100)
-        except Exception:
-            pass
+    is_portfolio = live_state.get("mode") == "portfolio"
 
-    # If buy_price is missing (e.g. crash before it was saved), reconstruct from
-    # Binance trade history so mark-to-market works correctly
-    if position == "IN_POSITION" and not buy_price and current_symbol:
-        try:
-            bkey = live_state.get("api_key", "")
-            bsec = live_state.get("api_secret", "")
-            if bkey and bsec:
-                _trader = BinanceTrader(bkey, bsec)
-                my_trades = await _trader.get_my_trades(current_symbol, limit=10)
-                last_buy = next((t for t in reversed(my_trades)
-                                 if t.get("isBuyer", False)), None)
-                if last_buy:
-                    buy_price = float(last_buy["price"])
-                    live_state["buy_price"] = buy_price
-                    save_live_state(user["username"], {"buy_price": buy_price})
-        except Exception:
-            pass
-
-    # current_capital: mark-to-market when IN_POSITION, otherwise stored value
-    if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
-        latest_price = symbol_candles[-1]["close"]
-        current_capital = round(committed * (latest_price / buy_price), 2)
+    # Portfolio mode: aggregate mark-to-market across all open positions
+    if is_portfolio:
+        positions = live_state.get("portfolio_positions") or {}
+        agg_value = 0.0
+        for slot in positions.values():
+            qty   = float(slot.get("position_qty") or 0)
+            price = float(slot.get("current_price") or slot.get("buy_price") or 0)
+            agg_value += qty * price
+        free_usdc_now = float(live_state.get("portfolio_free_usdc") or 0.0)
+        current_capital = round(free_usdc_now + agg_value, 2)
+        symbol_candles = []
     else:
-        current_capital = committed
+        # Mark-to-market: fetch recent candles for the held symbol so the chart
+        # shows unrealized P&L even right after a restart (live_candles may be empty)
+        symbol_candles: list = live_state.get("live_candles", [])
+        if position == "IN_POSITION" and current_symbol and len(symbol_candles) < 2:
+            try:
+                symbol_candles = await fetch_latest_klines(current_symbol,
+                    live_state.get("interval", "1h"), limit=100)
+            except Exception:
+                pass
+
+        # If buy_price is missing (e.g. crash before it was saved), reconstruct from
+        # Binance trade history so mark-to-market works correctly
+        if position == "IN_POSITION" and not buy_price and current_symbol:
+            try:
+                bkey = live_state.get("api_key", "")
+                bsec = live_state.get("api_secret", "")
+                if bkey and bsec:
+                    _trader = BinanceTrader(bkey, bsec)
+                    my_trades = await _trader.get_my_trades(current_symbol, limit=10)
+                    last_buy = next((t for t in reversed(my_trades)
+                                     if t.get("isBuyer", False)), None)
+                    if last_buy:
+                        buy_price = float(last_buy["price"])
+                        live_state["buy_price"] = buy_price
+                        save_live_state(user["username"], {"buy_price": buy_price})
+            except Exception:
+                pass
+
+        # current_capital: mark-to-market when IN_POSITION, otherwise stored value
+        if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
+            latest_price = symbol_candles[-1]["close"]
+            current_capital = round(committed * (latest_price / buy_price), 2)
+        else:
+            current_capital = committed
 
     sorted_trades = sorted(trade_history, key=lambda x: x.get("timestamp", 0))
     start_ts = sorted_trades[0]["timestamp"] if sorted_trades else (now_ms - 86_400_000)
     duration_h = (now_ms - start_ts) / 3_600_000
 
-    # Resolved SELL checkpoints (step-function anchors)
-    sell_checkpoints: dict[int, float] = {}  # ts → cumulative capital
-    running_cap = trade_amount
-    for t in sorted_trades:
-        if t["type"] == "SELL" and t.get("pnl_pct") is not None:
-            pnl = t["pnl_pct"]
-            if compounding_mode == "fixed":
-                running_cap = trade_amount
-            elif compounding_mode == "compound_wins":
-                running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
-            else:
-                running_cap = round(running_cap * (1 + pnl / 100), 2)
-            sell_checkpoints[t["timestamp"]] = running_cap
-
-    # Capital series — enrich with mark-to-market points from live_candles
-    # so the chart shows unrealized P&L while IN_POSITION, not just a flat line
-    # Build a map: ts → realised capital (step function value at that point in time)
-    # Then for candles inside an open position, overlay mark-to-market value
-    cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
-
-    last_realised = trade_amount
-    last_sell_ts = start_ts
-    for ts_sell, cap_after in sorted(sell_checkpoints.items()):
-        cap_series_raw.append((ts_sell, cap_after))
-        last_realised = cap_after
-        last_sell_ts = ts_sell
-
-    # If currently IN_POSITION with known buy_price, add intra-position candle points
-    if position == "IN_POSITION" and buy_price and buy_price > 0 and symbol_candles:
-        for c in symbol_candles:
-            c_ts = c.get("timestamp", 0)
-            if c_ts <= last_sell_ts:
-                continue  # before or at last sell — skip
-            mtm_cap = round(last_realised - committed + committed * (c["close"] / buy_price), 2)
-            cap_series_raw.append((c_ts, mtm_cap))
-
-    cap_series_raw.append((now_ms, current_capital))
-    cap_series_raw.sort(key=lambda x: x[0])
-
+    cap_series_raw, sell_checkpoints = _build_capital_series(
+        sorted_trades, trade_amount, compounding_mode,
+        position, buy_price, committed, symbol_candles, now_ms, current_capital, start_ts,
+    )
     capital_series = [{"ts": ts, "usdc": cap} for ts, cap in cap_series_raw]
 
     # Normalised % series for bot
@@ -1056,6 +1412,53 @@ async def live_performance(request: Request):
         for t in sorted_trades
         if t["type"] == "SELL" and t.get("pnl_pct") is not None
     ]
+
+    # Paired BUY→SELL trade list for trade table display
+    # Orphaned SELLs (no prior BUY in history) are shown with buy_price from live_state
+    trade_pairs = []
+    pending_buy = None
+    for t in sorted_trades:
+        if t.get("type") == "BUY":
+            pending_buy = t
+        elif t.get("type") == "SELL":
+            sell_ts = t.get("timestamp", 0)
+            if pending_buy is not None:
+                buy_ts  = pending_buy.get("timestamp", 0)
+                dur_h   = round((sell_ts - buy_ts) / 3_600_000, 1) if sell_ts > buy_ts else 0
+                bp      = pending_buy.get("price")
+                pending_buy = None
+            else:
+                # Orphaned SELL — use stored buy_price as best estimate
+                buy_ts  = start_ts
+                dur_h   = 0
+                bp      = buy_price  # from live_state, may be None
+            trade_pairs.append({
+                "symbol":     t.get("symbol", ""),
+                "buy_price":  bp,
+                "sell_price": t.get("price"),
+                "buy_ts":     buy_ts,
+                "sell_ts":    sell_ts,
+                "duration_h": dur_h,
+                "pnl_pct":    t.get("pnl_pct"),
+                "net_usdc":   t.get("net_usdc"),
+            })
+    # If still in position, add open trade
+    if pending_buy is not None and position == "IN_POSITION":
+        bp = buy_price or pending_buy.get("price")
+        cur = symbol_candles[-1]["close"] if symbol_candles else None
+        unrealised = round((cur - bp) / bp * 100, 2) if (bp and cur) else None
+        open_dur_h  = round((now_ms - pending_buy.get("timestamp", now_ms)) / 3_600_000, 1)
+        trade_pairs.append({
+            "symbol":     pending_buy.get("symbol", live_state.get("symbol", "")),
+            "buy_price":  pending_buy.get("price"),
+            "sell_price": None,
+            "buy_ts":     pending_buy.get("timestamp", 0),
+            "sell_ts":    None,
+            "duration_h": open_dur_h,
+            "pnl_pct":    unrealised,
+            "net_usdc":   None,
+            "open":       True,
+        })
 
     # BTC benchmark — interval chosen by duration for appropriate granularity
     # <2d → 1h | <14d → 4h | else → 1d
@@ -1095,6 +1498,7 @@ async def live_performance(request: Request):
         "bot_pct_series": bot_pct_series,
         "btc_pct_series": btc_pct_series,
         "trade_pnl": trade_pnl,
+        "trade_pairs": trade_pairs,
         "summary": {
             "start_capital": trade_amount,
             "current_capital": current_capital,
@@ -1407,12 +1811,17 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 return False, 0.0
             precision = max(0, -int(math.floor(math.log10(step))))
             order = await trader.place_market_order(symbol=position_symbol, side="SELL", quantity=qty, qty_precision=precision)
-            buy_p     = live_state.get("buy_price") or (candles[-1]["close"] if candles else 0)
-            cur_price = candles[-1]["close"] if candles else 0
-            pnl_pct   = (cur_price - buy_p) / buy_p * 100 if buy_p else 0.0
             gross_usdc = float(order.get("cummulativeQuoteQty", 0))
             usdc_fees  = sum(float(f["commission"]) for f in order.get("fills", []) if f.get("commissionAsset", "").upper() == "USDC")
-            net_usdc   = (gross_usdc - usdc_fees) if gross_usdc > 0 else (qty * cur_price)
+            net_usdc   = (gross_usdc - usdc_fees) if gross_usdc > 0 else (qty * (candles[-1]["close"] if candles else 0))
+            # Actual fill price from order (more accurate than candle close)
+            sell_price = (gross_usdc / qty) if qty > 0 and gross_usdc > 0 else (candles[-1]["close"] if candles else 0)
+            # Buy price: live_state wins, then last BUY trade record, then candle fallback
+            last_buy_rec = next((t for t in reversed(live_state.get("trade_history", [])) if t.get("type") == "BUY"), None)
+            buy_p = (live_state.get("buy_price")
+                     or (last_buy_rec.get("price") if last_buy_rec else None)
+                     or sell_price)
+            pnl_pct = (sell_price - buy_p) / buy_p * 100 if buy_p else 0.0
             prev_capital = live_state.get("current_capital") or req.trade_amount_usdt
             mode = live_state.get("compounding_mode", "compound")
             if mode == "fixed":
@@ -1432,10 +1841,11 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             reason_str = f" [{force_reason}]" if force_reason else ""
             live_state["trade_history"].append({
                 "type": "SELL", "symbol": position_symbol,
-                "price": cur_price, "timestamp": int(time.time() * 1000),
+                "price": round(sell_price, 8), "timestamp": int(time.time() * 1000),
                 "order_id": str(order.get("orderId", "")), "pnl_pct": round(pnl_pct, 3),
+                "net_usdc": round(net_usdc, 4),
             })
-            _log(live_state, f"✅ VERKAUF {position_symbol}{reason_str} @ ${cur_price:,.4f} | P&L: {pnl_pct:+.2f}% | Kapital: ${net_usdc:.2f} ({delta:+.2f}$)")
+            _log(live_state, f"✅ VERKAUF {position_symbol}{reason_str} @ ${sell_price:,.4f} | P&L: {pnl_pct:+.2f}% | Kapital: ${net_usdc:.2f} ({delta:+.2f}$)")
             _persist_trade_history(username, live_state)
             append_trade_log(username, position_symbol, live_state["trade_history"][-1])
             save_live_state_snapshot(username, position_symbol, live_state)
@@ -1512,6 +1922,9 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                                 "current_capital": crypto_value, "symbol": chosen,
                             })
                             update_position(username, "IN_POSITION", symbol=chosen)
+                            _add_synthetic_buy_if_needed(live_state, username, chosen,
+                                                         crypto_price or live_state.get("buy_price") or 0, crypto_held)
+                            _persist_trade_history(username, live_state)
                         elif usdc_available >= 10.0:
                             buy_usdc = min(need_usdc, round(usdc_available * 0.995, 2))
                             _log(live_state, f"ℹ {crypto_held:.6f} {base_asset} (~${crypto_value:.2f}) + kaufe ${buy_usdc:.2f} nach")
@@ -1521,6 +1934,9 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                                 "current_capital": crypto_value, "symbol": chosen,
                             })
                             update_position(username, "IN_POSITION", symbol=chosen)
+                            _add_synthetic_buy_if_needed(live_state, username, chosen,
+                                                         crypto_price or live_state.get("buy_price") or 0, crypto_held)
+                            _persist_trade_history(username, live_state)
                             try:
                                 order = await trader.place_market_order(chosen, "BUY", quote_quantity=buy_usdc)
                                 extra_qty = float(order.get("executedQty", 0))
@@ -1538,6 +1954,9 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                                 "current_capital": crypto_value, "symbol": chosen,
                             })
                             update_position(username, "IN_POSITION", symbol=chosen)
+                            _add_synthetic_buy_if_needed(live_state, username, chosen,
+                                                         crypto_price or live_state.get("buy_price") or 0, crypto_held)
+                            _persist_trade_history(username, live_state)
 
                     elif usdc_available >= 10.0:
                         _log(live_state, f"💰 {usdc_available:.2f} USDC (< Ziel ${target:.2f}) — kaufe soviel wie möglich")
@@ -1679,6 +2098,27 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 {"timestamp": c["timestamp"], "close": c["close"]} for c in candles[-80:]
             ]
 
+            # ── Per-cycle reconciliation: correct state if Binance diverged ───────
+            if live_state.get("position") == "IN_POSITION" and active_symbol:
+                try:
+                    base_asset = active_symbol.replace("USDC", "").replace("USDT", "")
+                    cycle_bal = await trader.get_balances()
+                    crypto_held = cycle_bal.get(base_asset, 0.0)
+                    if crypto_held <= 0:
+                        logger.warning(
+                            f"[{username}] Cycle desync: IN_POSITION but {base_asset}=0 → auto FLAT"
+                        )
+                        _log(live_state,
+                             f"⚠ Auto-Korrektur: intern IN_POSITION aber kein {base_asset} auf Binance — setze FLAT")
+                        live_state["position"] = "FLAT"
+                        live_state["position_qty"] = 0
+                        live_state["buy_price"] = None
+                        live_state["sl_pct"] = None
+                        live_state["tp_pct"] = None
+                        update_position(username, "FLAT")
+                except Exception as _rec_e:
+                    logger.warning(f"[{username}] Per-cycle reconcile failed: {_rec_e}")
+
             # ── Multi-TF: fetch 4h candles for regime ────────────────────────────
             if req.interval != "4h":
                 try:
@@ -1748,6 +2188,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     candles=enriched, current_position=live_state["position"],
                     username=username,
                     signal_history=live_state["signals"][-10:],
+                    trade_history=live_state.get("trade_history", []),
                     analysis_weight=req.analysis_weight,
                     api_key=api_key, oauth_token=oauth_token,
                     regime=regime_result,
@@ -1910,6 +2351,408 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 } if risk_result else None,
                 "force_sell": force_sell,
             }
+
+            next2 = _next_close()
+            live_state["next_check_ts"] = next2 + CLOSE_BUFFER
+            live_state["next_check_str"] = _fmt_ts(next2)
+            _log(live_state, f"Nächste Analyse: {_fmt_ts(next2)} (in {_fmt_wait(next2 - time.time())})")
+            live_state["_cycle_running"] = False
+
+    except Exception as e:
+        live_state["status"] = "error"
+        _log(live_state, f"FEHLER: {e}")
+        clear_live_state(username)
+    finally:
+        live_state["running"] = False
+        live_state["next_check_ts"] = None
+        live_state["next_check_str"] = None
+        live_state["status"] = "stopped"
+        live_state["_cycle_running"] = False
+        live_state["_trigger_event"] = None
+
+
+async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str],
+                          oauth_token: str = "", session_token: str = ""):
+    live_state = _get_live_state(username)
+    trigger_event = asyncio.Event()
+    live_state["_trigger_event"] = trigger_event
+
+    def _still_active() -> bool:
+        return live_state["running"] and live_state.get("_session_token") == session_token
+
+    trader = BinanceTrader(req.api_key, req.api_secret)
+    interval_seconds = _interval_to_seconds(req.interval)
+    CLOSE_BUFFER = 10
+
+    def _next_close() -> float:
+        now = time.time()
+        return (int(now / interval_seconds) + 1) * interval_seconds
+
+    def _fmt_ts(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    def _fmt_wait(secs: float) -> str:
+        h, rem = divmod(int(secs), 3600); m, s = divmod(rem, 60)
+        if h: return f"{h}h {m}m {s}s"
+        if m: return f"{m}m {s}s"
+        return f"{s}s"
+
+    # ── inline helpers (mirror _live_loop's _do_buy/_do_sell, operate on a slot) ──
+    async def _portfolio_buy(symbol: str, capital: float, sl_pct: float, tp_pct: float,
+                             buy_price_for_levels: float) -> bool:
+        try:
+            balances = await trader.get_balances()
+            usdc_avail = balances.get("USDC", 0.0)
+            spend = min(capital, round(usdc_avail * 0.995, 2))
+            if spend < PORTFOLIO_MIN_ORDER_USDC:
+                _log(live_state, f"⚠ {symbol}: zu wenig USDC ({usdc_avail:.2f}) — übersprungen")
+                return False
+            order = await trader.place_market_order(symbol=symbol, side="BUY", quote_quantity=spend)
+            qty = float(order.get("executedQty", 0))
+            if qty <= 0:
+                _log(live_state, f"⚠ {symbol}: executedQty=0 — übersprungen")
+                return False
+            cumm = float(order.get("cummulativeQuoteQty", 0))
+            buy_price = (cumm / qty) if qty > 0 else buy_price_for_levels
+            entry_ts = int(time.time() * 1000)
+            sl_price = round(buy_price * (1 - sl_pct / 100), 8) if sl_pct else None
+            tp_price = round(buy_price * (1 + tp_pct / 100), 8) if tp_pct else None
+            live_state["portfolio_positions"][symbol] = {
+                "symbol": symbol,
+                "position_qty": qty, "buy_price": buy_price, "current_price": buy_price,
+                "entry_ts": entry_ts,
+                "sl_pct": sl_pct, "tp_pct": tp_pct,
+                "sl_price": sl_price, "tp_price": tp_price,
+                "allocated_usdc": spend,
+                "order_id": str(order.get("orderId", "")),
+                "last_signal": "BUY", "last_confidence": 0,
+            }
+            live_state["trade_history"].append({
+                "type": "BUY", "symbol": symbol,
+                "price": buy_price, "timestamp": entry_ts,
+                "order_id": str(order.get("orderId", "")), "pnl_pct": None,
+            })
+            _persist_trade_history(username, live_state)
+            append_trade_log(username, symbol, live_state["trade_history"][-1])
+            _log(live_state, f"✅ KAUF {symbol} — {qty:.6f} @ ${buy_price:,.4f} | ${spend:.2f} USDC | SL {sl_pct:.2f}% / TP {tp_pct:.2f}%")
+            return True
+        except Exception as e:
+            _log(live_state, f"❌ {symbol} KAUF fehlgeschlagen: {e}")
+            logger.error(f"Portfolio KAUF [{username}/{symbol}]: {e}")
+            return False
+
+    async def _portfolio_sell(symbol: str, force_reason: str = "") -> tuple[bool, float]:
+        slot = live_state["portfolio_positions"].get(symbol)
+        if not slot:
+            return False, 0.0
+        qty = float(slot.get("position_qty") or 0)
+        if qty <= 0:
+            base = symbol.replace("USDC", "").replace("USDT", "")
+            try: qty = await trader.get_asset_balance(base)
+            except Exception: pass
+        if qty <= 0:
+            live_state["portfolio_positions"].pop(symbol, None)
+            return False, 0.0
+        try:
+            step = await trader.get_lot_step(symbol)
+            qty = _floor_to_step(qty, step)
+            if qty <= 0:
+                _log(live_state, f"⚠ {symbol}: Menge nach LOT_SIZE = 0")
+                return False, 0.0
+            precision = max(0, -int(math.floor(math.log10(step))))
+            order = await trader.place_market_order(symbol=symbol, side="SELL",
+                                                     quantity=qty, qty_precision=precision)
+            gross = float(order.get("cummulativeQuoteQty", 0))
+            fees  = sum(float(f["commission"]) for f in order.get("fills", [])
+                        if f.get("commissionAsset", "").upper() == "USDC")
+            net   = (gross - fees) if gross > 0 else 0.0
+            sell_price = (gross / qty) if qty > 0 and gross > 0 else 0.0
+            buy_p = float(slot.get("buy_price") or sell_price or 1.0)
+            pnl_pct = (sell_price - buy_p) / buy_p * 100 if buy_p else 0.0
+            reason_str = f" [{force_reason}]" if force_reason else ""
+            live_state["trade_history"].append({
+                "type": "SELL", "symbol": symbol,
+                "price": round(sell_price, 8), "timestamp": int(time.time() * 1000),
+                "order_id": str(order.get("orderId", "")),
+                "pnl_pct": round(pnl_pct, 3), "net_usdc": round(net, 4),
+            })
+            _persist_trade_history(username, live_state)
+            append_trade_log(username, symbol, live_state["trade_history"][-1])
+            live_state["portfolio_positions"].pop(symbol, None)
+            _log(live_state, f"✅ VERKAUF {symbol}{reason_str} @ ${sell_price:,.4f} | P&L: {pnl_pct:+.2f}% | +${net:.2f}")
+            return True, net
+        except Exception as e:
+            _log(live_state, f"❌ {symbol} VERKAUF fehlgeschlagen: {e}")
+            logger.error(f"Portfolio VERKAUF [{username}/{symbol}]: {e}")
+            return False, 0.0
+
+    try:
+        # ── Startup: reconcile portfolio from Binance balances ─────────────
+        is_resume = live_state.pop("_is_resume", False)
+        _log(live_state, f"🔍 Portfolio-Modus Startup ({'Resume' if is_resume else 'Frisch'})…")
+        try:
+            balances = await trader.get_balances()
+            detected = 0
+            for asset, amt in balances.items():
+                if asset == "USDC" or amt <= 0:
+                    continue
+                if len(live_state["portfolio_positions"]) >= PORTFOLIO_MAX_POSITIONS:
+                    break
+                sym = f"{asset}USDC"
+                try:
+                    sym_exists = await trader.symbol_exists(sym)
+                except Exception:
+                    sym_exists = False
+                if not sym_exists:
+                    continue
+                try: cur_price = await trader.get_price(sym)
+                except Exception: cur_price = 0.0
+                value = amt * cur_price
+                if value < PORTFOLIO_MIN_ORDER_USDC:
+                    continue
+                if sym in live_state["portfolio_positions"]:
+                    continue
+                live_state["portfolio_positions"][sym] = {
+                    "symbol": sym, "position_qty": amt,
+                    "buy_price": cur_price, "current_price": cur_price,
+                    "entry_ts": int(time.time() * 1000),
+                    "sl_pct": None, "tp_pct": None,
+                    "sl_price": None, "tp_price": None,
+                    "allocated_usdc": value,
+                    "order_id": "startup_detected",
+                    "last_signal": "", "last_confidence": 0,
+                }
+                _add_synthetic_buy_if_needed(live_state, username, sym, cur_price, amt)
+                detected += 1
+                _log(live_state, f"✓ Erkannt: {amt:.6f} {asset} (~${value:.2f}) — als Position übernommen")
+            _persist_trade_history(username, live_state)
+            live_state["portfolio_free_usdc"] = balances.get("USDC", 0.0)
+            if detected == 0:
+                _log(live_state, "Keine bestehenden Positionen erkannt — warte auf Signale")
+        except Exception as e:
+            _log(live_state, f"⚠ Portfolio-Startup-Check fehlgeschlagen: {e}")
+
+        first_run = True
+        while _still_active():
+            next_close_ts = _next_close()
+            wake_at = next_close_ts + CLOSE_BUFFER
+            wait_secs = wake_at - time.time()
+            live_state["next_check_ts"] = wake_at
+            live_state["next_check_str"] = _fmt_ts(next_close_ts)
+
+            if first_run:
+                _log(live_state, f"Portfolio-Loop aktiv — {req.interval}, {len(live_state['portfolio_positions'])}/{PORTFOLIO_MAX_POSITIONS} Positionen")
+                _log(live_state, f"Nächste Analyse: {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
+                first_run = False
+
+            manual_trigger = False
+            if wait_secs > 0:
+                slept = 0.0
+                while slept < wait_secs and _still_active():
+                    chunk = min(30.0, wait_secs - slept)
+                    try:
+                        await asyncio.wait_for(trigger_event.wait(), timeout=chunk)
+                        manual_trigger = True
+                        trigger_event.clear()
+                        break
+                    except asyncio.TimeoutError:
+                        slept += chunk
+            if not _still_active():
+                break
+
+            if manual_trigger:
+                _log(live_state, "\n🖱 Manueller Trigger — Portfolio-Analyse läuft…")
+            else:
+                live_state["candle_count"] += 1
+                _log(live_state, f"\n── Portfolio-Zyklus #{live_state['candle_count']} ({_fmt_ts(next_close_ts)}) ──")
+
+            live_state["_cycle_running"] = True
+
+            # ── Update free USDC for UI ──────────────────────────────────
+            try:
+                balances = await trader.get_balances()
+                live_state["portfolio_free_usdc"] = balances.get("USDC", 0.0)
+            except Exception:
+                balances = {}
+
+            # ── Phase 1: review existing positions ────────────────────────
+            from .news_fetcher import _fetch_fear_greed
+            for sym in list(live_state["portfolio_positions"].keys()):
+                slot = live_state["portfolio_positions"].get(sym)
+                if not slot:
+                    continue
+                try:
+                    raw = await fetch_latest_klines(sym, req.interval, limit=100)
+                    enriched = compute_indicators(raw)
+                    price = enriched[-1]["close"] if enriched else 0.0
+                    slot["current_price"] = price
+                except Exception as e:
+                    _log(live_state, f"⚠ {sym}: Daten-Fetch fehlgeschlagen ({e})")
+                    continue
+
+                # SL/TP check
+                buy_p = float(slot.get("buy_price") or 0)
+                sl_pct = float(slot.get("sl_pct") or 0)
+                tp_pct = float(slot.get("tp_pct") or 0)
+                force_sell = False
+                force_reason = ""
+                if buy_p and sl_pct and price <= buy_p * (1 - sl_pct / 100):
+                    force_sell = True
+                    force_reason = f"SL {sl_pct:.2f}% — ${price:,.4f} ≤ ${buy_p*(1-sl_pct/100):,.4f}"
+                    _log(live_state, f"🛑 {sym}: STOP-LOSS — {force_reason}")
+                elif buy_p and tp_pct and price >= buy_p * (1 + tp_pct / 100):
+                    force_sell = True
+                    force_reason = f"TP {tp_pct:.2f}% — ${price:,.4f} ≥ ${buy_p*(1+tp_pct/100):,.4f}"
+                    _log(live_state, f"🎯 {sym}: TAKE-PROFIT — {force_reason}")
+
+                if force_sell:
+                    sold, _net = await _portfolio_sell(sym, force_reason=force_reason)
+                    if sold:
+                        new_thresh = calibrate_thresholds(live_state.get("trade_history", []))
+                        if new_thresh:
+                            live_state["calibrated_thresholds"] = new_thresh
+                    continue
+
+                # Signal agent for hold-or-sell decision
+                try:
+                    candles_4h = enriched if req.interval == "4h" else compute_indicators(
+                        await fetch_latest_klines(sym, "4h", limit=100))
+                    candles_1h = enriched if req.interval == "1h" else compute_indicators(
+                        await fetch_latest_klines(sym, "1h", limit=100))
+                    fng = await _fetch_fear_greed()
+                    regime = await get_regime(symbol=sym, interval=req.interval,
+                                              candles_1h=candles_1h, candles_4h=candles_4h,
+                                              fear_greed=fng, api_key=api_key, oauth_token=oauth_token)
+                except Exception:
+                    regime = {"regime": "RANGING", "strength": 50,
+                              "recommended_strategy": "mean_revert",
+                              "signal_weight_technical": 70, "signal_weight_news": 30}
+                news_score = get_news_score_for_symbol(sym)
+                signal = await get_live_signal(
+                    symbol=sym, interval=req.interval, candles=enriched,
+                    current_position="IN_POSITION", username=username,
+                    signal_history=[], trade_history=live_state.get("trade_history", []),
+                    analysis_weight=req.analysis_weight,
+                    api_key=api_key, oauth_token=oauth_token,
+                    regime=regime, news_score=news_score,
+                )
+                action     = signal.get("action", "HOLD")
+                confidence = signal.get("confidence", 0)
+                slot["last_signal"] = action
+                slot["last_confidence"] = confidence
+                _log(live_state, f"{sym}: {action} ({confidence}%) — {signal.get('reason','')[:80]}")
+                min_sell = live_state.get("min_confidence_sell") or req.min_confidence_sell
+                if action == "SELL" and confidence >= min_sell:
+                    await _portfolio_sell(sym, force_reason=f"Signal {confidence}%")
+
+            # ── Phase 2: scan for new entries ─────────────────────────────
+            open_count = len(live_state["portfolio_positions"])
+            slots_free = PORTFOLIO_MAX_POSITIONS - open_count
+            if slots_free <= 0:
+                _log(live_state, f"Portfolio voll ({open_count}/{PORTFOLIO_MAX_POSITIONS}) — keine neuen Käufe")
+            else:
+                free_usdc = live_state.get("portfolio_free_usdc", 0.0)
+                if free_usdc < PORTFOLIO_MIN_ORDER_USDC:
+                    _log(live_state, f"Nur ${free_usdc:.2f} USDC frei — keine neuen Käufe")
+                else:
+                    _log(live_state, f"🔍 Scanne {len(SCAN_SYMBOLS)} Pairs für {slots_free} freie Slot(s)…")
+                    try:
+                        summaries = await _fetch_scan_summaries(req.interval)
+                        scan = await scan_market(summaries, req.interval,
+                                                 username=username,
+                                                 api_key=api_key, oauth_token=oauth_token)
+                    except Exception as e:
+                        _log(live_state, f"⚠ Scanner-Fehler: {e}")
+                        scan = {"ranking": []}
+
+                    # ranking is list of {symbol, score, reason}; filter out already-held & take top N
+                    held = set(live_state["portfolio_positions"].keys())
+                    ranking = [r for r in (scan.get("ranking") or [])
+                               if r.get("symbol") and r["symbol"] not in held]
+                    candidates = ranking[:slots_free * 2]  # consider 2x to allow signal rejections
+
+                    min_buy = live_state.get("min_confidence") or req.min_confidence
+                    fng = await _fetch_fear_greed()
+                    for cand in candidates:
+                        if slots_free <= 0: break
+                        sym = cand["symbol"]
+                        # Re-fetch latest balance — earlier buys reduced it
+                        try:
+                            balances = await trader.get_balances()
+                            free_usdc = balances.get("USDC", 0.0)
+                            live_state["portfolio_free_usdc"] = free_usdc
+                        except Exception:
+                            pass
+                        if free_usdc < PORTFOLIO_MIN_ORDER_USDC: break
+
+                        try:
+                            raw = await fetch_latest_klines(sym, req.interval, limit=100)
+                            enriched = compute_indicators(raw)
+                            candles_4h = enriched if req.interval == "4h" else compute_indicators(
+                                await fetch_latest_klines(sym, "4h", limit=100))
+                            candles_1h = enriched if req.interval == "1h" else compute_indicators(
+                                await fetch_latest_klines(sym, "1h", limit=100))
+                            regime = await get_regime(symbol=sym, interval=req.interval,
+                                                      candles_1h=candles_1h, candles_4h=candles_4h,
+                                                      fear_greed=fng,
+                                                      api_key=api_key, oauth_token=oauth_token)
+                        except Exception as e:
+                            _log(live_state, f"⚠ {sym}: Setup-Check fehlgeschlagen ({e})")
+                            continue
+
+                        news_score = get_news_score_for_symbol(sym)
+                        if regime.get("regime") == "HIGH_VOLATILITY":
+                            _log(live_state, f"⏭ {sym}: HIGH_VOLATILITY — übersprungen")
+                            continue
+                        if news_score.get("veto"):
+                            _log(live_state, f"⏭ {sym}: News-Veto — übersprungen")
+                            continue
+
+                        signal = await get_live_signal(
+                            symbol=sym, interval=req.interval, candles=enriched,
+                            current_position="FLAT", username=username,
+                            signal_history=[], trade_history=live_state.get("trade_history", []),
+                            analysis_weight=req.analysis_weight,
+                            api_key=api_key, oauth_token=oauth_token,
+                            regime=regime, news_score=news_score,
+                        )
+                        action     = signal.get("action", "HOLD")
+                        confidence = signal.get("confidence", 0)
+                        if action != "BUY" or confidence < min_buy:
+                            _log(live_state, f"⏭ {sym}: {action} {confidence}% (Min {min_buy}%) — kein Kauf")
+                            continue
+
+                        # Confidence-tier sizing
+                        tier_pct = _portfolio_allocation_pct(confidence)
+                        sized = round(free_usdc * tier_pct, 2)
+                        if req.max_per_position and req.max_per_position > 0:
+                            sized = min(sized, req.max_per_position)
+                        if sized < PORTFOLIO_MIN_ORDER_USDC:
+                            _log(live_state, f"⏭ {sym}: sized {sized:.2f} < ${PORTFOLIO_MIN_ORDER_USDC} — kein Kauf")
+                            continue
+
+                        # Risk params for SL/TP
+                        risk = calculate_risk_params(enriched, sized, regime.get("regime", "RANGING"),
+                                                     signals_count_green=4,
+                                                     sl_atr_mult=(live_state.get("sl_atr_mult") or req.sl_atr_mult),
+                                                     tp_atr_mult=(live_state.get("tp_atr_mult") or req.tp_atr_mult))
+                        if risk.get("blocked"):
+                            _log(live_state, f"⏭ {sym}: Risk-Agent blockiert")
+                            continue
+
+                        price_now = enriched[-1]["close"] if enriched else 0.0
+                        ok = await _portfolio_buy(sym, sized,
+                                                  sl_pct=risk["stop_loss_pct"],
+                                                  tp_pct=risk["take_profit_pct"],
+                                                  buy_price_for_levels=price_now)
+                        if ok:
+                            slots_free -= 1
+
+            # ── Cycle wrap-up ────────────────────────────────────────────
+            try:
+                balances = await trader.get_balances()
+                live_state["portfolio_free_usdc"] = balances.get("USDC", 0.0)
+            except Exception: pass
 
             next2 = _next_close()
             live_state["next_check_ts"] = next2 + CLOSE_BUFFER

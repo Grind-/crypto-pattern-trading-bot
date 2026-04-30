@@ -108,7 +108,8 @@ def authenticate(username: str, password: str) -> Optional[Dict]:
 
 
 def create_user(username: str, password: str, role: str = "user",
-                claude_mode: str = "api_key") -> bool:
+                claude_mode: str = "api_key", owner: Optional[str] = None,
+                email: Optional[str] = None) -> bool:
     if not username or not password:
         return False
     new_salt = secrets.token_hex(16)
@@ -128,9 +129,48 @@ def create_user(username: str, password: str, role: str = "user",
             claude_mode=claude_mode,
             claude_api_key=None,
             claude_oauth_token=None,
+            owner=owner,
+            email=email,
         ))
         conn.commit()
     return True
+
+
+def email_main_user(email: str) -> Optional[str]:
+    """Return the username of the main user (owner=NULL) who owns this email, or None."""
+    if not email:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users.c.username).where(
+                users.c.email == email,
+                users.c.owner.is_(None),
+            )
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_email(username: str, email: str) -> tuple[bool, Optional[str]]:
+    """
+    Set email for a user.
+    Returns (True, None) on success.
+    Returns (False, conflicting_username) if another main user already owns this email.
+    Sub-accounts (owner != NULL) are exempt from the uniqueness check.
+    """
+    norm = (email or "").strip().lower() or None
+    if norm:
+        user = get_user(username)
+        # Only main users (no owner) must be unique per email
+        if not user or user.get("owner") is None:
+            existing = email_main_user(norm)
+            if existing and existing != username:
+                return False, existing
+    with engine.connect() as conn:
+        result = conn.execute(
+            update(users).where(users.c.username == username).values(email=norm)
+        )
+        conn.commit()
+    return result.rowcount > 0, None
 
 
 def delete_user(username: str) -> bool:

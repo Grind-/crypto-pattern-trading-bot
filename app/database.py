@@ -38,6 +38,8 @@ users = Table(
     Column("claude_oauth_token", Text),
     Column("binance_api_key",    Text),
     Column("binance_api_secret", Text),
+    Column("owner",              Text),   # admin username who created this user
+    Column("email",              Text),   # groups accounts belonging to the same person
 )
 
 live_states = Table(
@@ -105,7 +107,7 @@ def init_db() -> None:
 def _migrate_add_columns() -> None:
     """Add columns that were introduced after initial schema creation."""
     with engine.connect() as conn:
-        for col in ("binance_api_key", "binance_api_secret", "salt"):
+        for col in ("binance_api_key", "binance_api_secret", "salt", "owner", "email"):
             try:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} TEXT"))
             except Exception:

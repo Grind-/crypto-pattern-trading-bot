@@ -4,14 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Crypto Pattern AI</title>
-  <link rel="stylesheet" href="/static/style.css?v=13" />
+  <link rel="stylesheet" href="/static/style.css?v=17" />
 </head>
 <body>
   <header>
     <div class="logo">⬡ Crypto Pattern AI</div>
     <div class="subtitle">Claude-powered backtesting &amp; live trading</div>
     <div class="header-actions" id="header-actions">
-      <span id="header-user"></span>
+      <div id="user-switcher" class="user-switcher" style="display:none">
+        <button class="user-switcher-btn" id="user-switcher-btn" onclick="toggleUserSwitcher()">
+          <span id="header-user"></span>
+          <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style="margin-left:4px;opacity:.6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <div class="user-switcher-dropdown" id="user-switcher-dropdown" style="display:none">
+          <div class="user-switcher-list" id="user-switcher-list"></div>
+        </div>
+      </div>
+      <span id="header-user-plain" style="display:none"></span>
       <a id="btn-admin" href="/admin" style="display:none" class="btn-logout">Admin</a>
       <a id="btn-docs" href="/documentation" style="display:none" class="btn-logout">Entwickler-Doku</a>
       <a href="/guide" class="btn-logout">Anleitung</a>
@@ -163,6 +172,12 @@
 
     <div class="card">
       <h2>Konfiguration</h2>
+      <div class="mode-switcher" id="live-mode-switcher" role="tablist">
+        <button type="button" class="mode-switcher-btn active" data-mode="single"
+                onclick="setLiveMode('single')">Single Pair</button>
+        <button type="button" class="mode-switcher-btn" data-mode="portfolio"
+                onclick="setLiveMode('portfolio')">Portfolio</button>
+      </div>
       <div id="binance-key-status" style="margin-bottom:12px;font-size:0.85em"></div>
       <div class="form-grid">
         <div class="field full" id="api-key-fields">
@@ -187,9 +202,12 @@
             <option value="1d">1d</option>
           </select>
         </div>
-        <div class="field">
-          <label>Trade-Betrag (USDC)</label>
+        <div class="field" id="live-amount-field">
+          <label id="live-amount-label">Trade-Betrag (USDC)</label>
           <input id="live-amount" type="number" value="50" min="10" onchange="saveUserSettings()" />
+          <div id="live-amount-hint" style="font-size:11px;color:var(--text-muted);margin-top:3px;display:none">
+            0 = automatisch (Agent verwaltet die Aufteilung).
+          </div>
         </div>
         <div class="field">
           <label>Compounding-Modus</label>
@@ -236,9 +254,18 @@
             <strong>Risk/Reward:</strong> Standard-SL 1,5 × ATR + TP 2,5 × ATR = Verhältnis 1:1,67. Damit reicht eine Win-Rate von ~38 %, um break-even zu sein. <strong>Kleiner</strong> = schnellerer Gewinn, geringerer Betrag. <strong>Größer</strong> = mehr Geduld nötig, aber höherer Gewinn pro Trade.
           </div>
         </div>
+        <div class="field full" id="portfolio-info-hint" style="display:none">
+          <div style="font-size:11px;color:var(--text-muted)">
+            ℹ Agent scannt 10 Pairs, hält bis zu 4 Positionen gleichzeitig.
+            Kapital wird nach Signal-Konfidenz gewichtet (55–70% → 20%, 70–85% → 30%, 85%+ → 40% des freien USDC).
+            Stop-Loss und Take-Profit werden pro Position individuell gesetzt (ATR-basiert).
+          </div>
+        </div>
       </div>
       <div class="btn-row">
-        <button id="btn-live-start" class="btn btn-primary" onclick="startLive()">▶ Live Trading starten</button>
+        <button id="btn-live-start" class="btn btn-primary" onclick="startLive()">
+          <span id="btn-live-start-label">▶ Live Trading starten</span>
+        </button>
         <button id="btn-live-stop" class="btn btn-danger" onclick="stopLive()" disabled>■ Stopp</button>
       </div>
     </div>
@@ -280,6 +307,13 @@
           </div>
         </div>
 
+        <!-- Real holdings from Binance -->
+        <div id="live-holdings-row" class="live-holdings-widget" style="display:none">
+          <div class="live-holdings-label">Bestand (Binance)</div>
+          <div id="live-holdings-value" class="live-holdings-value">—</div>
+          <div id="live-holdings-meta" class="live-capital-meta"></div>
+        </div>
+
         <!-- Countdown to next candle -->
         <div id="live-countdown-box" class="countdown-box" style="display:none">
           <div>
@@ -291,6 +325,7 @@
 
         <div class="trigger-row" style="margin-top:8px">
           <button id="btn-live-trigger" class="btn btn-secondary" onclick="triggerAnalysis()">⚡ Jetzt analysieren</button>
+          <button id="btn-reset-position" class="btn btn-danger btn-sm" onclick="resetPosition()" style="display:none" title="Intern auf FLAT setzen – kein Binance-Order">↺ Position zurücksetzen</button>
           <span id="trigger-result" class="trigger-result"></span>
         </div>
 
@@ -306,6 +341,27 @@
         </div>
 
         <div id="live-log-box" class="log-box" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Portfolio summary (only in portfolio mode) -->
+      <div class="card" id="portfolio-summary-card" style="display:none">
+        <div class="portfolio-total">
+          <div class="portfolio-total-label">Portfolio-Wert</div>
+          <div id="portfolio-total-value" class="portfolio-total-amount">—</div>
+          <div id="portfolio-total-meta" class="portfolio-free">USDC frei: —</div>
+        </div>
+      </div>
+
+      <!-- Per-position cards container -->
+      <div class="card" id="portfolio-positions-card" style="display:none">
+        <h2 style="display:flex;justify-content:space-between;align-items:center">
+          <span>Positionen</span>
+          <span id="portfolio-positions-count" class="badge"></span>
+        </h2>
+        <div id="portfolio-positions-empty" class="empty-state" style="display:none">
+          Keine offenen Positionen. Der Agent sucht nach Einstiegssignalen.
+        </div>
+        <div id="portfolio-positions" class="portfolio-positions"></div>
       </div>
 
       <!-- Decision Transparency Card -->
@@ -377,6 +433,7 @@
           <canvas id="perf-chart"></canvas>
         </div>
         <div id="perf-empty" class="empty-state perf-empty" style="display:none">Noch keine abgeschlossenen Trades.</div>
+        <div id="perf-trades-table" style="display:none"></div>
       </div>
 
     </div>
@@ -434,6 +491,6 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=13"></script>
+  <script src="/static/app.js?v=17"></script>
 </body>
 </html>

@@ -293,6 +293,7 @@ async def get_live_signal(
     current_position: str,
     username: str = "",
     signal_history: Optional[List[Dict]] = None,
+    trade_history: Optional[List[Dict]] = None,
     analysis_weight: int = 70,
     api_key: Optional[str] = None,
     oauth_token: str = "",
@@ -380,10 +381,47 @@ async def get_live_signal(
             )
         history_block += "\n"
 
+    trade_block = ""
+    if trade_history:
+        import time as _time
+        now_ms = int(_time.time() * 1000)
+        completed = [(b, s) for b, s in zip(trade_history, trade_history[1:])
+                     if b.get("type") == "BUY" and s.get("type") == "SELL"]
+        # rebuild correct pairs regardless of ordering
+        pairs = []
+        pending_buy = None
+        for t in sorted(trade_history, key=lambda x: x.get("timestamp", 0)):
+            if t.get("type") == "BUY":
+                pending_buy = t
+            elif t.get("type") == "SELL" and pending_buy:
+                pairs.append((pending_buy, t))
+                pending_buy = None
+
+        if pairs or pending_buy:
+            trade_block = "ABGESCHLOSSENE TRADES DIESER SESSION:\n"
+            for buy, sell in pairs[-5:]:  # last 5 completed trades
+                pnl = sell.get("pnl_pct")
+                pnl_str = f"{pnl:+.2f}%" if pnl is not None else "?"
+                trade_block += (
+                    f"  BUY {buy.get('symbol','?')} @ ${buy.get('price',0):,.4f} → "
+                    f"SELL @ ${sell.get('price',0):,.4f} | P&L: {pnl_str}\n"
+                )
+            if pending_buy:
+                buy_price = pending_buy.get("price", 0)
+                buy_sym   = pending_buy.get("symbol", symbol)
+                hold_ms   = now_ms - pending_buy.get("timestamp", now_ms)
+                hold_h    = round(hold_ms / 3_600_000, 1)
+                unreal_pct = ((current_price / buy_price) - 1) * 100 if buy_price else 0
+                trade_block += (
+                    f"  OFFENE POSITION: {buy_sym} @ ${buy_price:,.4f} | "
+                    f"Haltedauer: {hold_h}h | Unrealisiert: {unreal_pct:+.2f}%\n"
+                )
+            trade_block += "\n"
+
     prompt = f"""You are a live cryptocurrency trading AI. Respond with valid raw JSON only.
 
 Analyze {symbol} {interval} data and give ONE trading signal.
-{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}CURRENT PRICE: ${current_price:.2f}
+{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}{trade_block}CURRENT PRICE: ${current_price:.2f}
 CURRENT POSITION: {current_position} (IN_POSITION = only SELL or HOLD; FLAT = only BUY or HOLD)
 
 RECENT DATA (last {len(candles)} candles):

@@ -17,6 +17,35 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
+// ── Portfolio / Live mode state ───────────────────────────────────────────────
+let _liveMode = 'single';
+
+function setLiveMode(mode) {
+  if (mode !== 'single' && mode !== 'portfolio') return;
+  // Disable while running
+  const startBtn = document.getElementById('btn-live-start');
+  if (startBtn && startBtn.disabled) return;
+  _liveMode = mode;
+  document.querySelectorAll('#live-mode-switcher .mode-switcher-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  const portfolio = mode === 'portfolio';
+  // Form-field mutations
+  const amtField = document.getElementById('live-amount-field');
+  if (amtField) amtField.style.display = portfolio ? 'none' : '';
+  const info = document.getElementById('portfolio-info-hint');
+  if (info) info.style.display = portfolio ? 'block' : 'none';
+  const startLbl = document.getElementById('btn-live-start-label');
+  if (startLbl) startLbl.textContent = portfolio ? '▶ Portfolio Trading starten' : '▶ Live Trading starten';
+  saveUserSettings();
+}
+
+function _setModeSwitcherDisabled(disabled) {
+  const sw = document.getElementById('live-mode-switcher');
+  if (!sw) return;
+  sw.style.opacity = disabled ? '0.4' : '';
+  sw.style.pointerEvents = disabled ? 'none' : '';
+}
+
 // ── API Key reveal state ──────────────────────────────────────────────────────
 let _revealedApiKey = null;
 
@@ -302,10 +331,11 @@ function showIterResult(result) {
   if (chartPrices.length > 0 && result.signals) {
     const buyPoints = [];
     const sellPoints = [];
+    const chartLabels = priceChart.data.labels || [];
     result.signals.forEach(s => {
       const idx = s.candle_index;
       if (idx >= 0 && idx < chartPrices.length) {
-        const point = { x: idx, y: chartPrices[idx] };
+        const point = { x: chartLabels[idx] !== undefined ? chartLabels[idx] : idx, y: chartPrices[idx] };
         if (s.action === 'BUY') buyPoints.push(point);
         else if (s.action === 'SELL') sellPoints.push(point);
       }
@@ -372,16 +402,20 @@ async function validateBinanceKeys() {
 
 async function startLive() {
   const rawWeight = parseInt(document.getElementById('live-analysis-weight')?.value ?? '30', 10);
+  const isPortfolio = _liveMode === 'portfolio';
+  const amtVal = parseFloat(document.getElementById('live-amount').value) || 50;
   const body = {
     api_key: document.getElementById('live-api-key').value.trim(),
     api_secret: document.getElementById('live-api-secret').value.trim(),
     interval: document.getElementById('live-interval').value,
-    trade_amount_usdt: parseFloat(document.getElementById('live-amount').value),
+    trade_amount_usdt: isPortfolio ? 0 : amtVal,
     compounding_mode: document.getElementById('live-compounding-mode').value,
     analysis_weight: rawWeight,
     min_confidence: parseInt(document.getElementById('live-min-confidence')?.value ?? '55', 10),
     sl_atr_mult: parseFloat(document.getElementById('live-sl-mult')?.value ?? '1.5'),
     tp_atr_mult: parseFloat(document.getElementById('live-tp-mult')?.value ?? '2.5'),
+    mode: _liveMode,
+    max_per_position: 0,
   };
   const keyEl = document.getElementById('live-api-key');
   const secEl = document.getElementById('live-api-secret');
@@ -404,17 +438,26 @@ async function startLive() {
   document.getElementById('btn-live-start').disabled = true;
   document.getElementById('btn-live-stop').disabled = false;
   document.getElementById('live-active-section').style.display = 'block';
+  _setModeSwitcherDisabled(true);
 
   livePolling = setInterval(pollLive, 5000);
+  startHoldingsPolling();
 }
 
 async function stopLive() {
   await fetch('/api/live/stop', { method: 'POST' });
   clearInterval(livePolling);
   livePolling = null;
+  stopHoldingsPolling();
+  _setModeSwitcherDisabled(false);
   document.getElementById('btn-live-start').disabled = false;
   document.getElementById('btn-live-stop').disabled = true;
   document.getElementById('live-countdown-box').style.display = 'none';
+  // hide portfolio cards on stop
+  const psc = document.getElementById('portfolio-summary-card');
+  if (psc) psc.style.display = 'none';
+  const ppc = document.getElementById('portfolio-positions-card');
+  if (ppc) ppc.style.display = 'none';
   // hide topup row on stop
   const tr = document.getElementById('topup-row');
   if (tr) tr.style.display = 'none';
@@ -495,8 +538,168 @@ async function triggerAnalysis() {
   setTimeout(() => { res.textContent = ''; if (btn.disabled) btn.disabled = false; }, 4000);
 }
 
+async function resetPosition() {
+  const msg = _liveMode === 'portfolio'
+    ? 'Alle Portfolio-Positionen intern auf FLAT setzen?\n\nEs wird kein Binance-Order ausgeführt – nur der interne Zustand wird korrigiert.'
+    : 'Position wirklich auf FLAT zurücksetzen?\n\nEs wird kein Binance-Order ausgeführt – nur der interne Zustand wird korrigiert.';
+  if (!confirm(msg)) return;
+  const btn = document.getElementById('btn-reset-position');
+  const res = document.getElementById('trigger-result');
+  btn.disabled = true;
+  res.textContent = '…';
+  try {
+    const r = await fetch('/api/live/reset-position', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = '✓ Position zurückgesetzt';
+      res.style.color = 'var(--green)';
+      btn.style.display = 'none';
+    } else {
+      res.textContent = '✗ ' + (d.detail || 'Fehler');
+      res.style.color = 'var(--red)';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    res.textContent = '✗ Fehler';
+    res.style.color = 'var(--red)';
+    btn.disabled = false;
+  }
+  setTimeout(() => { res.textContent = ''; }, 4000);
+}
+
 let liveNextCheckTs = null;
 let countdownTick = null;
+let holdingsInterval = null;
+
+function startHoldingsPolling() {
+  fetchHoldings();
+  if (!holdingsInterval) holdingsInterval = setInterval(fetchHoldings, 30000);
+}
+
+function stopHoldingsPolling() {
+  if (holdingsInterval) { clearInterval(holdingsInterval); holdingsInterval = null; }
+  const row = document.getElementById('live-holdings-row');
+  if (row) row.style.display = 'none';
+}
+
+async function fetchHoldings() {
+  if (_liveMode === 'portfolio') return;     // skip — portfolio mode doesn't use this widget
+  try {
+    const d = await fetch('/api/live/holdings').then(r => r.json());
+    renderHoldings(d);
+  } catch(e) {}
+}
+
+function renderHoldings(d) {
+  const row = document.getElementById('live-holdings-row');
+  const valEl = document.getElementById('live-holdings-value');
+  const metaEl = document.getElementById('live-holdings-meta');
+  if (!row) return;
+  if (!d || !d.ok) { row.style.display = 'none'; return; }
+
+  row.style.display = 'block';
+  const { base, quote, base_amount, quote_amount, current_price, base_value_in_quote } = d;
+
+  const fmtUSD = v => `$${v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  const fmtCrypto = (v, asset) => {
+    const digits = v < 0.001 ? 8 : v < 1 ? 6 : 2;
+    return `${v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:digits})} ${asset}`;
+  };
+
+  const parts = [];
+  if (base_amount > 0.000001) {
+    const approx = base_value_in_quote > 0 ? ` <span style="color:var(--text-muted);font-weight:400;font-size:13px">≈ ${fmtUSD(base_value_in_quote)}</span>` : '';
+    parts.push(`<span style="color:var(--green)">${fmtCrypto(base_amount, base)}</span>${approx}`);
+  }
+  if (quote_amount > 0.01) {
+    parts.push(`<span style="color:var(--text-muted)">${fmtUSD(quote_amount)} ${quote}</span>`);
+  }
+
+  valEl.innerHTML = parts.length > 0
+    ? parts.join('<span style="color:var(--border);margin:0 8px">|</span>')
+    : `<span style="color:var(--text-muted)">—</span>`;
+
+  if (metaEl) {
+    const priceStr = current_price ? `Kurs: ${fmtUSD(current_price)} · ` : '';
+    metaEl.textContent = priceStr + `Stand: ${new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;
+  }
+}
+
+function renderPortfolio(state) {
+  const positions = state.portfolio_positions || {};
+  const entries = Object.values(positions);
+  const card = document.getElementById('portfolio-positions-card');
+  const summaryCard = document.getElementById('portfolio-summary-card');
+  const cnt = document.getElementById('portfolio-positions-count');
+  const emptyEl = document.getElementById('portfolio-positions-empty');
+  const grid = document.getElementById('portfolio-positions');
+  if (!card || !grid) return;
+
+  // Summary
+  const totalVal = state.portfolio_total_value ?? 0;
+  const free = state.portfolio_free_usdc ?? 0;
+  const fmtUSD = v => `$${v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  const tvEl = document.getElementById('portfolio-total-value');
+  const tmEl = document.getElementById('portfolio-total-meta');
+  if (tvEl) tvEl.textContent = fmtUSD(totalVal + free);
+  if (tmEl) tmEl.textContent = `USDC frei: ${fmtUSD(free)} · in Positionen: ${fmtUSD(totalVal)}`;
+
+  if (cnt) cnt.textContent = `${entries.length} / ${state.portfolio_max_positions || 4}`;
+
+  if (entries.length === 0) {
+    if (emptyEl) emptyEl.style.display = 'block';
+    grid.innerHTML = '';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const fmtPx = (v) => v != null ? `$${parseFloat(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:6})}` : '—';
+  const fmtQty = (v, asset) => `${parseFloat(v).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:8})} ${asset}`;
+
+  grid.innerHTML = entries.map(slot => {
+    const sym  = slot.symbol;
+    const base = sym.replace(/USDC$|USDT$/, '');
+    const cur  = slot.current_price || slot.buy_price || 0;
+    const buy  = slot.buy_price || 0;
+    const pnl  = buy > 0 ? (cur - buy) / buy * 100 : 0;
+    const pnlCol  = pnl > 0.001 ? 'var(--green)' : pnl < -0.001 ? 'var(--red)' : 'var(--text-muted)';
+    const cardCls = pnl > 0.001 ? 'pos-card pos-card--positive'
+                    : pnl < -0.001 ? 'pos-card pos-card--negative'
+                    : 'pos-card';
+    // Progress bar within SL..TP range
+    let bar = '';
+    const sl = slot.sl_price, tp = slot.tp_price;
+    if (sl && tp && cur >= sl && cur <= tp) {
+      const pct = ((cur - sl) / (tp - sl)) * 100;
+      const entryPct = buy > 0 ? ((buy - sl) / (tp - sl)) * 100 : 50;
+      bar = `<div class="pos-card-bar">
+        <div class="pos-card-bar-fill" style="width:${pct.toFixed(1)}%;background:${pnl>=0?'var(--green)':'var(--red)'}"></div>
+        <div class="pos-card-bar-entry" style="left:${entryPct.toFixed(1)}%"></div>
+      </div>`;
+    } else if (sl && tp) {
+      bar = `<div style="font-size:10px;color:var(--text-muted);margin-top:4px">Außerhalb SL/TP-Range</div>`;
+    }
+    const slStr = sl ? fmtPx(sl) : '—';
+    const tpStr = tp ? fmtPx(tp) : '—';
+    return `<div class="${cardCls}">
+      <div class="pos-card-header">
+        <strong>${sym}</strong>
+        <span class="badge" style="color:var(--green);border-color:var(--green);background:rgba(63,185,80,0.1)">LONG</span>
+        <span class="badge" style="color:${pnlCol};border-color:${pnlCol};background:${pnl>=0?'rgba(63,185,80,0.1)':'rgba(248,81,73,0.1)'}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</span>
+      </div>
+      <div class="pos-card-data">
+        <div><div class="pos-card-label">Einstieg</div><div>${fmtPx(buy)}</div></div>
+        <div><div class="pos-card-label">Aktuell</div><div>${fmtPx(cur)}</div></div>
+        <div><div class="pos-card-label">Menge</div><div>${fmtQty(slot.position_qty, base)}</div></div>
+      </div>
+      <div class="pos-card-sltp">
+        <span style="color:var(--red)">SL ${slStr}</span>
+        <span style="color:var(--green)">TP ${tpStr}</span>
+      </div>
+      ${bar}
+    </div>`;
+  }).join('');
+}
 
 function startCountdown(ts) {
   liveNextCheckTs = ts;
@@ -542,6 +745,38 @@ async function pollLive() {
     ? 'color:#3fb950;border-color:#3fb95044;background:rgba(63,185,80,0.1)'
     : 'color:#8b949e';
 
+  const resetBtn = document.getElementById('btn-reset-position');
+  if (resetBtn) {
+    const showReset = isInPos || (state.mode === 'portfolio' && state.portfolio_open_count > 0);
+    resetBtn.style.display = showReset ? '' : 'none';
+  }
+
+  // Mode-aware UI mutation
+  const portfolioMode = state.mode === 'portfolio';
+  if (state.running) _setModeSwitcherDisabled(true);
+  // Sync the mode switcher to backend state on resume
+  if (state.running && state.mode && _liveMode !== state.mode) {
+    _liveMode = state.mode;
+    document.querySelectorAll('#live-mode-switcher .mode-switcher-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.mode === state.mode));
+    // Update start label to match synced mode
+    const startLbl = document.getElementById('btn-live-start-label');
+    if (startLbl) startLbl.textContent = portfolioMode ? '▶ Portfolio Trading starten' : '▶ Live Trading starten';
+  }
+  const pSumCard = document.getElementById('portfolio-summary-card');
+  const pPosCard = document.getElementById('portfolio-positions-card');
+  if (pSumCard) pSumCard.style.display = portfolioMode && state.running ? 'block' : 'none';
+  if (pPosCard) pPosCard.style.display = portfolioMode && state.running ? 'block' : 'none';
+  // In portfolio mode, hide the single-pair holdings widget
+  const holdRow = document.getElementById('live-holdings-row');
+  if (portfolioMode && holdRow) holdRow.style.display = 'none';
+  // Capital widget: hide in portfolio mode
+  if (portfolioMode) {
+    const capRow2 = document.getElementById('live-capital-row');
+    if (capRow2) capRow2.style.display = 'none';
+  }
+  if (portfolioMode) renderPortfolio(state);
+
   const basisEl = document.getElementById('live-basis-name');
   if (basisEl) {
     const w = state.analysis_weight ?? 70;
@@ -553,7 +788,7 @@ async function pollLive() {
   const capRow = document.getElementById('live-capital-row');
   const capVal = document.getElementById('live-capital-value');
   const capMeta = document.getElementById('live-capital-meta');
-  if (capRow && capVal && state.running) {
+  if (capRow && capVal && state.running && !portfolioMode) {
     capRow.style.display = 'block';
     const initial = state.trade_amount || state.current_capital;
     const current = state.current_capital;
@@ -565,7 +800,7 @@ async function pollLive() {
     const modeStr = modeLabels[state.compounding_mode] || state.compounding_mode || '';
     capVal.innerHTML = `$${current.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="color:${color};font-size:13px;font-weight:600">${sign}${deltaPct.toFixed(1)}%</span>`;
     if (capMeta) capMeta.innerHTML = `<span style="color:${color}">${sign}$${delta.toFixed(2)}</span> seit Start ($${initial.toFixed(2)})${modeStr ? ' · ' + modeStr : ''}`;
-  } else if (capRow && !state.running) {
+  } else if (capRow && (!state.running || portfolioMode)) {
     capRow.style.display = 'none';
   }
 
@@ -634,6 +869,7 @@ async function pollLive() {
     if (countdownTick) clearInterval(countdownTick);
     livePolling = null;
     liveNextCheckTs = null;
+    _setModeSwitcherDisabled(false);
     document.getElementById('live-countdown-box').style.display = 'none';
     document.getElementById('btn-live-start').disabled = false;
     document.getElementById('btn-live-stop').disabled = true;
@@ -868,8 +1104,10 @@ function renderPerfChart(data, mode) {
 
   if (perfChart) { perfChart.destroy(); perfChart = null; }
   legendRow.innerHTML = ''; legendRow.style.display = 'none';
+  const tradeTableEl = document.getElementById('perf-trades-table');
+  if (tradeTableEl) { tradeTableEl.innerHTML = ''; tradeTableEl.style.display = 'none'; }
 
-  const fmtTs  = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  const fmtTs  = ts => new Date(ts).toLocaleString('de-DE', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
   const fmtDay = ts => new Date(ts).toLocaleDateString('de-DE', {month:'short', day:'numeric'});
   const noLegend = { plugins: { legend: { display: false } } };
 
@@ -948,33 +1186,82 @@ function renderPerfChart(data, mode) {
 
   // ── Mode: Trade P&L ───────────────────────────────────────────────────
   } else if (mode === 'trades') {
-    const pnl = data.trade_pnl || [];
-    if (!pnl.length) { showEmpty(); return; }
+    const pairs = data.trade_pairs || [];
+    const pnl   = data.trade_pnl   || [];
+
+    if (!pairs.length) { showEmpty(); return; }
     showChart();
-    perfChart = mkChart('perf-chart', 'bar', {
-      labels: pnl.map((t, i) => `#${i + 1}`),
-      datasets: [{
-        label: 'P&L',
-        data: pnl.map(t => t.pct),
-        backgroundColor: pnl.map(t => t.pct >= 0 ? 'rgba(63,185,80,0.75)' : 'rgba(248,81,73,0.75)'),
-        borderColor:     pnl.map(t => t.pct >= 0 ? '#3fb950' : '#f85149'),
-        borderWidth: 1, borderRadius: 4,
-      }],
-    }, { ...chartDefaults, ...noLegend,
-      scales: { ...chartDefaults.scales,
-        y: { ticks:{ color:'#8b949e', font:{size:10},
-              callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' },
-             grid:{ color: ctx => ctx.tick.value === 0 ? 'rgba(139,148,158,0.4)' : '#21262d' } },
-      },
-      plugins: { ...noLegend.plugins,
-        tooltip: { callbacks: {
-          label: ctx => {
-            const t = pnl[ctx.dataIndex];
-            return `${t.symbol}: ${t.pct >= 0 ? '+' : ''}${t.pct.toFixed(2)}%`;
-          },
-        }},
-      },
-    });
+
+    // Bar chart (completed trades only — no open)
+    const closed = pairs.filter(p => !p.open);
+    if (closed.length > 0) {
+      perfChart = mkChart('perf-chart', 'bar', {
+        labels: closed.map((t, i) => `#${i + 1}`),
+        datasets: [{
+          label: 'P&L',
+          data: closed.map(t => t.pnl_pct ?? 0),
+          backgroundColor: closed.map(t => (t.pnl_pct ?? 0) >= 0 ? 'rgba(63,185,80,0.75)' : 'rgba(248,81,73,0.75)'),
+          borderColor:     closed.map(t => (t.pnl_pct ?? 0) >= 0 ? '#3fb950' : '#f85149'),
+          borderWidth: 1, borderRadius: 4,
+        }],
+      }, { ...chartDefaults, ...noLegend,
+        scales: { ...chartDefaults.scales,
+          y: { ticks:{ color:'#8b949e', font:{size:10},
+                callback: v => (v>=0?'+':'') + v.toFixed(1) + '%' },
+               grid:{ color: ctx => ctx.tick.value === 0 ? 'rgba(139,148,158,0.4)' : '#21262d' } },
+        },
+        plugins: { ...noLegend.plugins,
+          tooltip: { callbacks: {
+            label: ctx => {
+              const t = closed[ctx.dataIndex];
+              const p = t.pnl_pct ?? 0;
+              return `${t.symbol}: ${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
+            },
+          }},
+        },
+      });
+    } else {
+      wrapEl.style.display = 'none';
+    }
+
+    // Trade table (all trades including open position)
+    const fmtD = ts => ts ? new Date(ts).toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+    const fmtP = (v, digits=4) => v != null ? `$${parseFloat(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:digits})}` : '—';
+    const rows = pairs.map((t, i) => {
+      const pct = t.pnl_pct;
+      const isOpen = !!t.open;
+      const pctStr = pct != null
+        ? `<span style="color:${pct >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight:600">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%${isOpen ? ' *' : ''}</span>`
+        : '—';
+      const dur = t.duration_h != null ? `${t.duration_h}h` : '—';
+      return `<tr style="${isOpen ? 'opacity:0.75' : ''}">
+        <td style="color:var(--text-muted);font-size:11px;padding:5px 6px">#${i+1}${isOpen ? ' 🔴' : ''}</td>
+        <td style="font-size:11px;padding:5px 6px;font-weight:600">${t.symbol || '—'}</td>
+        <td style="font-size:11px;padding:5px 6px">${fmtP(t.buy_price, 6)}</td>
+        <td style="font-size:11px;padding:5px 6px">${isOpen ? '<span style="color:var(--text-muted)">offen</span>' : fmtP(t.sell_price, 6)}</td>
+        <td style="font-size:11px;padding:5px 6px;color:var(--text-muted)">${dur}</td>
+        <td style="font-size:11px;padding:5px 6px;text-align:right">${pctStr}</td>
+      </tr>`;
+    }).join('');
+
+    const tableEl = document.getElementById('perf-trades-table');
+    if (tableEl) {
+      tableEl.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;margin-top:12px">
+          <thead><tr>
+            <th style="font-size:10px;color:var(--text-muted);text-align:left;padding:3px 6px;border-bottom:1px solid var(--border)">#</th>
+            <th style="font-size:10px;color:var(--text-muted);text-align:left;padding:3px 6px;border-bottom:1px solid var(--border)">Symbol</th>
+            <th style="font-size:10px;color:var(--text-muted);text-align:left;padding:3px 6px;border-bottom:1px solid var(--border)">Kauf</th>
+            <th style="font-size:10px;color:var(--text-muted);text-align:left;padding:3px 6px;border-bottom:1px solid var(--border)">Verkauf</th>
+            <th style="font-size:10px;color:var(--text-muted);text-align:left;padding:3px 6px;border-bottom:1px solid var(--border)">Dauer</th>
+            <th style="font-size:10px;color:var(--text-muted);text-align:right;padding:3px 6px;border-bottom:1px solid var(--border)">P&L</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${pairs.some(p => p.open) ? '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">🔴 offene Position · * unrealisiert</div>' : ''}
+      `;
+      tableEl.style.display = 'block';
+    }
   }
 }
 
@@ -1061,7 +1348,7 @@ function renderSimDetail(sim) {
     (sim.signals || []).forEach(s => {
       const idx = s.candle_index;
       if (idx >= 0 && idx < chartPrices.length) {
-        const pt = { x: idx, y: chartPrices[idx] };
+        const pt = { x: labels[idx] !== undefined ? labels[idx] : idx, y: chartPrices[idx] };
         if (s.action === 'BUY') buys.push(pt);
         else if (s.action === 'SELL') sells.push(pt);
       }
@@ -1256,6 +1543,7 @@ function saveUserSettings() {
       live_min_confidence:   parseInt(document.getElementById('live-min-confidence')?.value) || 55,
       live_sl_mult:          parseFloat(document.getElementById('live-sl-mult')?.value) || 1.5,
       live_tp_mult:          parseFloat(document.getElementById('live-tp-mult')?.value) || 2.5,
+      live_mode:             _liveMode,
       sim_symbol:            document.getElementById('symbol')?.value,
       sim_interval:          document.getElementById('interval')?.value,
       sim_days:              parseInt(document.getElementById('days')?.value) || 30,
@@ -1286,6 +1574,9 @@ async function loadUserSettings() {
     set('live-min-confidence',    s.live_min_confidence);
     set('live-sl-mult',           s.live_sl_mult);
     set('live-tp-mult',           s.live_tp_mult);
+    if (s.live_mode) {
+      setLiveMode(s.live_mode);
+    }
     set('symbol',                 s.sim_symbol);
     set('interval',               s.sim_interval);
     set('days',                   s.sim_days);
@@ -1309,6 +1600,23 @@ async function initPage() {
       document.getElementById('btn-live-stop').disabled = false;
 
       document.getElementById('live-status-text').textContent = state.status || 'active';
+
+      // Sync mode switcher on resume
+      if (state.mode === 'portfolio') {
+        _liveMode = 'portfolio';
+        document.querySelectorAll('#live-mode-switcher .mode-switcher-btn').forEach(b =>
+          b.classList.toggle('active', b.dataset.mode === 'portfolio'));
+        _setModeSwitcherDisabled(true);
+        const startLbl = document.getElementById('btn-live-start-label');
+        if (startLbl) startLbl.textContent = '▶ Portfolio Trading starten';
+        // Show portfolio cards immediately on resume
+        const psc = document.getElementById('portfolio-summary-card');
+        const ppc = document.getElementById('portfolio-positions-card');
+        if (psc) psc.style.display = 'block';
+        if (ppc) ppc.style.display = 'block';
+      } else {
+        _setModeSwitcherDisabled(true);
+      }
 
       const symBadge = document.getElementById('live-symbol-badge');
       symBadge.textContent = state.symbol || '';
@@ -1339,6 +1647,7 @@ async function initPage() {
 
       livePolling = setInterval(pollLive, 5000);
       pollLive();
+      startHoldingsPolling();
       loadPerformance(true);
     }
   } catch (e) {}
@@ -1350,8 +1659,17 @@ async function initPage() {
 // Load user profile (show admin button, username in header)
 fetch('/api/user/profile').then(r => r.json()).then(data => {
   _currentUsername = data.username;
+
+  // Header username + account-type badge
+  const typeLabel = data.is_subaccount ? 'Sub' : 'Haupt';
+  const typeColor = data.is_subaccount ? '#d29922' : '#58a6ff';
+  const badge = `<span style="font-size:10px;font-weight:600;color:${typeColor};border:1px solid ${typeColor};border-radius:3px;padding:1px 5px;margin-left:5px;opacity:.85">${typeLabel}</span>`;
+
   const el = document.getElementById('header-user');
-  if (el) el.textContent = data.username;
+  if (el) el.innerHTML = data.username + badge;
+  const plain = document.getElementById('header-user-plain');
+  if (plain) plain.innerHTML = data.username + badge;
+
   if (data.role === 'admin') {
     const btn = document.getElementById('btn-admin');
     if (btn) btn.style.display = '';
@@ -1360,7 +1678,90 @@ fetch('/api/user/profile').then(r => r.json()).then(data => {
     const refreshBtn = document.getElementById('btn-news-refresh');
     if (refreshBtn) refreshBtn.style.display = '';
   }
+  // Show switcher for any user who has an email (email groups accounts together)
+  if (data.email) initUserSwitcher(data.username, data.email);
 }).catch(() => {});
+
+let _userSwitcherOpen = false;
+
+async function initUserSwitcher(currentUser, currentEmail) {
+  try {
+    const d = await fetch('/api/admin/users').then(r => r.json());
+    // Only show users that share the same email address
+    const users = (d.users || []).filter(u =>
+      u.enabled && u.email && u.email === currentEmail
+    );
+    if (users.length < 2) return; // no point showing switcher with only one account
+
+    const switcher = document.getElementById('user-switcher');
+    const plain = document.getElementById('header-user-plain');
+    if (switcher) switcher.style.display = '';
+    if (plain) plain.style.display = 'none';
+
+    const list = document.getElementById('user-switcher-list');
+    if (!list) return;
+
+    // Sort: main accounts (no owner) first, then sub-accounts
+    const main = users.filter(u => !u.owner);
+    const subs = users.filter(u => !!u.owner);
+
+    const renderItem = (u, isSub) => {
+      const active = u.username === currentUser;
+      const dot = `<span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${active ? 'var(--blue)' : 'var(--border)'}"></span>`;
+      const typeTag = `<span style="font-size:10px;color:${isSub ? '#d29922' : '#58a6ff'};border:1px solid ${isSub ? '#d29922' : '#58a6ff'};border-radius:3px;padding:1px 4px;margin-left:auto;opacity:.8">${isSub ? 'Sub' : 'Haupt'}</span>`;
+      const indent = isSub ? 'padding-left:22px;' : '';
+      return `<button class="user-switcher-item${active ? ' user-switcher-item--active' : ''}"
+        style="${indent}"
+        onclick="switchToUser('${u.username}')"
+        ${active ? 'disabled' : ''}>
+        ${dot}
+        <span style="flex:1;text-align:left">${u.username}${active ? ' ✓' : ''}</span>
+        ${typeTag}
+      </button>`;
+    };
+
+    const divider = subs.length && main.length
+      ? `<div style="height:1px;background:var(--border);margin:3px 0"></div>` : '';
+
+    list.innerHTML = main.map(u => renderItem(u, false)).join('') + divider + subs.map(u => renderItem(u, true)).join('');
+  } catch(e) {}
+}
+
+function toggleUserSwitcher() {
+  const dd = document.getElementById('user-switcher-dropdown');
+  if (!dd) return;
+  _userSwitcherOpen = !_userSwitcherOpen;
+  dd.style.display = _userSwitcherOpen ? 'block' : 'none';
+}
+
+document.addEventListener('click', e => {
+  if (_userSwitcherOpen && !e.target.closest('#user-switcher')) {
+    _userSwitcherOpen = false;
+    const dd = document.getElementById('user-switcher-dropdown');
+    if (dd) dd.style.display = 'none';
+  }
+});
+
+async function switchToUser(username) {
+  _userSwitcherOpen = false;
+  const dd = document.getElementById('user-switcher-dropdown');
+  if (dd) dd.style.display = 'none';
+  try {
+    const r = await fetch('/api/admin/switch-user', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username}),
+    });
+    if (r.ok) {
+      window.location.reload();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert('Fehler: ' + (err.detail || 'Unbekannter Fehler'));
+    }
+  } catch(e) {
+    alert('Fehler beim Wechseln: ' + e.message);
+  }
+}
 
 // ── News Intelligence ────────────────────────────────────────────────────────
 let _newsLoaded = false;

@@ -49,8 +49,8 @@ def run_simulation(
         if action == expecting:
             valid.append(s)
             expecting = "SELL" if expecting == "BUY" else "BUY"
-    if valid and valid[-1].get("action", "").upper() == "BUY":
-        valid.pop()
+    # Trailing BUY (no closing SELL) is kept — the position will be
+    # marked-to-market at the last candle price rather than being dropped.
 
     sig_map = {s["candle_index"]: s for s in valid}
 

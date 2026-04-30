@@ -134,6 +134,49 @@
       <div class="error-msg" id="pw-error"></div>
     </div>
 
+    <!-- Email + Sub-Accounts -->
+    <div class="card">
+      <h2>E-Mail &amp; Sub-Accounts</h2>
+      <div id="account-type-info" style="margin-bottom:16px"></div>
+
+      <div class="field" style="margin-bottom:14px">
+        <label>E-Mail-Adresse</label>
+        <div id="email-set-view" style="display:none;align-items:center;gap:10px">
+          <span id="email-display" style="font-size:13px;font-weight:600;color:var(--text)"></span>
+          <span style="font-size:11px;color:var(--text-muted)">(unveränderlich)</span>
+        </div>
+        <div id="email-edit-view" style="display:flex;gap:8px">
+          <input id="email-input" type="email" placeholder="du@beispiel.de" style="flex:1" />
+          <button class="btn btn-primary" onclick="saveEmail()">Speichern</button>
+        </div>
+        <div class="success-msg" id="email-success">Gespeichert.</div>
+        <div class="error-msg" id="email-error"></div>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+
+      <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">Sub-Accounts</h3>
+      <div id="subaccounts-list" style="margin-bottom:14px"></div>
+
+      <div id="new-sub-form" style="display:none">
+        <div class="field" style="margin-bottom:8px">
+          <label>Username</label>
+          <input id="sub-username" type="text" placeholder="bot-btc" autocomplete="off" />
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>Passwort</label>
+          <input id="sub-password" type="password" placeholder="min. 6 Zeichen" autocomplete="new-password" />
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="createSubaccount()">Erstellen</button>
+          <button class="btn btn-secondary" onclick="toggleNewSubForm(false)">Abbrechen</button>
+        </div>
+        <div class="success-msg" id="sub-success">Sub-Account erstellt.</div>
+        <div class="error-msg" id="sub-error"></div>
+      </div>
+      <button id="btn-new-sub" class="btn btn-secondary" onclick="toggleNewSubForm(true)" style="margin-top:4px">+ Neuer Sub-Account</button>
+    </div>
+
   </div>
 
   <script>
@@ -179,6 +222,36 @@
         card.style.cursor = 'not-allowed';
         card.title = 'Nur durch Admin aktivierbar';
         card.querySelector('input').disabled = true;
+      }
+
+      // Account-type info box
+      const infoEl = document.getElementById('account-type-info');
+      if (infoEl) {
+        if (data.is_subaccount) {
+          infoEl.innerHTML = `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(210,153,34,0.08);border:1px solid rgba(210,153,34,0.3);border-radius:8px">
+              <span style="font-size:11px;font-weight:700;color:#d29922;border:1px solid #d29922;border-radius:3px;padding:2px 6px">SUB</span>
+              <div>
+                <div style="font-size:13px;font-weight:600">Sub-Account</div>
+                <div style="font-size:11px;color:var(--text-muted)">Gehört zu <strong>${data.owner}</strong> · ${data.email || 'keine E-Mail'}</div>
+              </div>
+            </div>`;
+          // Sub-accounts can't create their own sub-accounts or change email
+          const emailSection = document.getElementById('email-input');
+          if (emailSection) emailSection.disabled = true;
+          const subCard = document.getElementById('new-sub-form');
+          const subBtn = document.getElementById('btn-new-sub');
+          if (subBtn) subBtn.style.display = 'none';
+        } else {
+          infoEl.innerHTML = `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.3);border-radius:8px">
+              <span style="font-size:11px;font-weight:700;color:#58a6ff;border:1px solid #58a6ff;border-radius:3px;padding:2px 6px">HAUPT</span>
+              <div>
+                <div style="font-size:13px;font-weight:600">Haupt-Account</div>
+                <div style="font-size:11px;color:var(--text-muted)">Sub-Accounts erben deine E-Mail und sind im Schnellwechsler sichtbar.</div>
+              </div>
+            </div>`;
+        }
       }
     }
 
@@ -280,6 +353,86 @@
     }
 
     loadProfile();
+    loadSubaccounts();
+
+    async function saveEmail() {
+      const el = document.getElementById('email-input');
+      const successEl = document.getElementById('email-success');
+      const errEl = document.getElementById('email-error');
+      successEl.style.display = 'none'; errEl.style.display = 'none';
+      try {
+        const r = await fetch('/api/user/email', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({email: el.value.trim()}),
+        });
+        if (!r.ok) { const d = await r.json().catch(()=>({})); errEl.textContent = d.detail||'Fehler'; errEl.style.display='block'; return; }
+        successEl.style.display = 'block';
+        loadSubaccounts();
+      } catch(e) { errEl.textContent = e.message; errEl.style.display='block'; }
+    }
+
+    async function loadSubaccounts() {
+      try {
+        const d = await fetch('/api/user/subaccounts').then(r => r.json());
+        if (d.email) {
+          document.getElementById('email-display').textContent = d.email;
+          document.getElementById('email-set-view').style.display = 'flex';
+          document.getElementById('email-edit-view').style.display = 'none';
+        } else {
+          document.getElementById('email-set-view').style.display = 'none';
+          document.getElementById('email-edit-view').style.display = 'flex';
+        }
+        const list = document.getElementById('subaccounts-list');
+        const subs = d.subaccounts || [];
+        if (!subs.length) {
+          list.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Noch keine Sub-Accounts.</div>';
+        } else {
+          list.innerHTML = subs.map(s => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;margin-bottom:6px">
+              <span style="font-size:13px;font-weight:600">${s.username}</span>
+              <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;color:var(--red);border-color:var(--red)"
+                onclick="deleteSubaccount('${s.username}')">Löschen</button>
+            </div>`).join('');
+        }
+      } catch(e) {}
+    }
+
+    function toggleNewSubForm(show) {
+      document.getElementById('new-sub-form').style.display = show ? 'block' : 'none';
+      document.getElementById('btn-new-sub').style.display = show ? 'none' : '';
+      if (show) document.getElementById('sub-username').focus();
+      document.getElementById('sub-success').style.display = 'none';
+      document.getElementById('sub-error').style.display = 'none';
+    }
+
+    async function createSubaccount() {
+      const successEl = document.getElementById('sub-success');
+      const errEl = document.getElementById('sub-error');
+      successEl.style.display = 'none'; errEl.style.display = 'none';
+      const username = document.getElementById('sub-username').value.trim();
+      const password = document.getElementById('sub-password').value;
+      try {
+        const r = await fetch('/api/user/subaccounts', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({username, password}),
+        });
+        if (!r.ok) { const d = await r.json().catch(()=>({})); errEl.textContent = d.detail||'Fehler'; errEl.style.display='block'; return; }
+        successEl.style.display = 'block';
+        document.getElementById('sub-username').value = '';
+        document.getElementById('sub-password').value = '';
+        toggleNewSubForm(false);
+        loadSubaccounts();
+      } catch(e) { errEl.textContent = e.message; errEl.style.display='block'; }
+    }
+
+    async function deleteSubaccount(username) {
+      if (!confirm(`Sub-Account "${username}" wirklich löschen?`)) return;
+      try {
+        const r = await fetch(`/api/user/subaccounts/${username}`, {method:'DELETE'});
+        if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.detail||'Fehler'); return; }
+        loadSubaccounts();
+      } catch(e) { alert(e.message); }
+    }
   </script>
 </body>
 </html>

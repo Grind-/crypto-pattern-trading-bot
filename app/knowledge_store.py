@@ -260,7 +260,6 @@ def promote_rules_to_core(rules: list) -> None:
 _SNAPSHOT_EXCLUDE = frozenset({
     "signals", "log", "live_candles",
     "api_key", "api_secret",
-    "_session_token", "_sell_fail_count",
     "pending_symbol_switch",
 })
 
@@ -301,7 +300,8 @@ def save_live_state_snapshot(username: str, symbol: str, state: dict) -> None:
     """Persist a stripped live_state snapshot for crash recovery."""
     if not symbol:
         return
-    snapshot = {k: v for k, v in state.items() if k not in _SNAPSHOT_EXCLUDE}
+    snapshot = {k: v for k, v in state.items()
+                if k not in _SNAPSHOT_EXCLUDE and not k.startswith("_")}
     snapshot["_snapshot_at"] = datetime.now(timezone.utc).isoformat()
     _save(_user_live_state_snapshot_path(username, symbol), snapshot)
 
