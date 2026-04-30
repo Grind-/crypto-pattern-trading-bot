@@ -299,6 +299,7 @@ async def get_live_signal(
     oauth_token: str = "",
     regime: Optional[Dict] = None,
     news_score: Optional[Dict] = None,
+    portfolio_context: Optional[str] = None,
 ) -> Dict:
     analysis_weight = max(0, min(100, int(analysis_weight)))
 
@@ -418,11 +419,15 @@ async def get_live_signal(
                 )
             trade_block += "\n"
 
+    portfolio_rebalancing_block = ""
+    if portfolio_context:
+        portfolio_rebalancing_block = f"PORTFOLIO REBALANCING:\n{portfolio_context}\n\n"
+
     prompt = f"""You are a live cryptocurrency trading AI. Respond with valid raw JSON only.
 
 Analyze {symbol} {interval} data and give ONE trading signal.
-{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}{trade_block}CURRENT PRICE: ${current_price:.2f}
-CURRENT POSITION: {current_position} (IN_POSITION = only SELL or HOLD; FLAT = only BUY or HOLD)
+{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}{trade_block}{portfolio_rebalancing_block}CURRENT PRICE: ${current_price:.2f}
+CURRENT POSITION: {current_position} (IN_POSITION = SELL, PARTIAL_SELL or HOLD; FLAT = only BUY or HOLD)
 
 RECENT DATA (last {len(candles)} candles):
 {data_str}
@@ -436,20 +441,27 @@ INDICATOR GUIDE:
 - rsi_bear_div=True → bärische Divergenz (starkes SELL-Muster)
 - adx: <25=kein Trend, 25-50=Trend, >50=starker Trend
 
+ACTIONS GUIDE:
+- BUY: open new position (only when FLAT)
+- SELL: close full position (only when IN_POSITION)
+- PARTIAL_SELL: reduce position by sell_fraction (0.05–0.95); use to free capital for a stronger opportunity or to take partial profits (only when IN_POSITION)
+- HOLD: no action
+
 Respond with ONLY raw JSON:
 {{
   "action": "BUY",
   "confidence": 75,
   "reason": "Brief explanation",
   "stop_loss_pct": 2.5,
-  "take_profit_pct": 5.0
+  "take_profit_pct": 5.0,
+  "sell_fraction": 0.0
 }}"""
 
     try:
         return await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=60)
     except Exception:
         return {"action": "HOLD", "confidence": 0, "reason": "Claude error",
-                "stop_loss_pct": 2, "take_profit_pct": 4}
+                "stop_loss_pct": 2, "take_profit_pct": 4, "sell_fraction": 0}
 
 
 async def scan_market(symbol_summaries: List[Dict], interval: str,

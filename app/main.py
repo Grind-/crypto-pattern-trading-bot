@@ -2482,11 +2482,70 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             _persist_trade_history(username, live_state)
             append_trade_log(username, symbol, live_state["trade_history"][-1])
             live_state["portfolio_positions"].pop(symbol, None)
-            _log(live_state, f"✅ VERKAUF {symbol}{reason_str} @ ${sell_price:,.4f} | P&L: {pnl_pct:+.2f}% | +${net:.2f}")
+            pnl_str = f"{pnl_pct:+.2f}%" if pnl_pct is not None else "?"
+            _log(live_state, f"✅ VERKAUF {symbol}{reason_str} @ ${sell_price:,.4f} | P&L: {pnl_str} | +${net:.2f}")
             return True, net
         except Exception as e:
             _log(live_state, f"❌ {symbol} VERKAUF fehlgeschlagen: {e}")
             logger.error(f"Portfolio VERKAUF [{username}/{symbol}]: {e}")
+            return False, 0.0
+
+    async def _portfolio_partial_sell(symbol: str, fraction: float,
+                                       force_reason: str = "") -> tuple[bool, float]:
+        fraction = max(0.05, min(0.95, float(fraction)))
+        slot = live_state["portfolio_positions"].get(symbol)
+        if not slot:
+            return False, 0.0
+        total_qty = float(slot.get("position_qty") or 0)
+        if total_qty <= 0:
+            return False, 0.0
+        sell_qty = total_qty * fraction
+        try:
+            step = await trader.get_lot_step(symbol)
+            sell_qty = _floor_to_step(sell_qty, step)
+            if sell_qty <= 0:
+                _log(live_state, f"⚠ {symbol}: Teilmenge nach LOT_SIZE = 0")
+                return False, 0.0
+            precision = max(0, -int(math.floor(math.log10(step))))
+            order = await trader.place_market_order(symbol=symbol, side="SELL",
+                                                     quantity=sell_qty, qty_precision=precision)
+            gross = float(order.get("cummulativeQuoteQty", 0))
+            fees  = sum(float(f["commission"]) for f in order.get("fills", [])
+                        if f.get("commissionAsset", "").upper() == "USDC")
+            net   = (gross - fees) if gross > 0 else 0.0
+            sell_price = (gross / sell_qty) if sell_qty > 0 and gross > 0 else slot.get("current_price") or 0.0
+            buy_p = float(slot.get("buy_price") or sell_price or 1.0)
+            pnl_pct = (sell_price - buy_p) / buy_p * 100 if (buy_p and sell_price > 0) else None
+            reason_str = f" [{force_reason}]" if force_reason else ""
+
+            # Update slot in place (do NOT pop)
+            remaining_qty = max(0.0, total_qty - sell_qty)
+            slot["position_qty"] = remaining_qty
+            slot["allocated_usdc"] = max(0.0, float(slot.get("allocated_usdc") or 0) - gross)
+
+            live_state["trade_history"].append({
+                "type": "PARTIAL_SELL", "symbol": symbol,
+                "price": sell_price, "timestamp": int(time.time() * 1000),
+                "order_id": str(order.get("orderId", "")),
+                "pnl_pct": pnl_pct, "net_usdc": net,
+                "fraction": round(fraction, 4), "qty_sold": sell_qty,
+            })
+            _persist_trade_history(username, live_state)
+            append_trade_log(username, symbol, live_state["trade_history"][-1])
+            pnl_str_p = f"{pnl_pct:+.2f}%" if pnl_pct is not None else "?"
+            _log(live_state, f"✂ TEILVERKAUF{reason_str} {symbol} ({fraction*100:.0f}%) — "
+                 f"{sell_qty:.6f} @ ${sell_price:,.4f} | P&L: {pnl_str_p} | +${net:.2f}")
+
+            # Pop slot if remainder is below minimum order size (dust)
+            remaining_value = remaining_qty * sell_price
+            if remaining_value < PORTFOLIO_MIN_ORDER_USDC:
+                live_state["portfolio_positions"].pop(symbol, None)
+                _log(live_state, f"↩ {symbol}: Rest ({remaining_value:.2f}) unter Minimum — Position geschlossen")
+
+            return True, net
+        except Exception as e:
+            _log(live_state, f"❌ {symbol} TEILVERKAUF fehlgeschlagen: {e}")
+            logger.error(f"Portfolio TEILVERKAUF [{username}/{symbol}]: {e}")
             return False, 0.0
 
     try:
@@ -2717,6 +2776,11 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 min_sell = live_state.get("min_confidence_sell") or req.min_confidence_sell
                 if action == "SELL" and confidence >= min_sell:
                     await _portfolio_sell(sym, force_reason=f"Signal {confidence}%")
+                elif action == "PARTIAL_SELL" and confidence >= min_sell:
+                    frac = float(signal.get("sell_fraction") or 0)
+                    if 0 < frac < 1:
+                        await _portfolio_partial_sell(sym, frac,
+                                                       force_reason=f"Signal {confidence}%")
 
             # ── Phase 2: scan for new entries ─────────────────────────────
             open_count = len(live_state["portfolio_positions"])
@@ -2725,25 +2789,74 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 _log(live_state, f"Portfolio voll ({open_count}/{PORTFOLIO_MAX_POSITIONS}) — keine neuen Käufe")
             else:
                 free_usdc = live_state.get("portfolio_free_usdc", 0.0)
+
+                # ── Scan always runs first to get candidates ──────────────
+                _log(live_state, f"🔍 Scanne {len(SCAN_SYMBOLS)} Pairs für {slots_free} freie Slot(s)…")
+                try:
+                    summaries = await _fetch_scan_summaries(req.interval)
+                    scan = await scan_market(summaries, req.interval,
+                                             username=username,
+                                             api_key=api_key, oauth_token=oauth_token)
+                except Exception as e:
+                    _log(live_state, f"⚠ Scanner-Fehler: {e}")
+                    scan = {"ranking": []}
+
+                # ranking is list of {symbol, score, reason}; filter out already-held & take top N
+                held = set(live_state["portfolio_positions"].keys())
+                ranking = [r for r in (scan.get("ranking") or [])
+                           if r.get("symbol") and r["symbol"] not in held]
+                candidates = ranking[:slots_free * 2]  # consider 2x to allow signal rejections
+
+                # ── Rebalancing: if not enough USDC but candidates exist, ask held positions ──
+                if free_usdc < PORTFOLIO_MIN_ORDER_USDC and candidates and live_state["portfolio_positions"]:
+                    _log(live_state, f"♻ Nur ${free_usdc:.2f} USDC frei — versuche Rebalancing für {len(candidates)} Kandidaten…")
+                    portfolio_context_str = (
+                        f"free_usdc={free_usdc:.2f}, candidates={[c['symbol'] for c in candidates[:3]]}, "
+                        f"held={list(live_state['portfolio_positions'].keys())}"
+                    )
+                    for held_sym in list(live_state["portfolio_positions"].keys()):
+                        held_slot = live_state["portfolio_positions"].get(held_sym)
+                        if not held_slot:
+                            continue
+                        try:
+                            raw_h = await fetch_latest_klines(held_sym, req.interval, limit=100)
+                            enriched_h = compute_indicators(raw_h)
+                            news_score_h = get_news_score_for_symbol(held_sym)
+                            sym_history_h = [t for t in live_state.get("trade_history", [])
+                                             if t.get("symbol") == held_sym or not t.get("symbol")]
+                            sig_h = await get_live_signal(
+                                symbol=held_sym, interval=req.interval, candles=enriched_h,
+                                current_position="IN_POSITION", username=username,
+                                signal_history=[], trade_history=sym_history_h,
+                                analysis_weight=req.analysis_weight,
+                                api_key=api_key, oauth_token=oauth_token,
+                                news_score=news_score_h,
+                                portfolio_context=portfolio_context_str,
+                            )
+                            act_h = sig_h.get("action", "HOLD")
+                            conf_h = sig_h.get("confidence", 0)
+                            min_sell_h = live_state.get("min_confidence_sell") or req.min_confidence_sell
+                            if act_h == "PARTIAL_SELL" and conf_h >= min_sell_h:
+                                frac_h = float(sig_h.get("sell_fraction") or 0)
+                                if 0 < frac_h < 1:
+                                    ok_h, net_h = await _portfolio_partial_sell(
+                                        held_sym, frac_h, force_reason="Rebalancing")
+                                    if ok_h:
+                                        try:
+                                            balances = await trader.get_balances()
+                                            free_usdc = balances.get("USDC", 0.0)
+                                            live_state["portfolio_free_usdc"] = free_usdc
+                                        except Exception:
+                                            pass
+                                        if free_usdc >= PORTFOLIO_MIN_ORDER_USDC:
+                                            break
+                        except Exception as e:
+                            _log(live_state, f"⚠ Rebalancing {held_sym}: {e}")
+                            continue
+
                 if free_usdc < PORTFOLIO_MIN_ORDER_USDC:
                     _log(live_state, f"Nur ${free_usdc:.2f} USDC frei — keine neuen Käufe")
                 else:
-                    _log(live_state, f"🔍 Scanne {len(SCAN_SYMBOLS)} Pairs für {slots_free} freie Slot(s)…")
-                    try:
-                        summaries = await _fetch_scan_summaries(req.interval)
-                        scan = await scan_market(summaries, req.interval,
-                                                 username=username,
-                                                 api_key=api_key, oauth_token=oauth_token)
-                    except Exception as e:
-                        _log(live_state, f"⚠ Scanner-Fehler: {e}")
-                        scan = {"ranking": []}
-
-                    # ranking is list of {symbol, score, reason}; filter out already-held & take top N
-                    held = set(live_state["portfolio_positions"].keys())
-                    ranking = [r for r in (scan.get("ranking") or [])
-                               if r.get("symbol") and r["symbol"] not in held]
-                    candidates = ranking[:slots_free * 2]  # consider 2x to allow signal rejections
-
                     min_buy = live_state.get("min_confidence") or req.min_confidence
                     fng = await _fetch_fear_greed()
                     for cand in candidates:
