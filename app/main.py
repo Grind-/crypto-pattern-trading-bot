@@ -2,7 +2,7 @@ import asyncio
 import logging
 import math
 import os
-import random
+import re as _re
 import secrets
 import time
 import uuid
@@ -840,15 +840,36 @@ async def news_refresh(request: Request):
 
 SCAN_SYMBOLS = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
-    "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "DOTUSDC", "LINKUSDC",
+    "ADAUSDC", "AVAXUSDC", "DOGEUSDC",
 ]
 
-# Less-followed pairs rotated into each scan as "dark horse" picks
-UNDERDOG_SYMBOLS = [
-    "NEARUSDC", "ATOMUSDC", "LTCUSDC", "INJUSDC", "ARBUSDC",
-    "OPUSDC", "SUIUSDC", "APTUSDC", "SEIUSDC", "FETUSDC",
-    "RUNEUSDC", "TIAUSDC",
-]
+
+def _get_news_underdogs(held: set, count: int = 2) -> list[str]:
+    """Pick underdog symbols from News Agent top_opportunities + CoinGecko trending.
+    Returns up to `count` USDC pairs that are not in SCAN_SYMBOLS and not already held."""
+    intel = get_news_intelligence()
+    candidates: list[str] = []
+    seen: set[str] = set(SCAN_SYMBOLS) | held
+
+    # Priority 1: News Agent top_opportunities (already validated USDC pairs)
+    for opp in intel.get("top_opportunities", []):
+        sym = str(opp.get("symbol", "")).upper()
+        if sym.endswith("USDC") and sym not in seen and sym not in candidates:
+            candidates.append(sym)
+            if len(candidates) >= count:
+                return candidates
+
+    # Priority 2: CoinGecko trending coins — format "Solana (SOL)" → SOLUSDC
+    for coin_name in intel.get("trending_coins", []):
+        m = _re.search(r'\(([A-Z0-9]{2,8})\)', coin_name)
+        if m:
+            sym = m.group(1) + "USDC"
+            if sym not in seen and sym not in candidates:
+                candidates.append(sym)
+                if len(candidates) >= count:
+                    return candidates
+
+    return candidates
 
 PORTFOLIO_MAX_POSITIONS = 4
 PORTFOLIO_MIN_ORDER_USDC = 10.0
@@ -2817,12 +2838,12 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 free_usdc = live_state.get("portfolio_free_usdc", 0.0)
 
                 # ── Scan always runs first to get candidates ──────────────
-                # Pick 2 random underdogs (not already held) for each cycle
+                # Discover 2 underdog picks from News Agent intelligence
                 held_set = set(live_state["portfolio_positions"].keys())
-                available_underdogs = [s for s in UNDERDOG_SYMBOLS if s not in held_set]
-                cycle_underdogs = random.sample(available_underdogs, min(2, len(available_underdogs)))
+                cycle_underdogs = _get_news_underdogs(held_set, count=2)
                 scan_symbols_with_underdogs = SCAN_SYMBOLS + [s for s in cycle_underdogs if s not in SCAN_SYMBOLS]
-                _log(live_state, f"🔍 Scanne {len(scan_symbols_with_underdogs)} Pairs für {slots_free} freie Slot(s) (Underdogs: {', '.join(cycle_underdogs) or '–'})…")
+                underdog_label = ", ".join(cycle_underdogs) if cycle_underdogs else "–"
+                _log(live_state, f"🔍 Scanne {len(scan_symbols_with_underdogs)} Pairs für {slots_free} freie Slot(s) | 📰 Underdogs: {underdog_label}")
                 try:
                     summaries = await _fetch_scan_summaries(req.interval, scan_symbols_with_underdogs)
                     scan = await scan_market(summaries, req.interval,
