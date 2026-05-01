@@ -47,16 +47,16 @@ NEWS_AGENT_SYSTEM = (
     "concise, actionable, and focused on near-term (4–48h) catalysts."
 )
 
-_KNOWN_PAIRS = [
-    # Top 8 (always scanned)
+_AVAILABLE_PAIRS = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
-    "ADAUSDC", "AVAXUSDC", "DOGEUSDC",
-    # Underdog candidates (discovered via news)
-    "DOTUSDC", "LINKUSDC", "LTCUSDC", "ATOMUSDC", "NEARUSDC",
-    "UNIUSDC", "AAVEUSDC", "APTUSDC", "SUIUSDC", "INJUSDC",
-    "ARBUSDC", "OPUSDC", "SEIUSDC", "FETUSDC", "RUNEUSDC",
-    "TIAUSDC", "PEPEUSDC", "SHIBUSDC", "MATICUSDC", "JUPUSDC",
+    "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "DOTUSDC", "LINKUSDC",
+    "LTCUSDC", "ATOMUSDC", "NEARUSDC", "UNIUSDC", "AAVEUSDC",
+    "APTUSDC", "SUIUSDC", "INJUSDC", "SEIUSDC", "FETUSDC",
+    "RUNEUSDC", "TIAUSDC", "PEPEUSDC", "SHIBUSDC", "MATICUSDC",
+    "JUPUSDC", "OPUSDC", "ARBUSDC", "SANDUSDC", "MANAUSDC",
+    "GALAUSDC", "AXSUSDC", "ENJUSDC", "CRVUSDC", "LDOUSDC",
 ]
+_KNOWN_PAIRS = _AVAILABLE_PAIRS  # backward-compat alias
 
 _last_run: float = 0.0
 
@@ -276,7 +276,7 @@ async def run_news_cycle() -> dict:
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         pairs_list = ", ".join(_KNOWN_PAIRS)
 
-        prompt = f"""Analyze the current crypto market using the research below and identify actionable trading opportunities.
+        prompt = f"""Analyze the current crypto market using the research below and select which pairs to trade RIGHT NOW.
 
 TIME: {now_str}
 AVAILABLE BINANCE USDC PAIRS: {pairs_list}
@@ -300,17 +300,28 @@ Your task:
    - weight: "high" (breaks market direction), "medium" (relevant context), "low" (background noise)
    - signal: "bullish", "bearish", or "neutral"
    - affects_symbols: which USDC pairs are directly affected ([] if market-wide)
-   - decision_impact: one concrete sentence — e.g. "Stärkt BUY-Signal für XRPUSDC", "Erhöht Hold-Druck bei offenen Long-Positionen", "Kein direkter Einfluss auf Spot-Trading"
-   - reasoning: 1-2 sentences WHY this news shifts a trading signal (mechanism, not just restatement)
-   - flows_into_decision: true if this item is actively passed to the Trading Agent, false if filtered out as noise
+   - decision_impact: one concrete sentence
+   - reasoning: 1-2 sentences WHY this news shifts a trading signal
+   - flows_into_decision: true if this item is actively passed to the Trading Agent
 4. List key risks and warnings
 5. Confidence ≥ 60% only; pairs from AVAILABLE BINANCE USDC PAIRS only
+6. SCAN SELECTION — select the 10 pairs to actively scan this cycle:
+   - "top": 8 mainstream pairs that are most favored RIGHT NOW based on news, trends and momentum.
+     Do NOT always pick the same large-caps — rotate based on what the market is actually talking about.
+     If BTC/ETH have no catalyst today but SOL/XRP do, reflect that.
+   - "underdogs": exactly 2 lesser-known pairs with an emerging catalyst, starting trend, or surprising
+     news mention. These should be coins that a typical trader would overlook today.
+   Both lists must only contain pairs from AVAILABLE BINANCE USDC PAIRS.
 
 Respond with ONLY raw JSON:
 {{
   "market_sentiment": "bullish",
   "fear_greed_value": 72,
   "fear_greed_label": "Greed",
+  "recommended_scan_pairs": {{
+    "top": ["BTCUSDC", "ETHUSDC", "SOLUSDC", "XRPUSDC", "ADAUSDC", "BNBUSDC", "AVAXUSDC", "DOGEUSDC"],
+    "underdogs": ["NEARUSDC", "INJUSDC"]
+  }},
   "top_opportunities": [
     {{
       "symbol": "SOLUSDC",
@@ -329,7 +340,7 @@ Respond with ONLY raw JSON:
       "signal": "bullish",
       "affects_symbols": ["XRPUSDC"],
       "decision_impact": "Stärkt BUY-Signal für XRPUSDC aufgrund von Supply-Squeeze",
-      "reasoning": "Exchange outflows historically precede price appreciation as circulating supply tightens. Combined with regulatory tailwind, this shifts the BUY threshold lower.",
+      "reasoning": "Exchange outflows historically precede price appreciation as circulating supply tightens.",
       "flows_into_decision": true
     }}
   ],

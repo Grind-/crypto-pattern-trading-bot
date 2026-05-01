@@ -838,38 +838,45 @@ async def news_refresh(request: Request):
 
 # ── Market scanner ─────────────────────────────────────────────────────────────
 
-SCAN_SYMBOLS = [
+# Fallback scan list used only when News Agent intelligence is unavailable
+_SCAN_FALLBACK_TOP = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
     "ADAUSDC", "AVAXUSDC", "DOGEUSDC",
 ]
+_SCAN_FALLBACK_UNDERDOGS = ["NEARUSDC", "INJUSDC"]
+# Keep SCAN_SYMBOLS as alias so existing references (e.g. log messages) still work
+SCAN_SYMBOLS = _SCAN_FALLBACK_TOP
 
 
-def _get_news_underdogs(held: set, count: int = 2) -> list[str]:
-    """Pick underdog symbols from News Agent top_opportunities + CoinGecko trending.
-    Returns up to `count` USDC pairs that are not in SCAN_SYMBOLS and not already held."""
+def _get_scan_pairs_from_news(held: set) -> tuple[list[str], list[str]]:
+    """Return (top_8, underdogs_2) from News Agent recommended_scan_pairs.
+    Falls back to static defaults when intelligence is unavailable or stale."""
     intel = get_news_intelligence()
-    candidates: list[str] = []
-    seen: set[str] = set(SCAN_SYMBOLS) | held
+    scan = intel.get("recommended_scan_pairs", {})
 
-    # Priority 1: News Agent top_opportunities (already validated USDC pairs)
-    for opp in intel.get("top_opportunities", []):
-        sym = str(opp.get("symbol", "")).upper()
-        if sym.endswith("USDC") and sym not in seen and sym not in candidates:
-            candidates.append(sym)
-            if len(candidates) >= count:
-                return candidates
+    top = [s.upper() for s in scan.get("top", []) if str(s).upper().endswith("USDC")][:8]
+    underdogs = [
+        s.upper() for s in scan.get("underdogs", [])
+        if str(s).upper().endswith("USDC") and s.upper() not in top
+    ][:2]
 
-    # Priority 2: CoinGecko trending coins — format "Solana (SOL)" → SOLUSDC
-    for coin_name in intel.get("trending_coins", []):
-        m = _re.search(r'\(([A-Z0-9]{2,8})\)', coin_name)
-        if m:
-            sym = m.group(1) + "USDC"
-            if sym not in seen and sym not in candidates:
-                candidates.append(sym)
-                if len(candidates) >= count:
-                    return candidates
+    if not top:
+        top = _SCAN_FALLBACK_TOP
+    if not underdogs:
+        # Fallback: first top_opportunities not in top
+        for opp in intel.get("top_opportunities", []):
+            sym = str(opp.get("symbol", "")).upper()
+            if sym.endswith("USDC") and sym not in top:
+                underdogs.append(sym)
+                if len(underdogs) >= 2:
+                    break
+    if not underdogs:
+        underdogs = [s for s in _SCAN_FALLBACK_UNDERDOGS if s not in top][:2]
 
-    return candidates
+    # Never scan already-held positions as fresh candidates
+    top = [s for s in top if s not in held]
+    underdogs = [s for s in underdogs if s not in held]
+    return top, underdogs
 
 PORTFOLIO_MAX_POSITIONS = 4
 PORTFOLIO_MIN_ORDER_USDC = 10.0
@@ -2838,14 +2845,14 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 free_usdc = live_state.get("portfolio_free_usdc", 0.0)
 
                 # ── Scan always runs first to get candidates ──────────────
-                # Discover 2 underdog picks from News Agent intelligence
+                # Pairs selected dynamically by News Agent each cycle
                 held_set = set(live_state["portfolio_positions"].keys())
-                cycle_underdogs = _get_news_underdogs(held_set, count=2)
-                scan_symbols_with_underdogs = SCAN_SYMBOLS + [s for s in cycle_underdogs if s not in SCAN_SYMBOLS]
+                cycle_top, cycle_underdogs = _get_scan_pairs_from_news(held_set)
+                all_scan_symbols = cycle_top + [s for s in cycle_underdogs if s not in cycle_top]
                 underdog_label = ", ".join(cycle_underdogs) if cycle_underdogs else "–"
-                _log(live_state, f"🔍 Scanne {len(scan_symbols_with_underdogs)} Pairs für {slots_free} freie Slot(s) | 📰 Underdogs: {underdog_label}")
+                _log(live_state, f"🔍 Scanne {len(all_scan_symbols)} Pairs: {', '.join(cycle_top)} | 📰 Underdogs: {underdog_label}")
                 try:
-                    summaries = await _fetch_scan_summaries(req.interval, scan_symbols_with_underdogs)
+                    summaries = await _fetch_scan_summaries(req.interval, all_scan_symbols)
                     scan = await scan_market(summaries, req.interval,
                                              username=username,
                                              api_key=api_key, oauth_token=oauth_token,
