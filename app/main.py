@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import os
+import random
 import secrets
 import time
 import uuid
@@ -840,6 +841,13 @@ async def news_refresh(request: Request):
 SCAN_SYMBOLS = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
     "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "DOTUSDC", "LINKUSDC",
+]
+
+# Less-followed pairs rotated into each scan as "dark horse" picks
+UNDERDOG_SYMBOLS = [
+    "NEARUSDC", "ATOMUSDC", "LTCUSDC", "INJUSDC", "ARBUSDC",
+    "OPUSDC", "SUIUSDC", "APTUSDC", "SEIUSDC", "FETUSDC",
+    "RUNEUSDC", "TIAUSDC",
 ]
 
 PORTFOLIO_MAX_POSITIONS = 4
@@ -2809,12 +2817,18 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 free_usdc = live_state.get("portfolio_free_usdc", 0.0)
 
                 # ── Scan always runs first to get candidates ──────────────
-                _log(live_state, f"🔍 Scanne {len(SCAN_SYMBOLS)} Pairs für {slots_free} freie Slot(s)…")
+                # Pick 2 random underdogs (not already held) for each cycle
+                held_set = set(live_state["portfolio_positions"].keys())
+                available_underdogs = [s for s in UNDERDOG_SYMBOLS if s not in held_set]
+                cycle_underdogs = random.sample(available_underdogs, min(2, len(available_underdogs)))
+                scan_symbols_with_underdogs = SCAN_SYMBOLS + [s for s in cycle_underdogs if s not in SCAN_SYMBOLS]
+                _log(live_state, f"🔍 Scanne {len(scan_symbols_with_underdogs)} Pairs für {slots_free} freie Slot(s) (Underdogs: {', '.join(cycle_underdogs) or '–'})…")
                 try:
-                    summaries = await _fetch_scan_summaries(req.interval)
+                    summaries = await _fetch_scan_summaries(req.interval, scan_symbols_with_underdogs)
                     scan = await scan_market(summaries, req.interval,
                                              username=username,
-                                             api_key=api_key, oauth_token=oauth_token)
+                                             api_key=api_key, oauth_token=oauth_token,
+                                             underdog_symbols=cycle_underdogs)
                 except Exception as e:
                     _log(live_state, f"⚠ Scanner-Fehler: {e}")
                     scan = {"ranking": []}

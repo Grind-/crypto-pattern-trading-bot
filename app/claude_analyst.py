@@ -468,13 +468,16 @@ Respond with ONLY raw JSON:
 
 async def scan_market(symbol_summaries: List[Dict], interval: str,
                       username: str = "",
-                      api_key: Optional[str] = None, oauth_token: str = "") -> Dict:
+                      api_key: Optional[str] = None, oauth_token: str = "",
+                      underdog_symbols: Optional[List[str]] = None) -> Dict:
+    underdog_set = set(underdog_symbols or [])
     rows = ["Symbol      | Price       | 24h%   | 7d%    | ATR%  | RSI   | MACD  | Vol",
             "-" * 75]
     for s in symbol_summaries:
+        tag = " *" if s["symbol"] in underdog_set else ""
         rows.append(
             f"{s['symbol']:<11} | ${s['price']:>10,.2f} | {s['h24']:>+6.1f}% | {s['h7d']:>+6.1f}% | "
-            f"{s['atr_pct']:>4.1f}% | {s['rsi']:>5.1f} | {'↑' if s['macd'] > 0 else '↓'}      | {s['vol_ratio']:.1f}x"
+            f"{s['atr_pct']:>4.1f}% | {s['rsi']:>5.1f} | {'↑' if s['macd'] > 0 else '↓'}      | {s['vol_ratio']:.1f}x{tag}"
         )
     table = "\n".join(rows)
 
@@ -496,17 +499,26 @@ async def scan_market(symbol_summaries: List[Dict], interval: str,
             r = d.get("avg_return", 0)
             perf_block += f"  {sym}: avg {r:+.1f}% over {n} sessions\n"
 
+    underdog_note = ""
+    if underdog_set:
+        underdog_note = (
+            f"\nUNDERDOG PICKS (marked * in table): {', '.join(sorted(underdog_set))} — "
+            "these are less-followed pairs included as dark-horse candidates. "
+            "Score them on indicators alone, without penalising them for lower market cap.\n"
+        )
+
     prompt = f"""You are a crypto market analyst. Identify the best USDC trading pair for live trading RIGHT NOW.
 
 {news_block}MARKET SNAPSHOT ({interval} candles, last 60 bars):
 {table}
-{perf_block}
+{underdog_note}{perf_block}
 Pick the top symbol based on:
 - Clear directional momentum (strong trend, not choppy)
 - Sufficient volatility (ATR% > 1.5% for short intervals, >0.5% for daily)
 - Healthy volume (VolRatio > 1.0)
 - RSI not at reversal extremes (avoid >78 or <22)
 - Weight historical performance if available
+- Underdog picks (*) deserve equal consideration if their indicators are strong
 
 Respond with ONLY raw JSON:
 {{
