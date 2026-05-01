@@ -300,6 +300,7 @@ async def get_live_signal(
     regime: Optional[Dict] = None,
     news_score: Optional[Dict] = None,
     portfolio_context: Optional[str] = None,
+    min_confidence: int = 55,
 ) -> Dict:
     analysis_weight = max(0, min(100, int(analysis_weight)))
 
@@ -348,17 +349,18 @@ async def get_live_signal(
 
     regime_block = ""
     if regime:
+        mc = max(50, min(95, int(min_confidence)))
         thresholds = {
-            "BULL_TREND": "BUY≥55%, SELL≥65%",
-            "RANGING": "BUY≥65%, SELL≥60%",
-            "BEAR_TREND": "BUY≥75%, SELL≥55%",
+            "BULL_TREND": f"BUY≥{mc}%, SELL≥{mc + 10}%",
+            "RANGING": f"BUY≥{mc}%, SELL≥{mc + 5}%",
+            "BEAR_TREND": f"BUY≥{mc + 15}%, SELL≥{mc}%",
             "HIGH_VOLATILITY": "No new BUY",
         }
         regime_block = (
             f"MARKT-REGIME: {regime.get('regime')} "
             f"(Stärke {regime.get('strength')}/100) | "
             f"Strategie: {regime.get('recommended_strategy')} | "
-            f"Schwellen: {thresholds.get(regime.get('regime', 'RANGING'), 'BUY≥60%,SELL≥60%')}\n\n"
+            f"Schwellen: {thresholds.get(regime.get('regime', 'RANGING'), f'BUY≥{mc}%,SELL≥{mc + 5}%')}\n\n"
         )
 
     news_extra = ""

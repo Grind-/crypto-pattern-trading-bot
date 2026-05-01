@@ -2778,6 +2778,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                     analysis_weight=req.analysis_weight,
                     api_key=api_key, oauth_token=oauth_token,
                     regime=regime, news_score=news_score,
+                    min_confidence=live_state.get("min_confidence") or req.min_confidence,
                 )
                 action     = signal.get("action", "HOLD")
                 confidence = signal.get("confidence", 0)
@@ -2849,6 +2850,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                 api_key=api_key, oauth_token=oauth_token,
                                 news_score=news_score_h,
                                 portfolio_context=portfolio_context_str,
+                                min_confidence=live_state.get("min_confidence") or req.min_confidence,
                             )
                             act_h = sig_h.get("action", "HOLD")
                             conf_h = sig_h.get("confidence", 0)
@@ -2920,14 +2922,16 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             analysis_weight=req.analysis_weight,
                             api_key=api_key, oauth_token=oauth_token,
                             regime=regime, news_score=news_score,
+                            min_confidence=min_buy,
                         )
                         action     = signal.get("action", "HOLD")
                         confidence = signal.get("confidence", 0)
+                        reason_str = signal.get("reason", "")[:100]
                         if action != "BUY" or confidence < min_buy:
                             if action != "BUY":
-                                _log(live_state, f"⏭ {sym}: Agent sagt {action} — kein Kauf")
+                                _log(live_state, f"⏭ {sym}: {action} ({confidence}%) — {reason_str}")
                             else:
-                                _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {min_buy}% — kein Kauf")
+                                _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {min_buy}% — {reason_str}")
                             continue
 
                         # Confidence-tier sizing
@@ -2945,7 +2949,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                                      sl_atr_mult=(live_state.get("sl_atr_mult") or req.sl_atr_mult),
                                                      tp_atr_mult=(live_state.get("tp_atr_mult") or req.tp_atr_mult))
                         if risk.get("blocked"):
-                            _log(live_state, f"⏭ {sym}: Risk-Agent blockiert")
+                            _log(live_state, f"⏭ {sym}: Risk-Agent blockiert (SL {risk.get('stop_loss_pct', '?')}% ATR)")
                             continue
 
                         price_now = enriched[-1]["close"] if enriched else 0.0

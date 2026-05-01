@@ -5,7 +5,8 @@ from typing import Dict, List
 def calculate_risk_params(candles: List[Dict], capital: float,
                           regime: str, signals_count_green: int,
                           sl_atr_mult: float = 1.5,
-                          tp_atr_mult: float = 2.5) -> Dict:
+                          tp_atr_mult: float = 2.5,
+                          max_sl_pct: float = 10.0) -> Dict:
     atr = candles[-1].get("atr") if candles else None
     if not atr or math.isnan(atr):
         entry = candles[-1]["close"] if candles else 1.0
@@ -14,7 +15,7 @@ def calculate_risk_params(candles: List[Dict], capital: float,
     sl_pct = round(sl_atr_mult * atr / entry * 100, 3)
     tp_pct = round(tp_atr_mult * atr / entry * 100, 3)
 
-    if regime == "HIGH_VOLATILITY" or sl_pct > 5.0:
+    if regime == "HIGH_VOLATILITY" or sl_pct > max_sl_pct:
         size = 0
     elif signals_count_green >= 4 and regime == "BULL_TREND":
         size = 100
