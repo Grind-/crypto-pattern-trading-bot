@@ -2907,7 +2907,19 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             act_h = sig_h.get("action", "HOLD")
                             conf_h = sig_h.get("confidence", 0)
                             min_sell_h = live_state.get("min_confidence_sell") or req.min_confidence_sell
-                            if act_h == "PARTIAL_SELL" and conf_h >= min_sell_h:
+                            if act_h == "SELL" and conf_h >= min_sell_h:
+                                ok_h, net_h = await _portfolio_sell(
+                                    held_sym, force_reason="Rebalancing→SELL")
+                                if ok_h:
+                                    try:
+                                        balances = await trader.get_balances()
+                                        free_usdc = balances.get("USDC", 0.0)
+                                        live_state["portfolio_free_usdc"] = free_usdc
+                                    except Exception:
+                                        pass
+                                    if free_usdc >= PORTFOLIO_MIN_ORDER_USDC:
+                                        break
+                            elif act_h == "PARTIAL_SELL" and conf_h >= min_sell_h:
                                 frac_h = float(sig_h.get("sell_fraction") or 0)
                                 if 0 < frac_h < 1:
                                     ok_h, net_h = await _portfolio_partial_sell(
@@ -2924,6 +2936,32 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                         except Exception as e:
                             _log(live_state, f"⚠ Rebalancing {held_sym}: {e}")
                             continue
+
+                # ── Stufe 2: Schwächste Position opfern wenn High-Confidence-Kandidat wartet ──
+                if free_usdc < PORTFOLIO_MIN_ORDER_USDC and candidates and live_state["portfolio_positions"]:
+                    best_cand_score = max((c.get("score", 0) for c in candidates[:3]), default=0)
+                    if best_cand_score >= 75:
+                        worst_sym = min(
+                            live_state["portfolio_positions"].keys(),
+                            key=lambda s: (
+                                (live_state["portfolio_positions"][s].get("current_price", 0) or 0) /
+                                (live_state["portfolio_positions"][s].get("buy_price", 1) or 1)
+                            )
+                        )
+                        worst_slot = live_state["portfolio_positions"].get(worst_sym, {})
+                        buy_p = float(worst_slot.get("buy_price") or 0)
+                        cur_p = float(worst_slot.get("current_price") or buy_p)
+                        pnl_w = (cur_p - buy_p) / buy_p * 100 if buy_p else 0
+                        _log(live_state, f"♻ Stufe-2-Rebalancing: verkaufe schwächste Position {worst_sym} "
+                             f"(P&L: {pnl_w:+.1f}%) für High-Score-Kandidaten (score={best_cand_score})")
+                        ok_w, net_w = await _portfolio_sell(worst_sym, force_reason="Rebalancing→Rotation")
+                        if ok_w:
+                            try:
+                                balances = await trader.get_balances()
+                                free_usdc = balances.get("USDC", 0.0)
+                                live_state["portfolio_free_usdc"] = free_usdc
+                            except Exception:
+                                pass
 
                 if free_usdc < PORTFOLIO_MIN_ORDER_USDC:
                     _log(live_state, f"Nur ${free_usdc:.2f} USDC frei — keine neuen Käufe")
