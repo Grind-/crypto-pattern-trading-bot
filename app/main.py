@@ -1948,6 +1948,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     base_asset = chosen.replace("USDC", "").replace("USDT", "")
                     crypto_held = balances.get(base_asset, 0.0)
                     target = live_state.get("current_capital") or req.trade_amount_usdt
+                    if target < 10.0:
+                        target = req.trade_amount_usdt
 
                     try:
                         crypto_price = await trader.get_price(chosen) if crypto_held > 0 else 0.0
@@ -1956,7 +1958,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     crypto_value = crypto_held * crypto_price
 
                     if usdc_available >= target:
-                        _log(live_state, f"💰 {usdc_available:.2f} USDC — kaufe {chosen}")
+                        _log(live_state, f"💰 {usdc_available:.2f} USDC — kaufe {chosen} (${target:.2f})")
                         await _do_buy(chosen, target)
 
                     elif crypto_held > 0:
