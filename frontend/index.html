@@ -254,6 +254,62 @@
             <strong>Risk/Reward:</strong> Standard-SL 1,5 × ATR + TP 2,5 × ATR = Verhältnis 1:1,67. Damit reicht eine Win-Rate von ~38 %, um break-even zu sein. <strong>Kleiner</strong> = schnellerer Gewinn, geringerer Betrag. <strong>Größer</strong> = mehr Geduld nötig, aber höherer Gewinn pro Trade.
           </div>
         </div>
+        <!-- ── Schutz-Einstellungen ────────────────────────────────────── -->
+        <div class="field full" style="margin-top:4px">
+          <button type="button" id="btn-protection-toggle"
+            onclick="toggleProtectionPanel()"
+            style="background:none;border:none;padding:0;cursor:pointer;font-size:12px;color:var(--text-muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;gap:6px">
+            <span id="protection-arrow">▶</span> Schutz-Einstellungen
+          </button>
+        </div>
+        <div id="protection-panel" style="display:none;width:100%;display:none">
+          <div class="fields-grid" style="margin-top:2px">
+            <div class="field">
+              <label>Trailing Stop-Loss<button type="button" class="field-hint-btn" onclick="toggleHint('hint-trailing')" aria-label="Mehr Info">?</button></label>
+              <label style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                <input id="live-trailing-stop" type="checkbox" onchange="saveUserSettings();updateTrailingPanel()" style="width:16px;height:16px;cursor:pointer" />
+                <span style="font-size:12px;color:var(--text-muted)">Aktivieren</span>
+              </label>
+              <div class="field-hint-detail" id="hint-trailing" hidden>
+                Sobald der Kurs mehr als <em>Aktivierungs-%</em> über dem Kaufpreis liegt, wird der Stop-Loss-Preis nach oben mitgezogen — so werden Gewinne gesichert ohne früh auszusteigen.
+              </div>
+            </div>
+            <div class="field" id="trailing-activate-field" style="display:none">
+              <label>Trailing aktiviert ab <span style="color:var(--text-muted);font-weight:400">%</span></label>
+              <input id="live-trailing-activate" type="number" value="1.5" min="0.5" max="10" step="0.5" onchange="saveUserSettings()" />
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px">SL folgt erst nach X% Gewinn.</div>
+            </div>
+            <div class="field">
+              <label>Cooldown nach Stop-Loss <span style="color:var(--text-muted);font-weight:400">Kerzen</span><button type="button" class="field-hint-btn" onclick="toggleHint('hint-cooldown')" aria-label="Mehr Info">?</button></label>
+              <input id="live-cooldown-candles" type="number" value="0" min="0" max="10" step="1" onchange="saveUserSettings()" />
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px">0 = deaktiviert.</div>
+              <div class="field-hint-detail" id="hint-cooldown" hidden>
+                Nach einem Stop-Loss-Exit wird dasselbe Symbol für N Kerzen gesperrt. Verhindert Re-Entry in einen fallenden Markt. Empfehlung: 2.
+              </div>
+            </div>
+            <div class="field">
+              <label>Verlustserie-Brecher <span style="color:var(--text-muted);font-weight:400">Trades</span><button type="button" class="field-hint-btn" onclick="toggleHint('hint-streak')" aria-label="Mehr Info">?</button></label>
+              <input id="live-max-losses" type="number" value="0" min="0" max="10" step="1" onchange="saveUserSettings()" />
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px">0 = deaktiviert. Nach N Verlusten in Folge → Pause.</div>
+              <div class="field-hint-detail" id="hint-streak" hidden>
+                Nach N aufeinanderfolgenden Verlust-Trades stoppt der Bot alle Käufe für <em>Pause-Kerzen</em>. Circuit-Breaker bei Drawdown-Serien.
+              </div>
+            </div>
+            <div class="field" id="halt-candles-field">
+              <label>Pause nach Verlustserie <span style="color:var(--text-muted);font-weight:400">Kerzen</span></label>
+              <input id="live-halt-candles" type="number" value="4" min="1" max="20" step="1" onchange="saveUserSettings()" />
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Wie lange der Bot nach Verlustserie pausiert.</div>
+            </div>
+            <div class="field">
+              <label>Mindest-Haltezeit <span style="color:var(--text-muted);font-weight:400">Kerzen</span><button type="button" class="field-hint-btn" onclick="toggleHint('hint-minhold')" aria-label="Mehr Info">?</button></label>
+              <input id="live-min-hold" type="number" value="0" min="0" max="10" step="1" onchange="saveUserSettings()" />
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px">0 = deaktiviert. Verhindert Whipsaw-Exits.</div>
+              <div class="field-hint-detail" id="hint-minhold" hidden>
+                SELL-Signale werden für N Kerzen nach dem Kauf ignoriert. Stop-Loss und Take-Profit greifen trotzdem sofort.
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="field full" id="portfolio-info-hint" style="display:none">
           <div style="font-size:11px;color:var(--text-muted)">
             ℹ Agent scannt 10 Pairs, hält bis zu 4 Positionen gleichzeitig.

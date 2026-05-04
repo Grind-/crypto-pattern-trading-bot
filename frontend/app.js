@@ -416,6 +416,12 @@ async function startLive() {
     tp_atr_mult: parseFloat(document.getElementById('live-tp-mult')?.value ?? '2.5'),
     mode: _liveMode,
     max_per_position: 0,
+    trailing_stop: document.getElementById('live-trailing-stop')?.checked ?? false,
+    trailing_activate_pct: parseFloat(document.getElementById('live-trailing-activate')?.value ?? '1.5'),
+    cooldown_candles: parseInt(document.getElementById('live-cooldown-candles')?.value ?? '0', 10),
+    max_consecutive_losses: parseInt(document.getElementById('live-max-losses')?.value ?? '0', 10),
+    halt_candles: parseInt(document.getElementById('live-halt-candles')?.value ?? '4', 10),
+    min_hold_candles: parseInt(document.getElementById('live-min-hold')?.value ?? '0', 10),
   };
   const keyEl = document.getElementById('live-api-key');
   const secEl = document.getElementById('live-api-secret');
@@ -1463,6 +1469,21 @@ function toggleHint(id) {
   if (el) el.hidden = !el.hidden;
 }
 
+function toggleProtectionPanel() {
+  const panel = document.getElementById('protection-panel');
+  const arrow = document.getElementById('protection-arrow');
+  if (!panel) return;
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.textContent = open ? '▶' : '▼';
+}
+
+function updateTrailingPanel() {
+  const checked = document.getElementById('live-trailing-stop')?.checked;
+  const field = document.getElementById('trailing-activate-field');
+  if (field) field.style.display = checked ? '' : 'none';
+}
+
 // ── Page init ─────────────────────────────────────────────────────────────────
 
 function switchTab(name) {
@@ -1541,9 +1562,15 @@ function saveUserSettings() {
       live_compounding_mode: document.getElementById('live-compounding-mode')?.value,
       live_analysis_weight:  parseInt(document.getElementById('live-analysis-weight')?.value) || 30,
       live_min_confidence:   parseInt(document.getElementById('live-min-confidence')?.value) || 55,
-      live_sl_mult:          parseFloat(document.getElementById('live-sl-mult')?.value) || 1.5,
-      live_tp_mult:          parseFloat(document.getElementById('live-tp-mult')?.value) || 2.5,
-      live_mode:             _liveMode,
+      live_sl_mult:              parseFloat(document.getElementById('live-sl-mult')?.value) || 1.5,
+      live_tp_mult:              parseFloat(document.getElementById('live-tp-mult')?.value) || 2.5,
+      live_trailing_stop:        document.getElementById('live-trailing-stop')?.checked ?? false,
+      live_trailing_activate:    parseFloat(document.getElementById('live-trailing-activate')?.value) || 1.5,
+      live_cooldown_candles:     parseInt(document.getElementById('live-cooldown-candles')?.value) || 0,
+      live_max_losses:           parseInt(document.getElementById('live-max-losses')?.value) || 0,
+      live_halt_candles:         parseInt(document.getElementById('live-halt-candles')?.value) || 4,
+      live_min_hold:             parseInt(document.getElementById('live-min-hold')?.value) || 0,
+      live_mode:                 _liveMode,
       sim_symbol:            document.getElementById('symbol')?.value,
       sim_interval:          document.getElementById('interval')?.value,
       sim_days:              parseInt(document.getElementById('days')?.value) || 30,
@@ -1574,6 +1601,15 @@ async function loadUserSettings() {
     set('live-min-confidence',    s.live_min_confidence);
     set('live-sl-mult',           s.live_sl_mult);
     set('live-tp-mult',           s.live_tp_mult);
+    if (s.live_trailing_stop != null) {
+      const cb = document.getElementById('live-trailing-stop');
+      if (cb) { cb.checked = !!s.live_trailing_stop; updateTrailingPanel(); }
+    }
+    set('live-trailing-activate', s.live_trailing_activate);
+    set('live-cooldown-candles',  s.live_cooldown_candles);
+    set('live-max-losses',        s.live_max_losses);
+    set('live-halt-candles',      s.live_halt_candles);
+    set('live-min-hold',          s.live_min_hold);
     if (s.live_mode) {
       setLiveMode(s.live_mode);
     }
