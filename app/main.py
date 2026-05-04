@@ -1827,13 +1827,21 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
         """Place SELL order. Returns (success, net_usdc). Updates live_state."""
         nonlocal position_symbol
         qty = live_state.get("position_qty") or 0
-        if qty <= 0:
-            # Reconcile: check actual balance
-            base = position_symbol.replace("USDC", "").replace("USDT", "")
-            try:
-                qty = await trader.get_asset_balance(base)
-            except Exception:
-                pass
+        # Always verify actual balance before selling — position_qty can be stale
+        base = position_symbol.replace("USDC", "").replace("USDT", "")
+        try:
+            actual_qty = await trader.get_asset_balance(base)
+        except Exception:
+            actual_qty = qty
+        if actual_qty <= 0:
+            _log(live_state, f"⚠ Kein {base} auf Binance (position_qty={qty:.6f}) — setze auf FLAT")
+            live_state["position"] = "FLAT"
+            live_state["position_qty"] = 0
+            update_position(username, "FLAT")
+            return False, 0.0
+        if actual_qty < qty:
+            _log(live_state, f"⚠ Binance-Balance {actual_qty:.6f} < position_qty {qty:.6f} — verwende echte Balance")
+        qty = actual_qty
         if qty <= 0:
             _log(live_state, f"⚠ position_qty=0 — nichts zu verkaufen, setze auf FLAT")
             live_state["position"] = "FLAT"
