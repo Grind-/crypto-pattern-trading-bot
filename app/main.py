@@ -3005,10 +3005,14 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 # ── Rebalancing: if not enough USDC but candidates exist, ask held positions ──
                 if free_usdc < PORTFOLIO_MIN_ORDER_USDC and candidates and live_state["portfolio_positions"]:
                     _log(live_state, f"♻ Nur ${free_usdc:.2f} USDC frei — versuche Rebalancing für {len(candidates)} Kandidaten…")
-                    portfolio_context_str = (
-                        f"free_usdc={free_usdc:.2f}, candidates={[c['symbol'] for c in candidates[:3]]}, "
-                        f"held={list(live_state['portfolio_positions'].keys())}"
-                    )
+                    # Build candidate summary once — used in per-position context below
+                    cand_lines = []
+                    for c in candidates[:3]:
+                        cand_lines.append(
+                            f"  • {c['symbol']}: Score {c.get('score', '?')}/100 — {c.get('reason', '')[:120]}"
+                        )
+                    cand_summary = "\n".join(cand_lines) or "  (keine)"
+
                     for held_sym in list(live_state["portfolio_positions"].keys()):
                         held_slot = live_state["portfolio_positions"].get(held_sym)
                         if not held_slot:
@@ -3019,6 +3023,33 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             news_score_h = get_news_score_for_symbol(held_sym)
                             sym_history_h = [t for t in live_state.get("trade_history", [])
                                              if t.get("symbol") == held_sym or not t.get("symbol")]
+                            # Build rich per-position rebalancing context
+                            buy_p_h   = float(held_slot.get("buy_price") or 0)
+                            cur_p_h   = float(held_slot.get("current_price") or buy_p_h)
+                            pnl_h     = (cur_p_h - buy_p_h) / buy_p_h * 100 if buy_p_h else 0
+                            qty_h     = float(held_slot.get("position_qty") or 0)
+                            val_h     = qty_h * cur_p_h
+                            all_held  = {s: round(float((v.get("position_qty") or 0) *
+                                                        (v.get("current_price") or v.get("buy_price") or 0)), 2)
+                                         for s, v in live_state["portfolio_positions"].items()}
+                            portfolio_context_str = (
+                                f"REBALANCING-ANFRAGE:\n"
+                                f"Der Bot hat kein freies USDC (${free_usdc:.2f}) und möchte eine neue Position "
+                                f"eröffnen. Du entscheidest jetzt für {held_sym} ob Kapital freigegeben werden soll.\n\n"
+                                f"AKTUELLES PORTFOLIO:\n"
+                                f"  Freies USDC: ${free_usdc:.2f}\n"
+                                f"  Positionen: { {s: f'${v}' for s, v in all_held.items()} }\n\n"
+                                f"DEINE AKTUELLE POSITION ({held_sym}):\n"
+                                f"  Kaufpreis: ${buy_p_h:,.4f} | Aktuell: ${cur_p_h:,.4f} | "
+                                f"P&L: {pnl_h:+.2f}% | Wert: ${val_h:.2f}\n\n"
+                                f"WARTENDE KANDIDATEN (vom Scanner als besser bewertet):\n"
+                                f"{cand_summary}\n\n"
+                                f"DEINE AUFGABE:\n"
+                                f"Analysiere den Chart von {held_sym} UND bedenke die Kandidaten oben.\n"
+                                f"- SELL: wenn {held_sym} technisch schwach ist ODER ein Kandidat klar besser ist\n"
+                                f"- PARTIAL_SELL: wenn du Kapital teilweise freigeben willst ohne die Position aufzugeben\n"
+                                f"- HOLD: wenn {held_sym} klar besser als alle Kandidaten ist und du die Position behältst"
+                            )
                             sig_h = await get_live_signal(
                                 symbol=held_sym, interval=req.interval, candles=enriched_h,
                                 current_position="IN_POSITION", username=username,
