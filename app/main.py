@@ -336,6 +336,11 @@ def _default_live_state() -> dict:
         "mode": "single",
         "portfolio_positions": {},
         "max_per_position": 0.0,
+        "cooldowns": {},
+        "trading_halted_until_ts": None,
+        "loss_streak": 0,
+        "sl_price": None,
+        "entry_candle_count": None,
     }
 
 
@@ -476,6 +481,12 @@ class LiveRequest(BaseModel):
     tp_atr_mult: float = 2.5             # take-profit = tp_atr_mult × ATR
     mode: str = "single"                 # "single" | "portfolio"
     max_per_position: float = 0.0        # 0 = no per-position cap
+    trailing_stop: bool = False
+    trailing_activate_pct: float = 1.0
+    cooldown_candles: int = 0
+    max_consecutive_losses: int = 0
+    halt_candles: int = 4
+    min_hold_candles: int = 0
 
 
 class TopupRequest(BaseModel):
@@ -880,6 +891,56 @@ def _get_scan_pairs_from_news(held: set) -> tuple[list[str], list[str]]:
 
 PORTFOLIO_MAX_POSITIONS = 4
 PORTFOLIO_MIN_ORDER_USDC = 10.0
+
+
+def _count_recent_consecutive_losses(trade_history, symbol=None):
+    """Count trailing consecutive losing SELLs from most recent, stopping at a win."""
+    streak = 0
+    for t in reversed(trade_history):
+        if t.get("type") not in ("SELL",):
+            continue
+        if symbol and t.get("symbol") != symbol:
+            continue
+        pnl = t.get("pnl_pct")
+        if pnl is None:
+            continue
+        if pnl < 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _is_buy_blocked_by_protections(live_state, symbol, now_ts, req):
+    """Check halt and cooldown protections. Returns (blocked: bool, reason: str)."""
+    halt_until = live_state.get("trading_halted_until_ts")
+    if halt_until and now_ts < halt_until:
+        return True, f"Trading-Halt aktiv (Verlustserie) — frei in {int(halt_until - now_ts)}s"
+    cd = (live_state.get("cooldowns") or {}).get(symbol)
+    if cd and now_ts < cd:
+        return True, f"Cooldown {symbol} — frei in {int(cd - now_ts)}s"
+    return False, ""
+
+
+def _register_sell_outcome(live_state, symbol, pnl_pct, was_sl, interval_seconds, req,
+                           log_fn=None):
+    """Update cooldown and halt state after a sell. log_fn is optional callable(state, msg)."""
+    now_ts = time.time()
+    if was_sl and req.cooldown_candles > 0:
+        live_state.setdefault("cooldowns", {})[symbol] = (
+            now_ts + req.cooldown_candles * interval_seconds
+        )
+    if req.max_consecutive_losses > 0:
+        streak = _count_recent_consecutive_losses(live_state.get("trade_history", []))
+        live_state["loss_streak"] = streak
+        if streak >= req.max_consecutive_losses:
+            live_state["trading_halted_until_ts"] = (
+                now_ts + req.halt_candles * interval_seconds
+            )
+            if log_fn is not None:
+                log_fn(live_state,
+                       f"⛔ Trading-Halt: {streak} Verluste in Folge — "
+                       f"pausiere für {req.halt_candles} Kerzen")
 
 
 def _portfolio_allocation_pct(confidence: int) -> float:
@@ -2218,9 +2279,16 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 buy_p  = live_state.get("buy_price") or 0
                 sl_pct = live_state.get("sl_pct") or 0
                 tp_pct = live_state.get("tp_pct") or 0
-                if buy_p and sl_pct and price <= buy_p * (1 - sl_pct / 100):
+                # Protection A: Trailing SL ratchet
+                if req.trailing_stop and buy_p and sl_pct and price > buy_p * (1 + req.trailing_activate_pct / 100):
+                    new_sl = round(price * (1 - sl_pct / 100), 8)
+                    if live_state.get("sl_price") is None or new_sl > live_state["sl_price"]:
+                        live_state["sl_price"] = new_sl
+                        _log(live_state, f"⤴ Trailing-SL angehoben → ${new_sl:,.4f}")
+                sl_trigger = live_state.get("sl_price") or (round(buy_p * (1 - sl_pct / 100), 8) if (buy_p and sl_pct) else 0)
+                if buy_p and sl_pct and price <= sl_trigger:
                     force_sell = True
-                    force_sell_reason = f"Stop-Loss {sl_pct}% — ${price:,.2f} ≤ ${buy_p*(1-sl_pct/100):,.2f}"
+                    force_sell_reason = f"Stop-Loss {sl_pct}% — ${price:,.2f} ≤ ${sl_trigger:,.2f}"
                     _log(live_state, f"🛑 STOP-LOSS: {force_sell_reason}")
                 elif buy_p and tp_pct and price >= buy_p * (1 + tp_pct / 100):
                     force_sell = True
@@ -2310,6 +2378,15 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 _d_overrides.append(f"SELL→HOLD: Konfidenz {confidence}% unter Mindest-Schwelle {min_conf_sell}%")
                 _log(live_state, f"→ HOLD: SELL Konfidenz {confidence}% < {min_conf_sell}%")
 
+            # ── Protections B+C: halt / cooldown gate ────────────────────────────
+            if action == "BUY" and live_state["position"] == "FLAT":
+                _blocked, _why = _is_buy_blocked_by_protections(
+                    live_state, current_symbol, time.time(), req)
+                if _blocked:
+                    action = "HOLD"
+                    _d_overrides.append(f"BUY blockiert: {_why}")
+                    _log(live_state, f"🚫 BUY blockiert: {_why}")
+
             # ── Agent 4: Risk sizing ─────────────────────────────────────────────
             risk_result = None
             # Stash voting context so _do_buy can annotate the trade record
@@ -2340,6 +2417,9 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 capital = live_state.get("current_capital") or req.trade_amount_usdt
                 if risk_result and not risk_result["blocked"]:
                     sized_capital = round(capital * risk_result["position_size_pct"] / 100.0, 2)
+                    # Protection D: confidence-scaled sizing cap
+                    sized_capital = min(sized_capital,
+                                        round(capital * _portfolio_allocation_pct(confidence), 2))
                 else:
                     sized_capital = capital
                 if sized_capital >= 10.0:
@@ -2347,19 +2427,41 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     if bought and risk_result:
                         live_state["sl_pct"] = risk_result["stop_loss_pct"]
                         live_state["tp_pct"] = risk_result["take_profit_pct"]
+                        # Seed trailing SL anchor and record entry candle (Protections A, E)
+                        live_state["sl_price"] = round(
+                            live_state["buy_price"] * (1 - risk_result["stop_loss_pct"] / 100), 8
+                        ) if live_state.get("buy_price") else None
+                        live_state["entry_candle_count"] = live_state.get("candle_count", 0)
                         _log(live_state, f"SL: {live_state['sl_pct']:.2f}% / TP: {live_state['tp_pct']:.2f}% (ATR-basiert)")
                 else:
                     _log(live_state, f"⚠ sized_capital {sized_capital:.2f} < $10 — kein Kauf")
 
             elif action == "SELL" and live_state["position"] == "IN_POSITION":
-                sold, _ = await _do_sell(force=force_sell, force_reason=force_sell_reason)
-                if sold:
-                    new_thresholds = calibrate_thresholds(live_state.get("trade_history", []))
-                    if new_thresholds:
-                        live_state["calibrated_thresholds"] = new_thresholds
-                        save_live_state(username, {"calibrated_thresholds": new_thresholds,
-                                                   "trade_history": live_state.get("trade_history", [])})
-                        _log(live_state, f"📐 Kalibrierung aktualisiert: {new_thresholds}")
+                # Protection E: minimum holding period gate (non-forced exits only)
+                if not force_sell and req.min_hold_candles > 0:
+                    entry_cc = live_state.get("entry_candle_count")
+                    held_c = (live_state.get("candle_count", 0) - entry_cc) if entry_cc is not None else req.min_hold_candles
+                    if held_c < req.min_hold_candles:
+                        action = "HOLD"
+                        _d_overrides.append(f"SELL→HOLD: min_hold_candles ({held_c}/{req.min_hold_candles})")
+                        _log(live_state, f"⏳ SELL→HOLD: erst {held_c} von {req.min_hold_candles} Kerzen gehalten")
+                if action == "SELL":
+                    sold, _ = await _do_sell(force=force_sell, force_reason=force_sell_reason)
+                    if sold:
+                        # Protection A: clear trailing SL anchor on exit
+                        live_state["sl_price"] = None
+                        live_state["entry_candle_count"] = None
+                        # Protection B+C: register outcome for cooldown / halt logic
+                        _was_sl = "Stop-Loss" in (force_sell_reason or "")
+                        _sell_pnl = (live_state.get("trade_history") or [{}])[-1].get("pnl_pct", 0.0) or 0.0
+                        _register_sell_outcome(live_state, position_symbol, _sell_pnl,
+                                               _was_sl, interval_seconds, req, log_fn=_log)
+                        new_thresholds = calibrate_thresholds(live_state.get("trade_history", []))
+                        if new_thresholds:
+                            live_state["calibrated_thresholds"] = new_thresholds
+                            save_live_state(username, {"calibrated_thresholds": new_thresholds,
+                                                       "trade_history": live_state.get("trade_history", [])})
+                            _log(live_state, f"📐 Kalibrierung aktualisiert: {new_thresholds}")
 
             elif action == "HOLD":
                 _log(live_state, f"→ HALTEN (Konfidenz: {confidence}%, Position: {live_state['position']})")
@@ -2476,6 +2578,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 "allocated_usdc": spend,
                 "order_id": str(order.get("orderId", "")),
                 "last_signal": "BUY", "last_confidence": 0,
+                "entry_candle_count": live_state.get("candle_count", 0),
             }
             live_state["trade_history"].append({
                 "type": "BUY", "symbol": symbol,
@@ -2783,9 +2886,16 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 tp_pct = float(slot.get("tp_pct") or 0)
                 force_sell = False
                 force_reason = ""
-                if buy_p and sl_pct and price <= buy_p * (1 - sl_pct / 100):
+                # Protection A: Trailing SL ratchet (portfolio)
+                if req.trailing_stop and buy_p and sl_pct and price > buy_p * (1 + req.trailing_activate_pct / 100):
+                    new_sl_p = round(price * (1 - sl_pct / 100), 8)
+                    if slot.get("sl_price") is None or new_sl_p > slot["sl_price"]:
+                        slot["sl_price"] = new_sl_p
+                        _log(live_state, f"⤴ {sym}: Trailing-SL angehoben → ${new_sl_p:,.4f}")
+                sl_trigger_p = slot.get("sl_price") or (round(buy_p * (1 - sl_pct / 100), 8) if (buy_p and sl_pct) else 0)
+                if buy_p and sl_pct and price <= sl_trigger_p:
                     force_sell = True
-                    force_reason = f"SL {sl_pct:.2f}% — ${price:,.4f} ≤ ${buy_p*(1-sl_pct/100):,.4f}"
+                    force_reason = f"SL {sl_pct:.2f}% — ${price:,.4f} ≤ ${sl_trigger_p:,.4f}"
                     _log(live_state, f"🛑 {sym}: STOP-LOSS — {force_reason}")
                 elif buy_p and tp_pct and price >= buy_p * (1 + tp_pct / 100):
                     force_sell = True
@@ -2795,6 +2905,11 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 if force_sell:
                     sold, _net = await _portfolio_sell(sym, force_reason=force_reason)
                     if sold:
+                        # Protection B+C: register outcome for cooldown / halt
+                        _was_sl_p = "SL" in force_reason
+                        _pnl_p = (live_state.get("trade_history") or [{}])[-1].get("pnl_pct", 0.0) or 0.0
+                        _register_sell_outcome(live_state, sym, _pnl_p,
+                                               _was_sl_p, interval_seconds, req, log_fn=_log)
                         new_thresh = calibrate_thresholds(live_state.get("trade_history", []))
                         if new_thresh:
                             live_state["calibrated_thresholds"] = new_thresh
@@ -2833,7 +2948,17 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 _log(live_state, f"{sym}: {action} ({confidence}%) — {signal.get('reason','')[:80]}")
                 min_sell = live_state.get("min_confidence_sell") or req.min_confidence_sell
                 if action == "SELL" and confidence >= min_sell:
-                    await _portfolio_sell(sym, force_reason=f"Signal {confidence}%")
+                    # Protection E: minimum holding period gate (signal-driven, non-forced)
+                    _entry_cc = slot.get("entry_candle_count")
+                    _held_c = (live_state.get("candle_count", 0) - _entry_cc) if _entry_cc is not None else req.min_hold_candles
+                    if req.min_hold_candles > 0 and _held_c < req.min_hold_candles:
+                        _log(live_state, f"⏳ {sym}: SELL→HOLD: erst {_held_c} von {req.min_hold_candles} Kerzen gehalten")
+                    else:
+                        ok_s, _ = await _portfolio_sell(sym, force_reason=f"Signal {confidence}%")
+                        if ok_s:
+                            _register_sell_outcome(live_state, sym,
+                                                   (live_state.get("trade_history") or [{}])[-1].get("pnl_pct", 0.0) or 0.0,
+                                                   False, interval_seconds, req, log_fn=_log)
                 elif action == "PARTIAL_SELL" and confidence >= min_sell:
                     frac = float(signal.get("sell_fraction") or 0)
                     if 0 < frac < 1:
@@ -2911,6 +3036,10 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                 ok_h, net_h = await _portfolio_sell(
                                     held_sym, force_reason="Rebalancing→SELL")
                                 if ok_h:
+                                    _register_sell_outcome(
+                                        live_state, held_sym,
+                                        (live_state.get("trade_history") or [{}])[-1].get("pnl_pct", 0.0) or 0.0,
+                                        False, interval_seconds, req, log_fn=_log)
                                     try:
                                         balances = await trader.get_balances()
                                         free_usdc = balances.get("USDC", 0.0)
@@ -2956,6 +3085,10 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                              f"(P&L: {pnl_w:+.1f}%) für High-Score-Kandidaten (score={best_cand_score})")
                         ok_w, net_w = await _portfolio_sell(worst_sym, force_reason="Rebalancing→Rotation")
                         if ok_w:
+                            _register_sell_outcome(
+                                live_state, worst_sym,
+                                (live_state.get("trade_history") or [{}])[-1].get("pnl_pct", 0.0) or 0.0,
+                                False, interval_seconds, req, log_fn=_log)
                             try:
                                 balances = await trader.get_balances()
                                 free_usdc = balances.get("USDC", 0.0)
@@ -3001,6 +3134,12 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             continue
                         if news_score.get("veto"):
                             _log(live_state, f"⏭ {sym}: News-Veto — übersprungen")
+                            continue
+                        # Protection B+C: halt / cooldown gate
+                        _blk, _why = _is_buy_blocked_by_protections(
+                            live_state, sym, time.time(), req)
+                        if _blk:
+                            _log(live_state, f"🚫 {sym}: BUY blockiert: {_why}")
                             continue
 
                         sym_history = [t for t in live_state.get("trade_history", [])
