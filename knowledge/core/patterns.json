@@ -1,15 +1,15 @@
 {
   "version": 1,
   "updated_at": "",
-  "description": "Core knowledge \u2014 read-only for Claude. Updated only via admin promotion.",
+  "description": "Core knowledge — read-only for Claude. Updated only via admin promotion.",
   "global_rules": [
     {
-      "rule": "Confirm BUY signals with volume_ratio > 1.2 \u2014 low-volume breakouts frequently fail",
+      "rule": "Volume confirmation: vol_x > 1.5 strongly confirms a BUY signal. vol_x 0.5–1.2 is acceptable for entries — normal consolidation volume. Only treat vol_x < 0.3 as a warning (reduce confidence by 10–15%), NOT as a veto. Low-volume moves in uptrends are valid — do not block BUY solely because vol_x < 1.2.",
       "confidence": "seed",
       "samples": 0
     },
     {
-      "rule": "Avoid BUY when RSI > 72 \u2014 mean-reversion risk is high near overbought extremes",
+      "rule": "RSI overbought handling is regime-dependent: In RANGING or BEAR_TREND, avoid BUY when RSI > 74 (mean-reversion risk). In BULL_TREND, RSI 70–82 is normal momentum — reduce confidence by 10% but do NOT veto BUY. Only hard-veto in BULL_TREND when RSI > 82.",
       "confidence": "seed",
       "samples": 0
     },
@@ -25,7 +25,7 @@
     }
   ],
   "interval_notes": {
-    "1h": "Noisy \u2014 many false signals; require higher confidence thresholds",
+    "1h": "Noisy — many false signals; require higher confidence thresholds",
     "4h": "Best balance of signal quality and trade frequency for most USDC pairs",
     "1d": "Very reliable patterns but few trades per month"
   },

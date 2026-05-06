@@ -2330,7 +2330,7 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 live_state["signals"] = live_state["signals"][-500:]
 
             # ── Voting matrix ────────────────────────────────────────────────────
-            _BUY_THRESHOLDS = {"BULL_TREND": 0.8, "RANGING": 1.0, "BEAR_TREND": 1.2, "HIGH_VOLATILITY": 999.0}
+            _BUY_THRESHOLDS = {"BULL_TREND": 0.6, "RANGING": 0.75, "BEAR_TREND": 1.2, "HIGH_VOLATILITY": 999.0}
             buy_threshold = 1.0  # default, overridden below after regime_str is set
             if not force_sell:
                 regime_str = regime_result.get("regime", "RANGING")

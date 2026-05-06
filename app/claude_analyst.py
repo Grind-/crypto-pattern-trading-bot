@@ -261,7 +261,7 @@ INDICATOR GUIDE:
 - RSI <30 = oversold (buy opportunity) | RSI >70 = overbought (sell opportunity)
 - MACD positive + rising = bullish momentum | negative + falling = bearish
 - bb_pct ~0 = price near lower band (oversold) | ~1 = near upper band (overbought)
-- vol_x >1.5 = high volume (confirms move) | <0.5 = weak/fake move
+- vol_x >1.5 = high volume (strongly confirms move) | 0.5–1.2 = normal/acceptable | <0.3 = very thin (reduce confidence, not a veto)
 - ch4h% = 4-candle momentum
 
 RULES FOR YOUR SIGNALS:
@@ -438,7 +438,7 @@ INDICATOR GUIDE:
 - RSI <30 = oversold (buy opportunity) | RSI >70 = overbought (sell opportunity)
 - MACD positive + rising = bullish momentum | negative + falling = bearish
 - bb_pct ~0 = price near lower band (oversold) | ~1 = near upper band (overbought)
-- vol_x >1.5 = high volume (confirms move) | <0.5 = weak/fake move
+- vol_x >1.5 = high volume (strongly confirms move) | 0.5–1.2 = normal/acceptable | <0.3 = very thin (reduce confidence, not a veto)
 - rsi_bull_div=True → bullische Divergenz (starkes BUY-Muster)
 - rsi_bear_div=True → bärische Divergenz (starkes SELL-Muster)
 - adx: <25=kein Trend, 25-50=Trend, >50=starker Trend
