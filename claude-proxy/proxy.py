@@ -14,6 +14,7 @@ class PromptRequest(BaseModel):
     system: str = ""
     prompt: str
     oauth_token: str = ""   # per-request override for user subscriptions
+    model: str = ""          # per-request model override (e.g. claude-haiku-4-5-20251001)
 
 
 @app.get("/health")
@@ -35,6 +36,10 @@ async def analyze(req: PromptRequest):
         val = os.environ.get(key)
         if val:
             env[key] = val
+
+    # Per-request model override takes priority over container default
+    if req.model:
+        env["ANTHROPIC_MODEL"] = req.model
 
     # Per-request OAuth token takes priority over server token
     if req.oauth_token:

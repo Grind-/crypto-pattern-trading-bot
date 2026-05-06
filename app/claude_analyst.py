@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 
 PROXY_URL = os.environ.get("CLAUDE_PROXY_URL", "http://claude-proxy:8081")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL      = "claude-sonnet-4-6"
+CLAUDE_MODEL_FAST = "claude-haiku-4-5-20251001"  # for classification/merging tasks
 
 TRADING_AGENT_SYSTEM = (
     "You are an expert quantitative cryptocurrency trading analyst (Trading Agent). "
@@ -128,6 +129,7 @@ async def get_regime(
         result = await _call_claude(
             prompt, api_key=api_key, oauth_token=oauth_token,
             timeout=45, system=REGIME_AGENT_SYSTEM,
+            model=CLAUDE_MODEL_FAST,
         )
         if not isinstance(result, dict) or "regime" not in result:
             return _FALLBACK
@@ -140,11 +142,15 @@ async def get_regime(
 
 async def _call_proxy(prompt: str, timeout: int = 270,
                       oauth_token: str = "",
-                      system: str = TRADING_AGENT_SYSTEM) -> Dict:
+                      system: str = TRADING_AGENT_SYSTEM,
+                      model: str = "") -> Dict:
+    body = {"system": system, "prompt": prompt, "oauth_token": oauth_token}
+    if model:
+        body["model"] = model
     async with httpx.AsyncClient(timeout=timeout + 30) as client:
         r = await client.post(
             f"{PROXY_URL}/analyze",
-            json={"system": system, "prompt": prompt, "oauth_token": oauth_token},
+            json=body,
         )
         r.raise_for_status()
         data = r.json()
@@ -155,7 +161,8 @@ async def _call_proxy(prompt: str, timeout: int = 270,
 
 
 async def _call_api(prompt: str, api_key: str, timeout: int = 270,
-                    system: str = TRADING_AGENT_SYSTEM) -> Dict:
+                    system: str = TRADING_AGENT_SYSTEM,
+                    model: str = "") -> Dict:
     async with httpx.AsyncClient(timeout=timeout + 30) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
@@ -165,7 +172,7 @@ async def _call_api(prompt: str, api_key: str, timeout: int = 270,
                 "content-type": "application/json",
             },
             json={
-                "model": CLAUDE_MODEL,
+                "model": model or CLAUDE_MODEL,
                 "max_tokens": 4096,
                 "system": system,
                 "messages": [{"role": "user", "content": prompt}],
@@ -180,10 +187,11 @@ async def _call_api(prompt: str, api_key: str, timeout: int = 270,
 
 async def _call_claude(prompt: str, api_key: Optional[str] = None,
                        oauth_token: str = "", timeout: int = 270,
-                       system: str = TRADING_AGENT_SYSTEM) -> Dict:
+                       system: str = TRADING_AGENT_SYSTEM,
+                       model: str = "") -> Dict:
     if api_key:
-        return await _call_api(prompt, api_key, timeout, system=system)
-    return await _call_proxy(prompt, timeout, oauth_token=oauth_token, system=system)
+        return await _call_api(prompt, api_key, timeout, system=system, model=model)
+    return await _call_proxy(prompt, timeout, oauth_token=oauth_token, system=system, model=model)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -531,7 +539,8 @@ Respond with ONLY raw JSON:
 }}"""
 
     try:
-        return await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+        return await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90,
+                                  model=CLAUDE_MODEL_FAST)
     except Exception as e:
         return {"best_symbol": "", "ranking": [], "recommendation": f"Scan fehlgeschlagen: {e}"}
 
@@ -541,6 +550,7 @@ async def test_connection(api_key: Optional[str] = None, oauth_token: str = "") 
         result = await _call_claude(
             'Respond with exactly: {"ok": true}',
             api_key=api_key, oauth_token=oauth_token, timeout=30,
+            model=CLAUDE_MODEL_FAST,
         )
         return bool(result)
     except Exception:
@@ -621,7 +631,8 @@ Respond with ONLY raw JSON (no markdown):
 
     for attempt in range(2):
         try:
-            result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+            result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90,
+                                        model=CLAUDE_MODEL_FAST)
             if isinstance(result, dict) and "session_count" in result:
                 result["last_updated"] = datetime.now(timezone.utc).isoformat()
                 update_user_patterns(username, symbol, interval, result)
@@ -713,7 +724,8 @@ Respond ONLY with raw JSON:
 
     for attempt in range(2):
         try:
-            result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+            result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90,
+                                        model=CLAUDE_MODEL_FAST)
             if isinstance(result, dict) and "contributing_users" in result:
                 result["contributing_users"] = n
                 result["total_sessions"]     = total_sessions
@@ -842,7 +854,8 @@ Respond with ONLY raw JSON — the merged pattern object:
   "last_updated": "{datetime.now(timezone.utc).date().isoformat()}"
 }}"""
 
-        result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90)
+        result = await _call_claude(prompt, api_key=api_key, oauth_token=oauth_token, timeout=90,
+                                    model=CLAUDE_MODEL_FAST)
         if not isinstance(result, dict) or "session_count" not in result:
             return False
 
