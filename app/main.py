@@ -385,13 +385,18 @@ def _build_capital_series(
     running_cap = trade_amount
     for t in sorted_trades:
         if t["type"] == "SELL" and t.get("pnl_pct") is not None:
-            pnl = t["pnl_pct"]
-            if compounding_mode == "fixed":
-                running_cap = trade_amount
-            elif compounding_mode == "compound_wins":
-                running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
+            real_bal = t.get("real_usdc_balance")
+            if real_bal is not None:
+                # Real Binance balance snapshot — use directly as ground truth
+                running_cap = real_bal
             else:
-                running_cap = round(running_cap * (1 + pnl / 100), 2)
+                pnl = t["pnl_pct"]
+                if compounding_mode == "fixed":
+                    running_cap = trade_amount
+                elif compounding_mode == "compound_wins":
+                    running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
+                else:
+                    running_cap = round(running_cap * (1 + pnl / 100), 2)
             sell_checkpoints[t["timestamp"]] = running_cap
 
     cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
@@ -1976,11 +1981,19 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             live_state["_sell_fail_count"] = 0
             delta = net_usdc - prev_capital
             reason_str = f" [{force_reason}]" if force_reason else ""
+            # Fetch real USDC balance for accurate performance graph snapshots
+            real_usdc_balance: Optional[float] = None
+            try:
+                post_sell_balances = await trader.get_balances()
+                real_usdc_balance = round(post_sell_balances.get("USDC", 0.0), 4)
+            except Exception:
+                pass
             live_state["trade_history"].append({
                 "type": "SELL", "symbol": position_symbol,
                 "price": round(sell_price, 8), "timestamp": int(time.time() * 1000),
                 "order_id": str(order.get("orderId", "")), "pnl_pct": round(pnl_pct, 3),
                 "net_usdc": round(net_usdc, 4),
+                **({"real_usdc_balance": real_usdc_balance} if real_usdc_balance is not None else {}),
             })
             _log(live_state, f"✅ VERKAUF {position_symbol}{reason_str} @ ${sell_price:,.4f} | P&L: {pnl_pct:+.2f}% | Kapital: ${net_usdc:.2f} ({delta:+.2f}$)")
             _persist_trade_history(username, live_state)
