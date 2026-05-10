@@ -404,7 +404,7 @@ def _build_capital_series(
         for t in sorted_trades if t.get("type") == "SELL"
     )
     cap_series_raw: list[tuple[int, float]] = (
-        [] if has_real_snapshots else [(start_ts, trade_amount)]
+        [] if (has_real_snapshots or not trade_amount) else [(start_ts, trade_amount)]
     )
     last_realised = trade_amount
     last_sell_ts = start_ts
@@ -2681,15 +2681,29 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             buy_p = float(slot.get("buy_price") or sell_price or 1.0)
             pnl_pct = (sell_price - buy_p) / buy_p * 100 if (buy_p and sell_price > 0) else None
             reason_str = f" [{force_reason}]" if force_reason else ""
+            live_state["portfolio_positions"].pop(symbol, None)
+            # Snapshot real portfolio value: actual USDC balance + remaining positions
+            real_portfolio_value: Optional[float] = None
+            try:
+                post_balances = await trader.get_balances()
+                free_usdc = post_balances.get("USDC", 0.0)
+                positions_value = sum(
+                    float(s.get("position_qty", 0))
+                    * float(s.get("current_price") or s.get("buy_price") or 0)
+                    for s in live_state["portfolio_positions"].values()
+                )
+                real_portfolio_value = round(free_usdc + positions_value, 4)
+            except Exception:
+                pass
             live_state["trade_history"].append({
                 "type": "SELL", "symbol": symbol,
                 "price": round(sell_price, 8), "timestamp": int(time.time() * 1000),
                 "order_id": str(order.get("orderId", "")),
                 "pnl_pct": round(pnl_pct, 3), "net_usdc": round(net, 4),
+                **({"real_usdc_balance": real_portfolio_value} if real_portfolio_value is not None else {}),
             })
             _persist_trade_history(username, live_state)
             append_trade_log(username, symbol, live_state["trade_history"][-1])
-            live_state["portfolio_positions"].pop(symbol, None)
             pnl_str = f"{pnl_pct:+.2f}%" if pnl_pct is not None else "?"
             _log(live_state, f"✅ VERKAUF {symbol}{reason_str} @ ${sell_price:,.4f} | P&L: {pnl_str} | +${net:.2f}")
             return True, net
