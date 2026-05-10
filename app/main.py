@@ -386,12 +386,19 @@ def _build_capital_series(
     for t in sorted_trades:
         if t["type"] == "SELL" and t.get("pnl_pct") is not None:
             pnl = t["pnl_pct"]
+            net = t.get("net_usdc")  # actual USDC after fees, present on all real sells
             if compounding_mode == "fixed":
                 running_cap = trade_amount
             elif compounding_mode == "compound_wins":
-                running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
-            else:
-                running_cap = round(running_cap * (1 + pnl / 100), 2)
+                if net is not None:
+                    running_cap = max(round(net, 2), trade_amount)
+                else:
+                    running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
+            else:  # compound
+                if net is not None:
+                    running_cap = round(net, 2)
+                else:
+                    running_cap = round(running_cap * (1 + pnl / 100), 2)
             sell_checkpoints[t["timestamp"]] = running_cap
 
     cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
@@ -1274,6 +1281,35 @@ async def trigger_live(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/live/reset-history")
+async def reset_live_history(request: Request):
+    user = _get_current_user(request)
+    username = user["username"]
+    live_state = _get_live_state(username)
+    if not live_state.get("running"):
+        raise HTTPException(400, "Live Trading ist nicht aktiv")
+    is_in_pos = (
+        live_state.get("position") in ("IN_POSITION", "BUYING", "SELLING")
+        or (live_state.get("mode") == "portfolio" and live_state.get("portfolio_open_count", 0) > 0)
+        or bool(live_state.get("portfolio_positions"))
+    )
+    if is_in_pos:
+        raise HTTPException(400, "Kann Historie nicht zurücksetzen während Positionen offen sind")
+    start_capital = float(live_state.get("trade_amount") or 50.0)
+    live_state["trade_history"] = []
+    live_state["current_capital"] = start_capital
+    live_state["portfolio_positions"] = {}
+    live_state["portfolio_open_count"] = 0
+    _persist_trade_history(username, live_state)
+    save_live_state(username, {
+        "trade_history": [],
+        "current_capital": start_capital,
+        "portfolio_positions": {},
+    })
+    _log(live_state, f"🔄 Historie zurückgesetzt — Startkapital ${start_capital:.2f}")
+    return {"ok": True, "start_capital": start_capital}
+
+
 @app.post("/api/live/reset-position")
 async def reset_live_position(request: Request):
     user = _get_current_user(request)
@@ -1957,6 +1993,12 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
             _persist_trade_history(username, live_state)
             append_trade_log(username, position_symbol, live_state["trade_history"][-1])
             save_live_state_snapshot(username, position_symbol, live_state)
+            save_live_state(username, {
+                "position": "FLAT", "symbol": live_state.get("symbol", ""),
+                "buy_price": None, "position_qty": 0,
+                "current_capital": live_state["current_capital"],
+                "trade_history": live_state.get("trade_history", []),
+            })
             return True, net_usdc
         except Exception as e:
             live_state["position"] = "IN_POSITION"
