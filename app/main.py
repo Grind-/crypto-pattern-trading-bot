@@ -869,6 +869,29 @@ _SCAN_FALLBACK_UNDERDOGS = ["NEARUSDC", "INJUSDC"]
 # Keep SCAN_SYMBOLS as alias so existing references (e.g. log messages) still work
 SCAN_SYMBOLS = _SCAN_FALLBACK_TOP
 
+# Extended pool for second-round scan when primary candidates all fail buy criteria
+_SCAN_EXTENDED_POOL = [
+    "LINKUSDC", "UNIUSDC", "DOTUSDC", "LTCUSDC", "MATICUSDC",
+    "ARBUSDC", "OPUSDC", "ATOMUSDC", "SUIUSDC", "APTUSDC",
+    "FTMUSDC", "AAVEUSDC", "LDOUSDC", "TIAUSDC", "SEIUSDC",
+    "JUPUSDC", "ONDOUSDC", "EIGENUSDC", "ENAUSDC", "WIFUSDC",
+]
+
+
+def _get_extended_scan_pairs(already_scanned: set, held: set) -> list[str]:
+    """Return up to 10 additional pairs for a second-round scan.
+    Prefers pairs from News Agent's extended top list, falls back to static pool."""
+    intel = get_news_intelligence()
+    news_top_all = [
+        s.upper() for s in intel.get("recommended_scan_pairs", {}).get("top", [])
+        if str(s).upper().endswith("USDC")
+    ]
+    # Pairs from news agent beyond the first 8 (already in primary scan)
+    news_extended = [s for s in news_top_all[8:] if s not in already_scanned and s not in held]
+    static_extended = [s for s in _SCAN_EXTENDED_POOL if s not in already_scanned and s not in held]
+    combined = news_extended + [s for s in static_extended if s not in news_extended]
+    return combined[:10]
+
 
 def _get_scan_pairs_from_news(held: set) -> tuple[list[str], list[str]]:
     """Return (top_8, underdogs_2) from News Agent recommended_scan_pairs.
@@ -3204,93 +3227,123 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 else:
                     min_buy = live_state.get("min_confidence") or req.min_confidence
                     fng = await _fetch_fear_greed()
-                    for cand in candidates:
-                        if slots_free <= 0: break
-                        sym = cand["symbol"]
-                        # Re-fetch latest balance — earlier buys reduced it
-                        try:
-                            balances = await trader.get_balances()
-                            free_usdc = balances.get("USDC", 0.0)
-                            live_state["portfolio_free_usdc"] = free_usdc
-                        except Exception:
-                            pass
-                        if free_usdc < PORTFOLIO_MIN_ORDER_USDC: break
+                    _scan_rounds = [candidates]
+                    for _round_idx, _round_cands in enumerate(_scan_rounds):
+                        _slots_before_round = slots_free
+                        for cand in _round_cands:
+                            if slots_free <= 0: break
+                            sym = cand["symbol"]
+                            # Re-fetch latest balance — earlier buys reduced it
+                            try:
+                                balances = await trader.get_balances()
+                                free_usdc = balances.get("USDC", 0.0)
+                                live_state["portfolio_free_usdc"] = free_usdc
+                            except Exception:
+                                pass
+                            if free_usdc < PORTFOLIO_MIN_ORDER_USDC: break
 
-                        try:
-                            raw = await fetch_latest_klines(sym, req.interval, limit=100)
-                            enriched = compute_indicators(raw)
-                            candles_4h = enriched if req.interval == "4h" else compute_indicators(
-                                await fetch_latest_klines(sym, "4h", limit=100))
-                            candles_1h = enriched if req.interval == "1h" else compute_indicators(
-                                await fetch_latest_klines(sym, "1h", limit=100))
-                            regime = await get_regime(symbol=sym, interval=req.interval,
-                                                      candles_1h=candles_1h, candles_4h=candles_4h,
-                                                      fear_greed=fng,
-                                                      api_key=api_key, oauth_token=oauth_token)
-                        except Exception as e:
-                            _log(live_state, f"⚠ {sym}: Setup-Check fehlgeschlagen ({e})")
-                            continue
+                            try:
+                                raw = await fetch_latest_klines(sym, req.interval, limit=100)
+                                enriched = compute_indicators(raw)
+                                candles_4h = enriched if req.interval == "4h" else compute_indicators(
+                                    await fetch_latest_klines(sym, "4h", limit=100))
+                                candles_1h = enriched if req.interval == "1h" else compute_indicators(
+                                    await fetch_latest_klines(sym, "1h", limit=100))
+                                regime = await get_regime(symbol=sym, interval=req.interval,
+                                                          candles_1h=candles_1h, candles_4h=candles_4h,
+                                                          fear_greed=fng,
+                                                          api_key=api_key, oauth_token=oauth_token)
+                            except Exception as e:
+                                _log(live_state, f"⚠ {sym}: Setup-Check fehlgeschlagen ({e})")
+                                continue
 
-                        news_score = get_news_score_for_symbol(sym)
-                        if regime.get("regime") == "HIGH_VOLATILITY":
-                            _log(live_state, f"⏭ {sym}: HIGH_VOLATILITY — übersprungen")
-                            continue
-                        if news_score.get("veto"):
-                            _log(live_state, f"⏭ {sym}: News-Veto — übersprungen")
-                            continue
-                        # Protection B+C: halt / cooldown gate
-                        _blk, _why = _is_buy_blocked_by_protections(
-                            live_state, sym, time.time(), req)
-                        if _blk:
-                            _log(live_state, f"🚫 {sym}: BUY blockiert: {_why}")
-                            continue
+                            news_score = get_news_score_for_symbol(sym)
+                            if regime.get("regime") == "HIGH_VOLATILITY":
+                                _log(live_state, f"⏭ {sym}: HIGH_VOLATILITY — übersprungen")
+                                continue
+                            if news_score.get("veto"):
+                                _log(live_state, f"⏭ {sym}: News-Veto — übersprungen")
+                                continue
+                            # Protection B+C: halt / cooldown gate
+                            _blk, _why = _is_buy_blocked_by_protections(
+                                live_state, sym, time.time(), req)
+                            if _blk:
+                                _log(live_state, f"🚫 {sym}: BUY blockiert: {_why}")
+                                continue
 
-                        sym_history = [t for t in live_state.get("trade_history", [])
-                                       if t.get("symbol") == sym or not t.get("symbol")]
-                        signal = await get_live_signal(
-                            symbol=sym, interval=req.interval, candles=enriched,
-                            current_position="FLAT", username=username,
-                            signal_history=[], trade_history=sym_history,
-                            analysis_weight=req.analysis_weight,
-                            api_key=api_key, oauth_token=oauth_token,
-                            regime=regime, news_score=news_score,
-                            min_confidence=min_buy,
-                        )
-                        action     = signal.get("action", "HOLD")
-                        confidence = signal.get("confidence", 0)
-                        reason_str = signal.get("reason", "")[:100]
-                        if action != "BUY" or confidence < min_buy:
-                            if action != "BUY":
-                                _log(live_state, f"⏭ {sym}: {action} ({confidence}%) — {reason_str}")
-                            else:
-                                _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {min_buy}% — {reason_str}")
-                            continue
+                            sym_history = [t for t in live_state.get("trade_history", [])
+                                           if t.get("symbol") == sym or not t.get("symbol")]
+                            signal = await get_live_signal(
+                                symbol=sym, interval=req.interval, candles=enriched,
+                                current_position="FLAT", username=username,
+                                signal_history=[], trade_history=sym_history,
+                                analysis_weight=req.analysis_weight,
+                                api_key=api_key, oauth_token=oauth_token,
+                                regime=regime, news_score=news_score,
+                                min_confidence=min_buy,
+                            )
+                            action     = signal.get("action", "HOLD")
+                            confidence = signal.get("confidence", 0)
+                            reason_str = signal.get("reason", "")[:100]
+                            if action != "BUY" or confidence < min_buy:
+                                if action != "BUY":
+                                    _log(live_state, f"⏭ {sym}: {action} ({confidence}%) — {reason_str}")
+                                else:
+                                    _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {min_buy}% — {reason_str}")
+                                continue
 
-                        # Confidence-tier sizing
-                        tier_pct = _portfolio_allocation_pct(confidence)
-                        sized = round(free_usdc * tier_pct, 2)
-                        if req.max_per_position and req.max_per_position > 0:
-                            sized = min(sized, req.max_per_position)
-                        if sized < PORTFOLIO_MIN_ORDER_USDC:
-                            _log(live_state, f"⏭ {sym}: sized {sized:.2f} < ${PORTFOLIO_MIN_ORDER_USDC} — kein Kauf")
-                            continue
+                            # Confidence-tier sizing
+                            tier_pct = _portfolio_allocation_pct(confidence)
+                            sized = round(free_usdc * tier_pct, 2)
+                            if req.max_per_position and req.max_per_position > 0:
+                                sized = min(sized, req.max_per_position)
+                            if sized < PORTFOLIO_MIN_ORDER_USDC:
+                                _log(live_state, f"⏭ {sym}: sized {sized:.2f} < ${PORTFOLIO_MIN_ORDER_USDC} — kein Kauf")
+                                continue
 
-                        # Risk params for SL/TP
-                        risk = calculate_risk_params(enriched, sized, regime.get("regime", "RANGING"),
-                                                     signals_count_green=4,
-                                                     sl_atr_mult=(live_state.get("sl_atr_mult") or req.sl_atr_mult),
-                                                     tp_atr_mult=(live_state.get("tp_atr_mult") or req.tp_atr_mult))
-                        if risk.get("blocked"):
-                            _log(live_state, f"⏭ {sym}: Risk-Agent blockiert (SL {risk.get('stop_loss_pct', '?')}% ATR)")
-                            continue
+                            # Risk params for SL/TP
+                            risk = calculate_risk_params(enriched, sized, regime.get("regime", "RANGING"),
+                                                         signals_count_green=4,
+                                                         sl_atr_mult=(live_state.get("sl_atr_mult") or req.sl_atr_mult),
+                                                         tp_atr_mult=(live_state.get("tp_atr_mult") or req.tp_atr_mult))
+                            if risk.get("blocked"):
+                                _log(live_state, f"⏭ {sym}: Risk-Agent blockiert (SL {risk.get('stop_loss_pct', '?')}% ATR)")
+                                continue
 
-                        price_now = enriched[-1]["close"] if enriched else 0.0
-                        ok = await _portfolio_buy(sym, sized,
-                                                  sl_pct=risk["stop_loss_pct"],
-                                                  tp_pct=risk["take_profit_pct"],
-                                                  buy_price_for_levels=price_now)
-                        if ok:
-                            slots_free -= 1
+                            price_now = enriched[-1]["close"] if enriched else 0.0
+                            ok = await _portfolio_buy(sym, sized,
+                                                      sl_pct=risk["stop_loss_pct"],
+                                                      tp_pct=risk["take_profit_pct"],
+                                                      buy_price_for_levels=price_now)
+                            if ok:
+                                slots_free -= 1
+
+                        # After first round: if no buys, scan 10 additional pairs
+                        if (_round_idx == 0
+                                and slots_free == _slots_before_round
+                                and slots_free > 0
+                                and free_usdc >= PORTFOLIO_MIN_ORDER_USDC):
+                            _ext_pairs = _get_extended_scan_pairs(set(all_scan_symbols), held_set)
+                            if _ext_pairs:
+                                _log(live_state, f"🔎 Keine Kaufsignale — scanne {len(_ext_pairs)} weitere Pairs: {', '.join(_ext_pairs)}")
+                                try:
+                                    _ext_summ = await _fetch_scan_summaries(req.interval, _ext_pairs)
+                                    _ext_result = await scan_market(
+                                        _ext_summ, req.interval,
+                                        username=username,
+                                        api_key=api_key, oauth_token=oauth_token,
+                                        underdog_symbols=[])
+                                except Exception as _e_ext:
+                                    _log(live_state, f"⚠ Erweiterter Scanner-Fehler: {_e_ext}")
+                                    _ext_result = {"ranking": []}
+                                _ext_held = set(live_state["portfolio_positions"].keys())
+                                _ext_ranking = [
+                                    r for r in (_ext_result.get("ranking") or [])
+                                    if r.get("symbol") and r["symbol"] not in _ext_held
+                                ]
+                                _ext_cands = _ext_ranking[:slots_free * 2]
+                                if _ext_cands:
+                                    _scan_rounds.append(_ext_cands)
 
             # ── Cycle wrap-up ────────────────────────────────────────────
             try:
