@@ -399,7 +399,13 @@ def _build_capital_series(
                     running_cap = round(running_cap * (1 + pnl / 100), 2)
             sell_checkpoints[t["timestamp"]] = running_cap
 
-    cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
+    has_real_snapshots = any(
+        t.get("real_usdc_balance") is not None
+        for t in sorted_trades if t.get("type") == "SELL"
+    )
+    cap_series_raw: list[tuple[int, float]] = (
+        [] if has_real_snapshots else [(start_ts, trade_amount)]
+    )
     last_realised = trade_amount
     last_sell_ts = start_ts
     for ts_sell, cap_after in sorted(sell_checkpoints.items()):
@@ -1526,7 +1532,6 @@ async def live_performance(request: Request):
 
     sorted_trades = sorted(trade_history, key=lambda x: x.get("timestamp", 0))
     start_ts = sorted_trades[0]["timestamp"] if sorted_trades else (now_ms - 86_400_000)
-    duration_h = (now_ms - start_ts) / 3_600_000
 
     cap_series_raw, sell_checkpoints = _build_capital_series(
         sorted_trades, trade_amount, compounding_mode,
@@ -1534,10 +1539,15 @@ async def live_performance(request: Request):
     )
     capital_series = [{"ts": ts, "usdc": cap} for ts, cap in cap_series_raw]
 
+    # Use first real point as baseline; fall back to trade_amount when no trades yet
+    baseline_capital = capital_series[0]["usdc"] if capital_series else trade_amount
+    baseline_ts = capital_series[0]["ts"] if capital_series else start_ts
+
     # Normalised % series for bot
     bot_pct_series = [
-        {"ts": p["ts"], "pct": round((p["usdc"] / trade_amount - 1) * 100, 2)}
+        {"ts": p["ts"], "pct": round((p["usdc"] / baseline_capital - 1) * 100, 2)}
         for p in capital_series
+        if baseline_capital
     ]
 
     # Per-trade P&L bars
@@ -1594,8 +1604,8 @@ async def live_performance(request: Request):
             "open":       True,
         })
 
-    # BTC benchmark — interval chosen by duration for appropriate granularity
-    # <2d → 1h | <14d → 4h | else → 1d
+    # BTC benchmark — interval chosen by duration relative to first real snapshot
+    duration_h = (now_ms - baseline_ts) / 3_600_000
     if duration_h <= 48:
         btc_interval, btc_limit = "1h", 500
     elif duration_h <= 336:
@@ -1607,12 +1617,12 @@ async def live_performance(request: Request):
     try:
         btc_raw = await fetch_latest_klines("BTCUSDC", btc_interval, limit=btc_limit)
         if btc_raw:
-            candles_before = [c for c in btc_raw if c["timestamp"] <= start_ts]
+            candles_before = [c for c in btc_raw if c["timestamp"] <= baseline_ts]
             ref_candle = candles_before[-1] if candles_before else btc_raw[0]
             ref_price = ref_candle["close"]
             series_src = [c for c in btc_raw if c["timestamp"] >= ref_candle["timestamp"]]
             btc_pct_series = [
-                {"ts": start_ts if i == 0 else c["timestamp"],
+                {"ts": baseline_ts if i == 0 else c["timestamp"],
                  "pct": round((c["close"] / ref_price - 1) * 100, 2)}
                 for i, c in enumerate(series_src)
             ]
@@ -1624,7 +1634,7 @@ async def live_performance(request: Request):
     except Exception as exc:
         logger.warning(f"BTC benchmark fetch failed [{user['username']}]: {exc}")
 
-    bot_total_pct = round((current_capital / trade_amount - 1) * 100, 2) if trade_amount else 0
+    bot_total_pct = round((current_capital / baseline_capital - 1) * 100, 2) if baseline_capital else 0
     btc_total_pct = btc_pct_series[-1]["pct"] if btc_pct_series else None
 
     return {
@@ -1634,7 +1644,7 @@ async def live_performance(request: Request):
         "trade_pnl": trade_pnl,
         "trade_pairs": trade_pairs,
         "summary": {
-            "start_capital": trade_amount,
+            "start_capital": baseline_capital,
             "current_capital": current_capital,
             "bot_pct": bot_total_pct,
             "btc_pct": btc_total_pct,
