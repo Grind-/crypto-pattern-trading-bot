@@ -386,19 +386,12 @@ def _build_capital_series(
     for t in sorted_trades:
         if t["type"] == "SELL" and t.get("pnl_pct") is not None:
             pnl = t["pnl_pct"]
-            net = t.get("net_usdc")  # actual USDC after fees, present on all real sells
             if compounding_mode == "fixed":
                 running_cap = trade_amount
             elif compounding_mode == "compound_wins":
-                if net is not None:
-                    running_cap = max(round(net, 2), trade_amount)
-                else:
-                    running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
-            else:  # compound
-                if net is not None:
-                    running_cap = round(net, 2)
-                else:
-                    running_cap = round(running_cap * (1 + pnl / 100), 2)
+                running_cap = max(round(running_cap * (1 + pnl / 100), 2), trade_amount)
+            else:
+                running_cap = round(running_cap * (1 + pnl / 100), 2)
             sell_checkpoints[t["timestamp"]] = running_cap
 
     cap_series_raw: list[tuple[int, float]] = [(start_ts, trade_amount)]
