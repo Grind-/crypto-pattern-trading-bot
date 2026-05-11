@@ -868,60 +868,74 @@ async def news_refresh(request: Request):
 # Fallback scan list used only when News Agent intelligence is unavailable
 _SCAN_FALLBACK_TOP = [
     "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
-    "ADAUSDC", "AVAXUSDC", "DOGEUSDC",
+    "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "LINKUSDC", "UNIUSDC",
 ]
-_SCAN_FALLBACK_UNDERDOGS = ["NEARUSDC", "INJUSDC"]
+_SCAN_FALLBACK_UNDERDOGS = [
+    "NEARUSDC", "INJUSDC", "APTUSDC", "SUIUSDC", "TIAUSDC",
+    "SEIUSDC", "JUPUSDC", "PYTHUSDC", "WIFUSDC", "ENAUSDC",
+]
 # Keep SCAN_SYMBOLS as alias so existing references (e.g. log messages) still work
 SCAN_SYMBOLS = _SCAN_FALLBACK_TOP
 
-# Extended pool for second-round scan when primary candidates all fail buy criteria
-_SCAN_EXTENDED_POOL = [
-    "LINKUSDC", "UNIUSDC", "DOTUSDC", "LTCUSDC", "MATICUSDC",
-    "ARBUSDC", "OPUSDC", "ATOMUSDC", "SUIUSDC", "APTUSDC",
-    "FTMUSDC", "AAVEUSDC", "LDOUSDC", "TIAUSDC", "SEIUSDC",
-    "JUPUSDC", "ONDOUSDC", "EIGENUSDC", "ENAUSDC", "WIFUSDC",
+# Extended pool for second-round scan (pairs not in primary scan)
+_SCAN_EXTENDED_TOP = [
+    "DOTUSDC", "LTCUSDC", "MATICUSDC", "ARBUSDC", "OPUSDC",
+    "ATOMUSDC", "AAVEUSDC", "LDOUSDC", "ONDOUSDC", "FTMUSDC",
+]
+_SCAN_EXTENDED_UNDERDOGS = [
+    "EIGENUSDC", "JUPUSDC", "WUSDC", "TAOUSDC", "RENDERUSDC",
+    "FETUSDC", "AGIXUSDC", "OCEANUSDC", "AKASHUSDC", "IOTAUSDC",
 ]
 
 
-def _get_extended_scan_pairs(already_scanned: set, held: set) -> list[str]:
-    """Return up to 10 additional pairs for a second-round scan.
-    Prefers pairs from News Agent's extended top list, falls back to static pool."""
+def _get_extended_scan_pairs(already_scanned: set, held: set) -> tuple[list[str], list[str]]:
+    """Return (top_10, underdogs_10) for the second-round scan.
+    Prefers pairs from News Agent's extended list, falls back to static pools."""
     intel = get_news_intelligence()
-    news_top_all = [
-        s.upper() for s in intel.get("recommended_scan_pairs", {}).get("top", [])
-        if str(s).upper().endswith("USDC")
-    ]
-    # Pairs from news agent beyond the first 8 (already in primary scan)
-    news_extended = [s for s in news_top_all[8:] if s not in already_scanned and s not in held]
-    static_extended = [s for s in _SCAN_EXTENDED_POOL if s not in already_scanned and s not in held]
-    combined = news_extended + [s for s in static_extended if s not in news_extended]
-    return combined[:10]
+    scan = intel.get("recommended_scan_pairs", {})
+    news_top_all = [s.upper() for s in scan.get("top", []) if str(s).upper().endswith("USDC")]
+    news_underdogs_all = [s.upper() for s in scan.get("underdogs", []) if str(s).upper().endswith("USDC")]
+
+    # News pairs beyond the first 10 (already used in primary scan)
+    news_ext_top = [s for s in news_top_all[10:] if s not in already_scanned and s not in held]
+    news_ext_und = [s for s in news_underdogs_all[10:] if s not in already_scanned and s not in held]
+
+    static_top = [s for s in _SCAN_EXTENDED_TOP if s not in already_scanned and s not in held]
+    static_und = [s for s in _SCAN_EXTENDED_UNDERDOGS if s not in already_scanned and s not in held]
+
+    ext_top = (news_ext_top + [s for s in static_top if s not in news_ext_top])[:10]
+    ext_und = (news_ext_und + [s for s in static_und if s not in news_ext_und])[:10]
+    return ext_top, ext_und
 
 
 def _get_scan_pairs_from_news(held: set) -> tuple[list[str], list[str]]:
-    """Return (top_8, underdogs_2) from News Agent recommended_scan_pairs.
+    """Return (top_10, underdogs_10) from News Agent recommended_scan_pairs.
     Falls back to static defaults when intelligence is unavailable or stale."""
     intel = get_news_intelligence()
     scan = intel.get("recommended_scan_pairs", {})
 
-    top = [s.upper() for s in scan.get("top", []) if str(s).upper().endswith("USDC")][:8]
+    top = [s.upper() for s in scan.get("top", []) if str(s).upper().endswith("USDC")][:10]
     underdogs = [
         s.upper() for s in scan.get("underdogs", [])
         if str(s).upper().endswith("USDC") and s.upper() not in top
-    ][:2]
+    ][:10]
 
     if not top:
         top = _SCAN_FALLBACK_TOP
-    if not underdogs:
-        # Fallback: first top_opportunities not in top
+    if len(underdogs) < 10:
+        # Fill from top_opportunities first
         for opp in intel.get("top_opportunities", []):
             sym = str(opp.get("symbol", "")).upper()
-            if sym.endswith("USDC") and sym not in top:
+            if sym.endswith("USDC") and sym not in top and sym not in underdogs:
                 underdogs.append(sym)
-                if len(underdogs) >= 2:
+                if len(underdogs) >= 10:
                     break
-    if not underdogs:
-        underdogs = [s for s in _SCAN_FALLBACK_UNDERDOGS if s not in top][:2]
+    if len(underdogs) < 10:
+        for s in _SCAN_FALLBACK_UNDERDOGS:
+            if s not in top and s not in underdogs:
+                underdogs.append(s)
+                if len(underdogs) >= 10:
+                    break
 
     # Never scan already-held positions as fresh candidates
     top = [s for s in top if s not in held]
@@ -3091,7 +3105,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 cycle_top, cycle_underdogs = _get_scan_pairs_from_news(held_set)
                 all_scan_symbols = cycle_top + [s for s in cycle_underdogs if s not in cycle_top]
                 underdog_label = ", ".join(cycle_underdogs) if cycle_underdogs else "–"
-                _log(live_state, f"🔍 Scanne {len(all_scan_symbols)} Pairs: {', '.join(cycle_top)} | 📰 Underdogs: {underdog_label}")
+                _log(live_state, f"🔍 Scanne {len(all_scan_symbols)} Pairs — {len(cycle_top)} Top: {', '.join(cycle_top)} | 📰 {len(cycle_underdogs)} Underdogs: {underdog_label}")
                 try:
                     summaries = await _fetch_scan_summaries(req.interval, all_scan_symbols)
                     scan = await scan_market(summaries, req.interval,
@@ -3332,16 +3346,17 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                         if (_round_idx == 0
                                 and slots_free > 0
                                 and free_usdc >= PORTFOLIO_MIN_ORDER_USDC):
-                            _ext_pairs = _get_extended_scan_pairs(set(all_scan_symbols), held_set)
+                            _ext_top, _ext_und = _get_extended_scan_pairs(set(all_scan_symbols), held_set)
+                            _ext_pairs = _ext_top + [s for s in _ext_und if s not in _ext_top]
                             if _ext_pairs:
-                                _log(live_state, f"🔎 Keine Kaufsignale — scanne {len(_ext_pairs)} weitere Pairs: {', '.join(_ext_pairs)}")
+                                _log(live_state, f"🔎 Scanne {len(_ext_pairs)} weitere Pairs — {len(_ext_top)} Top + {len(_ext_und)} Underdogs: {', '.join(_ext_top)} | 📰 {', '.join(_ext_und)}")
                                 try:
                                     _ext_summ = await _fetch_scan_summaries(req.interval, _ext_pairs)
                                     _ext_result = await scan_market(
                                         _ext_summ, req.interval,
                                         username=username,
                                         api_key=api_key, oauth_token=oauth_token,
-                                        underdog_symbols=[])
+                                        underdog_symbols=_ext_und)
                                 except Exception as _e_ext:
                                     _log(live_state, f"⚠ Erweiterter Scanner-Fehler: {_e_ext}")
                                     _ext_result = {"ranking": []}
