@@ -942,7 +942,6 @@ def _get_scan_pairs_from_news(held: set) -> tuple[list[str], list[str]]:
     underdogs = [s for s in underdogs if s not in held]
     return top, underdogs
 
-PORTFOLIO_MAX_POSITIONS = 4
 PORTFOLIO_MIN_ORDER_USDC = 10.0
 
 
@@ -1195,8 +1194,8 @@ async def start_live(req: LiveRequest, background_tasks: BackgroundTasks,
     session_token = str(uuid.uuid4())
 
     if mode == "portfolio":
-        start_log = (f"Portfolio Trading gestartet — {req.interval}, max {PORTFOLIO_MAX_POSITIONS} "
-                     f"Positionen, max ${req.max_per_position or 0:.0f}/Pos | {weight_note}")
+        start_log = (f"Portfolio Trading gestartet — {req.interval}, unbegrenzte Positionen, "
+                     f"max ${req.max_per_position or 0:.0f}/Pos | {weight_note}")
     else:
         start_log = f"Live Trading gestartet — {req.interval}, ${req.trade_amount_usdt} USDC | {weight_note}"
 
@@ -1447,7 +1446,7 @@ async def live_status(request: Request):
             total_value += qty * price
         result["portfolio_total_value"] = round(total_value, 2)
         result["portfolio_open_count"] = len(positions)
-        result["portfolio_max_positions"] = PORTFOLIO_MAX_POSITIONS
+        result["portfolio_max_positions"] = None
         # free_usdc is updated by the loop on each cycle
         result["portfolio_free_usdc"] = float(live_state.get("portfolio_free_usdc") or 0.0)
     return result
@@ -2828,8 +2827,6 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             for asset, amt in balances.items():
                 if asset == "USDC" or amt <= 0:
                     continue
-                if len(live_state["portfolio_positions"]) >= PORTFOLIO_MAX_POSITIONS:
-                    break
                 sym = f"{asset}USDC"
                 try:
                     sym_exists = await trader.symbol_exists(sym)
@@ -2883,7 +2880,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             live_state["next_check_str"] = _fmt_ts(next_close_ts)
 
             if first_run:
-                _log(live_state, f"Portfolio-Loop aktiv — {req.interval}, {len(live_state['portfolio_positions'])}/{PORTFOLIO_MAX_POSITIONS} Positionen")
+                _log(live_state, f"Portfolio-Loop aktiv — {req.interval}, {len(live_state['portfolio_positions'])} Positionen offen")
                 _log(live_state, f"Nächste Analyse: {_fmt_ts(next_close_ts)} (in {_fmt_wait(wait_secs)})")
                 first_run = False
 
@@ -2933,8 +2930,6 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                         continue
                     sym = f"{asset}USDC"
                     if sym in live_state["portfolio_positions"]:
-                        continue
-                    if len(live_state["portfolio_positions"]) >= PORTFOLIO_MAX_POSITIONS:
                         continue
                     try:
                         sym_exists = await trader.symbol_exists(sym)
@@ -3087,10 +3082,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
 
             # ── Phase 2: scan for new entries ─────────────────────────────
             open_count = len(live_state["portfolio_positions"])
-            slots_free = PORTFOLIO_MAX_POSITIONS - open_count
-            if slots_free <= 0:
-                _log(live_state, f"Portfolio voll ({open_count}/{PORTFOLIO_MAX_POSITIONS}) — keine neuen Käufe")
-            else:
+            if True:
                 # Re-fetch USDC balance — Phase 1 sells may have freed capital
                 try:
                     bal_p2 = await trader.get_balances()
@@ -3120,7 +3112,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 held = set(live_state["portfolio_positions"].keys())
                 ranking = [r for r in (scan.get("ranking") or [])
                            if r.get("symbol") and r["symbol"] not in held]
-                candidates = ranking[:slots_free * 2]  # consider 2x to allow signal rejections
+                candidates = ranking  # no position cap — USDC is the only limit
 
                 # ── Rebalancing: if not enough USDC but candidates exist, ask held positions ──
                 if free_usdc < PORTFOLIO_MIN_ORDER_USDC and candidates and live_state["portfolio_positions"]:
@@ -3255,7 +3247,6 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                     _scan_rounds = [candidates]
                     for _round_idx, _round_cands in enumerate(_scan_rounds):
                         for cand in _round_cands:
-                            if slots_free <= 0: break
                             sym = cand["symbol"]
                             # Re-fetch latest balance — earlier buys reduced it
                             try:
@@ -3339,12 +3330,8 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                                       sl_pct=risk["stop_loss_pct"],
                                                       tp_pct=risk["take_profit_pct"],
                                                       buy_price_for_levels=price_now)
-                            if ok:
-                                slots_free -= 1
-
-                        # After first round: if slots/USDC remain, scan 10 additional pairs
+                        # After first round: if USDC remains, scan additional pairs
                         if (_round_idx == 0
-                                and slots_free > 0
                                 and free_usdc >= PORTFOLIO_MIN_ORDER_USDC):
                             _ext_top, _ext_und = _get_extended_scan_pairs(set(all_scan_symbols), held_set)
                             _ext_pairs = _ext_top + [s for s in _ext_und if s not in _ext_top]
@@ -3365,7 +3352,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                     r for r in (_ext_result.get("ranking") or [])
                                     if r.get("symbol") and r["symbol"] not in _ext_held
                                 ]
-                                _ext_cands = _ext_ranking[:slots_free * 2]
+                                _ext_cands = _ext_ranking
                                 if _ext_cands:
                                     _scan_rounds.append(_ext_cands)
 
