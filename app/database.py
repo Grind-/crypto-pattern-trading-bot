@@ -62,6 +62,8 @@ live_states = Table(
     Column("compounding_mode",       Text),   # "fixed" | "compound" | "compound_wins"
     Column("analysis_weight",        Integer, default=70),
     Column("calibrated_thresholds",  Text),   # JSON dict {regime: threshold}
+    Column("portfolio_free_usdc",    Float,   default=0.0),
+    Column("portfolio_positions",    Text),   # JSON dict
     Column("updated_at",             Text),
 )
 
@@ -115,7 +117,8 @@ def _migrate_add_columns() -> None:
         for live_col in ("current_capital REAL", "position_qty REAL", "compounding_mode TEXT",
                          "analysis_weight INTEGER", "calibrated_thresholds TEXT",
                          "buy_price REAL", "min_confidence INTEGER", "min_confidence_sell INTEGER",
-                         "sl_atr_mult REAL", "tp_atr_mult REAL"):
+                         "sl_atr_mult REAL", "tp_atr_mult REAL",
+                         "portfolio_free_usdc REAL", "portfolio_positions TEXT"):
             try:
                 conn.execute(text(f"ALTER TABLE live_states ADD COLUMN {live_col}"))
             except Exception:

@@ -421,7 +421,11 @@ def _build_capital_series(
             mtm_cap = round(last_realised - committed + committed * (c["close"] / buy_price), 2)
             cap_series_raw.append((c_ts, mtm_cap))
 
-    cap_series_raw.append((now_ms, current_capital))
+    if current_capital > 0:
+        cap_series_raw.append((now_ms, current_capital))
+    elif cap_series_raw:
+        # State is stale (restart with no persisted portfolio state) — hold last known value
+        cap_series_raw.append((now_ms, sorted(cap_series_raw, key=lambda x: x[0])[-1][1]))
     cap_series_raw.sort(key=lambda x: x[0])
 
     # Deduplicate: keep last value per timestamp (later = more accurate)
@@ -2718,6 +2722,12 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                 real_portfolio_value = round(free_usdc + positions_value, 4)
             except Exception:
                 pass
+            if real_portfolio_value is not None:
+                live_state["portfolio_free_usdc"] = free_usdc
+                save_live_state(username, {
+                    "portfolio_free_usdc": free_usdc,
+                    "portfolio_positions": live_state["portfolio_positions"],
+                })
             live_state["trade_history"].append({
                 "type": "SELL", "symbol": symbol,
                 "price": round(sell_price, 8), "timestamp": int(time.time() * 1000),
@@ -3347,6 +3357,10 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             try:
                 balances = await trader.get_balances()
                 live_state["portfolio_free_usdc"] = balances.get("USDC", 0.0)
+                save_live_state(username, {
+                    "portfolio_free_usdc": live_state["portfolio_free_usdc"],
+                    "portfolio_positions": live_state.get("portfolio_positions", {}),
+                })
             except Exception: pass
 
             next2 = _next_close()

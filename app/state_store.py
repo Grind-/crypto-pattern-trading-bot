@@ -8,7 +8,7 @@ from .database import engine, live_states
 
 
 _JSON_LIST_FIELDS = ("strategy_patterns", "trade_history")
-_JSON_DICT_FIELDS = ("calibrated_thresholds",)
+_JSON_DICT_FIELDS = ("calibrated_thresholds", "portfolio_positions")
 
 
 def _serialize(config: dict) -> dict:
