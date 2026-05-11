@@ -553,21 +553,22 @@ async function fullReset() {
     'Dieser Schritt kann nicht rückgängig gemacht werden.'
   )) return;
   const btn = document.getElementById('btn-full-reset');
-  const res = document.getElementById('trigger-result');
+  const res = document.getElementById('reset-result');
   btn.disabled = true;
   res.textContent = '…';
+  res.style.color = 'var(--text-muted)';
   try {
     const r = await fetch('/api/live/full-reset', {method: 'POST'});
     const d = await r.json();
     if (d.ok) {
-      res.textContent = `✓ Bot zurückgesetzt — $${d.capital.toFixed(2)} USDC, ${d.positions} Position(en) erkannt`;
+      res.textContent = `✓ Zurückgesetzt — $${d.capital.toFixed(2)} USDC, ${d.positions} Position(en)`;
       res.style.color = 'var(--green)';
     } else {
       res.textContent = '✗ ' + (d.detail || 'Fehler');
       res.style.color = 'var(--red)';
     }
   } catch(e) {
-    res.textContent = '✗ Fehler';
+    res.textContent = '✗ Verbindungsfehler';
     res.style.color = 'var(--red)';
   }
   btn.disabled = false;
