@@ -335,6 +335,7 @@ def _default_live_state() -> dict:
         "_cycle_running": False,
         "mode": "single",
         "portfolio_positions": {},
+        "portfolio_free_usdc": 0.0,
         "max_per_position": 0.0,
         "cooldowns": {},
         "trading_halted_until_ts": None,
