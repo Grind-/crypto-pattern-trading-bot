@@ -323,6 +323,7 @@
           <span id="btn-live-start-label">▶ Live Trading starten</span>
         </button>
         <button id="btn-live-stop" class="btn btn-danger" onclick="stopLive()" disabled>■ Stopp</button>
+        <button id="btn-full-reset" class="btn btn-warning btn-sm" onclick="fullReset()" title="Historie löschen, Binance-Stand neu einlesen, sofort analysieren">🔄 Zurücksetzen</button>
       </div>
     </div>
 
@@ -381,7 +382,6 @@
 
         <div class="trigger-row" style="margin-top:8px">
           <button id="btn-live-trigger" class="btn btn-secondary" onclick="triggerAnalysis()">⚡ Jetzt analysieren</button>
-          <button id="btn-full-reset" class="btn btn-danger btn-sm" onclick="fullReset()" style="display:none" title="Historie löschen, Binance-Stand neu einlesen, sofort analysieren">🔄 Bot zurücksetzen</button>
           <span id="trigger-result" class="trigger-result"></span>
         </div>
 

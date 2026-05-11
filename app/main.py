@@ -1392,11 +1392,19 @@ async def full_reset_bot(request: Request):
     user = _get_current_user(request)
     username = user["username"]
     live_state = _get_live_state(username)
-    if not live_state.get("running"):
-        raise HTTPException(400, "Live Trading ist nicht aktiv")
 
+    # Load API keys: prefer in-memory state, fall back to saved DB state
     bkey = live_state.get("api_key", "")
     bsec = live_state.get("api_secret", "")
+    if not bkey or not bsec:
+        saved = load_live_state(username)
+        if saved:
+            bkey = saved.get("api_key", "")
+            bsec = saved.get("api_secret", "")
+    if not bkey or not bsec:
+        bkey, bsec = get_binance_keys(username)
+    if not bkey:
+        raise HTTPException(400, "Keine Binance API-Keys konfiguriert")
     trader = BinanceTrader(bkey, bsec)
 
     # Fetch fresh Binance balances to compute real starting capital

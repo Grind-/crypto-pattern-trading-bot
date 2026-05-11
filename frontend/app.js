@@ -752,10 +752,6 @@ async function pollLive() {
     ? 'color:#3fb950;border-color:#3fb95044;background:rgba(63,185,80,0.1)'
     : 'color:#8b949e';
 
-  const fullResetBtn = document.getElementById('btn-full-reset');
-  if (fullResetBtn) {
-    fullResetBtn.style.display = state.running ? '' : 'none';
-  }
 
   // Mode-aware UI mutation
   const portfolioMode = state.mode === 'portfolio';
