@@ -30,11 +30,21 @@ class BinanceTrader:
 
     async def get_balances(self) -> Dict[str, float]:
         account = await self.get_account()
-        return {
-            b["asset"]: float(b["free"])
-            for b in account.get("balances", [])
-            if float(b["free"]) > 0
-        }
+        result = {}
+        for b in account.get("balances", []):
+            asset = b["asset"]
+            free = float(b["free"])
+            locked = float(b.get("locked", 0))
+            # Stablecoins: only spendable free amount (locked = open limit-buy orders)
+            if asset in ("USDC", "USDT", "BUSD", "FDUSD"):
+                if free > 0:
+                    result[asset] = free
+            else:
+                # Crypto positions: free + locked (locked = open stop-loss/limit-sell orders)
+                total = free + locked
+                if total > 0:
+                    result[asset] = total
+        return result
 
     async def get_asset_balance(self, asset: str) -> float:
         balances = await self.get_balances()
