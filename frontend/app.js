@@ -564,6 +564,7 @@ async function fullReset() {
       const extra = d.restarted ? ' — Bot gestartet' : '';
       res.textContent = `✓ Zurückgesetzt — $${d.capital.toFixed(2)} USDC, ${d.positions} Position(en)${extra}`;
       res.style.color = 'var(--green)';
+      loadPerformance(true);
     } else {
       res.textContent = '✗ ' + (d.detail || 'Fehler');
       res.style.color = 'var(--red)';

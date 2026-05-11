@@ -942,7 +942,8 @@ def _get_scan_pairs_from_news(held: set) -> tuple[list[str], list[str]]:
     underdogs = [s for s in underdogs if s not in held]
     return top, underdogs
 
-PORTFOLIO_MIN_ORDER_USDC = 10.0
+PORTFOLIO_MIN_ORDER_USDC = 10.0   # minimum for new BUY orders
+PORTFOLIO_MIN_DETECT_USDC = 1.0   # minimum value to recognise an existing position
 
 
 def _count_recent_consecutive_losses(trade_history, symbol=None):
@@ -1429,7 +1430,7 @@ async def full_reset_bot(request: Request):
             except Exception:
                 cur_price = 0.0
             value = float(amt) * cur_price
-            if value < PORTFOLIO_MIN_ORDER_USDC:
+            if value < PORTFOLIO_MIN_DETECT_USDC:
                 continue
             fresh_positions[sym] = {
                 "symbol": sym, "position_qty": float(amt),
@@ -3017,8 +3018,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
             except Exception:
                 cur_price = 0.0
             value = float(amt) * cur_price
-            if value < PORTFOLIO_MIN_ORDER_USDC:
-                _log(live_state, f"↷ {asset}: ${value:.2f} unter Minimum ${PORTFOLIO_MIN_ORDER_USDC} — übersprungen")
+            if value < PORTFOLIO_MIN_DETECT_USDC:
                 continue
             if sym in live_state["portfolio_positions"]:
                 continue
@@ -3120,8 +3120,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                     except Exception:
                         cur_price = 0.0
                     value = float(amt) * cur_price
-                    if value < PORTFOLIO_MIN_ORDER_USDC:
-                        _log(live_state, f"↷ {asset}: ${value:.2f} unter Minimum — übersprungen")
+                    if value < PORTFOLIO_MIN_DETECT_USDC:
                         continue
                     live_state["portfolio_positions"][sym] = {
                         "symbol": sym, "position_qty": float(amt),
