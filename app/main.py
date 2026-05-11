@@ -1386,6 +1386,97 @@ async def reset_live_position(request: Request):
     return {"ok": True, "position": "FLAT"}
 
 
+@app.post("/api/live/full-reset")
+async def full_reset_bot(request: Request):
+    """Clear history + positions, re-fetch Binance state, trigger immediate analysis."""
+    user = _get_current_user(request)
+    username = user["username"]
+    live_state = _get_live_state(username)
+    if not live_state.get("running"):
+        raise HTTPException(400, "Live Trading ist nicht aktiv")
+
+    bkey = live_state.get("api_key", "")
+    bsec = live_state.get("api_secret", "")
+    trader = BinanceTrader(bkey, bsec)
+
+    # Fetch fresh Binance balances to compute real starting capital
+    real_capital = 0.0
+    fresh_positions: dict = {}
+    try:
+        balances = await trader.get_balances()
+        free_usdc = balances.get("USDC", 0.0)
+        # Detect open crypto positions from balance
+        for asset, amt in balances.items():
+            if asset in ("USDC", "USDT", "BUSD", "FDUSD") or float(amt) <= 0:
+                continue
+            sym = f"{asset}USDC"
+            try:
+                sym_exists = await trader.symbol_exists(sym)
+            except Exception:
+                sym_exists = False
+            if not sym_exists:
+                continue
+            try:
+                cur_price = await trader.get_price(sym)
+            except Exception:
+                cur_price = 0.0
+            value = float(amt) * cur_price
+            if value < PORTFOLIO_MIN_ORDER_USDC:
+                continue
+            fresh_positions[sym] = {
+                "symbol": sym, "position_qty": float(amt),
+                "buy_price": cur_price, "current_price": cur_price,
+                "entry_ts": int(time.time() * 1000),
+                "sl_pct": None, "tp_pct": None,
+                "sl_price": None, "tp_price": None,
+                "allocated_usdc": value,
+                "order_id": "reset_detected",
+                "last_signal": "", "last_confidence": 0,
+            }
+        pos_value = sum(
+            float(p["position_qty"]) * float(p["current_price"])
+            for p in fresh_positions.values()
+        )
+        real_capital = round(free_usdc + pos_value, 2)
+    except Exception as e:
+        _log(live_state, f"⚠ Konnte Binance-Balances nicht abrufen: {e}")
+        free_usdc = 0.0
+
+    # Wipe history and rebuild state
+    live_state["trade_history"] = []
+    live_state["portfolio_positions"] = fresh_positions
+    live_state["portfolio_open_count"] = len(fresh_positions)
+    live_state["portfolio_free_usdc"] = free_usdc
+    live_state["current_capital"] = real_capital
+    live_state["trade_amount"] = real_capital
+    live_state["position"] = "FLAT"
+    live_state["position_qty"] = 0
+    live_state["buy_price"] = None
+    live_state["sl_pct"] = None
+    live_state["tp_pct"] = None
+
+    _persist_trade_history(username, live_state)
+    save_live_state(username, {
+        "trade_history": [],
+        "current_capital": real_capital,
+        "trade_amount": real_capital,
+        "portfolio_positions": fresh_positions,
+        "portfolio_free_usdc": free_usdc,
+        "position": "FLAT",
+    })
+    _log(live_state, (
+        f"🔄 Bot vollständig zurückgesetzt — Startkapital ${real_capital:.2f} USDC "
+        f"(frei: ${free_usdc:.2f}, {len(fresh_positions)} Positionen erkannt)"
+    ))
+
+    # Trigger immediate analysis
+    ev = live_state.get("_trigger_event")
+    if ev is not None and not live_state.get("_cycle_running"):
+        ev.set()
+
+    return {"ok": True, "capital": real_capital, "positions": len(fresh_positions)}
+
+
 @app.get("/api/live/credentials")
 async def get_live_credentials(request: Request):
     user = _get_current_user(request)

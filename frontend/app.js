@@ -544,33 +544,34 @@ async function triggerAnalysis() {
   setTimeout(() => { res.textContent = ''; if (btn.disabled) btn.disabled = false; }, 4000);
 }
 
-async function resetPosition() {
-  const msg = _liveMode === 'portfolio'
-    ? 'Alle Portfolio-Positionen intern auf FLAT setzen?\n\nEs wird kein Binance-Order ausgeführt – nur der interne Zustand wird korrigiert.'
-    : 'Position wirklich auf FLAT zurücksetzen?\n\nEs wird kein Binance-Order ausgeführt – nur der interne Zustand wird korrigiert.';
-  if (!confirm(msg)) return;
-  const btn = document.getElementById('btn-reset-position');
+async function fullReset() {
+  if (!confirm(
+    'Bot wirklich komplett zurücksetzen?\n\n' +
+    '• Gesamte Trade-Historie wird gelöscht\n' +
+    '• Aktueller Binance-Stand wird neu eingelesen\n' +
+    '• Sofortige Analyse wird gestartet\n\n' +
+    'Dieser Schritt kann nicht rückgängig gemacht werden.'
+  )) return;
+  const btn = document.getElementById('btn-full-reset');
   const res = document.getElementById('trigger-result');
   btn.disabled = true;
   res.textContent = '…';
   try {
-    const r = await fetch('/api/live/reset-position', {method: 'POST'});
+    const r = await fetch('/api/live/full-reset', {method: 'POST'});
     const d = await r.json();
     if (d.ok) {
-      res.textContent = '✓ Position zurückgesetzt';
+      res.textContent = `✓ Bot zurückgesetzt — $${d.capital.toFixed(2)} USDC, ${d.positions} Position(en) erkannt`;
       res.style.color = 'var(--green)';
-      btn.style.display = 'none';
     } else {
       res.textContent = '✗ ' + (d.detail || 'Fehler');
       res.style.color = 'var(--red)';
-      btn.disabled = false;
     }
   } catch(e) {
     res.textContent = '✗ Fehler';
     res.style.color = 'var(--red)';
-    btn.disabled = false;
   }
-  setTimeout(() => { res.textContent = ''; }, 4000);
+  btn.disabled = false;
+  setTimeout(() => { res.textContent = ''; }, 5000);
 }
 
 let liveNextCheckTs = null;
@@ -751,10 +752,9 @@ async function pollLive() {
     ? 'color:#3fb950;border-color:#3fb95044;background:rgba(63,185,80,0.1)'
     : 'color:#8b949e';
 
-  const resetBtn = document.getElementById('btn-reset-position');
-  if (resetBtn) {
-    const showReset = isInPos || (state.mode === 'portfolio' && state.portfolio_open_count > 0);
-    resetBtn.style.display = showReset ? '' : 'none';
+  const fullResetBtn = document.getElementById('btn-full-reset');
+  if (fullResetBtn) {
+    fullResetBtn.style.display = state.running ? '' : 'none';
   }
 
   // Mode-aware UI mutation
@@ -773,6 +773,11 @@ async function pollLive() {
   const pPosCard = document.getElementById('portfolio-positions-card');
   if (pSumCard) pSumCard.style.display = portfolioMode && state.running ? 'block' : 'none';
   if (pPosCard) pPosCard.style.display = portfolioMode && state.running ? 'block' : 'none';
+  // In portfolio mode, hide trade-amount field and portfolio-info hint
+  const amtFieldSync = document.getElementById('live-amount-field');
+  const infoHintSync = document.getElementById('portfolio-info-hint');
+  if (amtFieldSync) amtFieldSync.style.display = portfolioMode ? 'none' : '';
+  if (infoHintSync) infoHintSync.style.display = portfolioMode ? 'block' : 'none';
   // In portfolio mode, hide the single-pair holdings widget
   const holdRow = document.getElementById('live-holdings-row');
   if (portfolioMode && holdRow) holdRow.style.display = 'none';
@@ -1645,6 +1650,11 @@ async function initPage() {
         _setModeSwitcherDisabled(true);
         const startLbl = document.getElementById('btn-live-start-label');
         if (startLbl) startLbl.textContent = '▶ Portfolio Trading starten';
+        // Hide trade-amount field and show info hint in portfolio mode
+        const amtF = document.getElementById('live-amount-field');
+        if (amtF) amtF.style.display = 'none';
+        const infoH = document.getElementById('portfolio-info-hint');
+        if (infoH) infoH.style.display = 'block';
         // Show portfolio cards immediately on resume
         const psc = document.getElementById('portfolio-summary-card');
         const ppc = document.getElementById('portfolio-positions-card');
