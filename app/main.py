@@ -3229,7 +3229,6 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                     fng = await _fetch_fear_greed()
                     _scan_rounds = [candidates]
                     for _round_idx, _round_cands in enumerate(_scan_rounds):
-                        _slots_before_round = slots_free
                         for cand in _round_cands:
                             if slots_free <= 0: break
                             sym = cand["symbol"]
@@ -3318,9 +3317,8 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             if ok:
                                 slots_free -= 1
 
-                        # After first round: if no buys, scan 10 additional pairs
+                        # After first round: if slots/USDC remain, scan 10 additional pairs
                         if (_round_idx == 0
-                                and slots_free == _slots_before_round
                                 and slots_free > 0
                                 and free_usdc >= PORTFOLIO_MIN_ORDER_USDC):
                             _ext_pairs = _get_extended_scan_pairs(set(all_scan_symbols), held_set)
