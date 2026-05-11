@@ -1477,12 +1477,82 @@ async def full_reset_bot(request: Request):
         f"(frei: ${free_usdc:.2f}, {len(fresh_positions)} Positionen erkannt)"
     ))
 
-    # Trigger immediate analysis
-    ev = live_state.get("_trigger_event")
-    if ev is not None and not live_state.get("_cycle_running"):
-        ev.set()
+    was_running = live_state.get("running", False)
 
-    return {"ok": True, "capital": real_capital, "positions": len(fresh_positions)}
+    if was_running:
+        # Trigger immediate analysis cycle
+        ev = live_state.get("_trigger_event")
+        if ev is not None and not live_state.get("_cycle_running"):
+            ev.set()
+        return {"ok": True, "capital": real_capital, "positions": len(fresh_positions), "restarted": False}
+
+    # Bot was stopped — restart it from saved settings
+    saved = load_live_state(username) or {}
+    saved_mode = (saved.get("strategy_name") or "single").strip()
+    if saved_mode not in ("single", "portfolio"):
+        saved_mode = "single"
+    interval = saved.get("interval") or "1h"
+    req_r = LiveRequest(
+        api_key=bkey, api_secret=bsec,
+        symbol="" if saved_mode == "portfolio" else (saved.get("symbol") or ""),
+        interval=interval,
+        trade_amount_usdt=real_capital if real_capital > 0 else float(saved.get("trade_amount") or 0),
+        compounding_mode=saved.get("compounding_mode", "compound"),
+        analysis_weight=int(saved.get("analysis_weight") or 70),
+        min_confidence=int(saved.get("min_confidence") or 55),
+        min_confidence_sell=int(saved.get("min_confidence_sell") or 40),
+        sl_atr_mult=float(saved.get("sl_atr_mult") or 1.5),
+        tp_atr_mult=float(saved.get("tp_atr_mult") or 2.5),
+        mode=saved_mode,
+        max_per_position=float(saved.get("max_per_position") or 0.0),
+    )
+    api_key_claude, oauth_token = _claude_creds(username)
+    session_token = str(uuid.uuid4())
+    live_state.update({
+        "running": True, "status": "active", "position": "FLAT",
+        "symbol": req_r.symbol, "interval": interval,
+        "trade_amount": req_r.trade_amount_usdt,
+        "current_capital": real_capital if real_capital > 0 else req_r.trade_amount_usdt,
+        "position_qty": 0, "buy_price": None, "sl_pct": None, "tp_pct": None,
+        "compounding_mode": req_r.compounding_mode,
+        "signals": [], "live_candles": [], "candle_count": 0,
+        "api_key": bkey, "api_secret": bsec,
+        "next_check_ts": None, "next_check_str": None,
+        "analysis_weight": req_r.analysis_weight,
+        "min_confidence": req_r.min_confidence,
+        "min_confidence_sell": req_r.min_confidence_sell,
+        "sl_atr_mult": req_r.sl_atr_mult,
+        "tp_atr_mult": req_r.tp_atr_mult,
+        "trade_history": [], "calibrated_thresholds": saved.get("calibrated_thresholds") or {},
+        "mode": saved_mode, "portfolio_positions": {},
+        "portfolio_free_usdc": free_usdc,
+        "max_per_position": req_r.max_per_position,
+        "_session_token": session_token, "_username": username, "_cycle_running": False,
+    })
+    save_live_state(username, {
+        "was_running": True, "api_key": bkey, "api_secret": bsec,
+        "symbol": req_r.symbol, "interval": interval,
+        "trade_amount": req_r.trade_amount_usdt,
+        "current_capital": real_capital if real_capital > 0 else req_r.trade_amount_usdt,
+        "position": "FLAT", "position_qty": 0, "buy_price": None,
+        "compounding_mode": req_r.compounding_mode,
+        "analysis_weight": req_r.analysis_weight,
+        "min_confidence": req_r.min_confidence,
+        "min_confidence_sell": req_r.min_confidence_sell,
+        "sl_atr_mult": req_r.sl_atr_mult,
+        "tp_atr_mult": req_r.tp_atr_mult,
+        "trade_history": [], "calibrated_thresholds": saved.get("calibrated_thresholds") or {},
+        "strategy_name": saved_mode,
+        "max_per_position": req_r.max_per_position,
+        "portfolio_positions": {},
+        "portfolio_free_usdc": free_usdc,
+    })
+    if saved_mode == "portfolio":
+        asyncio.create_task(_portfolio_loop(req_r, username, api_key_claude, oauth_token, session_token))
+    else:
+        asyncio.create_task(_live_loop(req_r, username, api_key_claude, oauth_token, session_token))
+
+    return {"ok": True, "capital": real_capital, "positions": len(fresh_positions), "restarted": True}
 
 
 @app.get("/api/live/credentials")
@@ -2920,55 +2990,64 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
         # ── Startup: reconcile portfolio from Binance balances ─────────────
         is_resume = live_state.pop("_is_resume", False)
         _log(live_state, f"🔍 Portfolio-Modus Startup ({'Resume' if is_resume else 'Frisch'})…")
-        try:
-            balances = await trader.get_balances()
-            detected = 0
-            for asset, amt in balances.items():
-                if asset == "USDC" or amt <= 0:
-                    continue
-                sym = f"{asset}USDC"
-                try:
-                    sym_exists = await trader.symbol_exists(sym)
-                except Exception:
-                    sym_exists = False
-                if not sym_exists:
-                    continue
-                try: cur_price = await trader.get_price(sym)
-                except Exception: cur_price = 0.0
-                value = amt * cur_price
-                if value < PORTFOLIO_MIN_ORDER_USDC:
-                    continue
-                if sym in live_state["portfolio_positions"]:
-                    continue
-                live_state["portfolio_positions"][sym] = {
-                    "symbol": sym, "position_qty": amt,
-                    "buy_price": cur_price, "current_price": cur_price,
-                    "entry_ts": int(time.time() * 1000),
-                    "sl_pct": None, "tp_pct": None,
-                    "sl_price": None, "tp_price": None,
-                    "allocated_usdc": value,
-                    "order_id": "startup_detected",
-                    "last_signal": "", "last_confidence": 0,
-                }
-                _add_synthetic_buy_if_needed(live_state, username, sym, cur_price, amt)
-                detected += 1
-                _log(live_state, f"✓ Erkannt: {amt:.6f} {asset} (~${value:.2f}) — als Position übernommen")
-            _persist_trade_history(username, live_state)
-            free_usdc_start = balances.get("USDC", 0.0)
-            live_state["portfolio_free_usdc"] = free_usdc_start
-            # Compute real starting capital = free USDC + all position values
-            pos_value = sum(
-                float(s.get("position_qty", 0)) * float(s.get("current_price") or s.get("buy_price") or 0)
-                for s in live_state["portfolio_positions"].values()
-            )
-            real_start = round(free_usdc_start + pos_value, 2)
-            if real_start > 0:
-                live_state["trade_amount"] = real_start
-            _log(live_state, f"💰 Startkapital: ${real_start:.2f} USDC (frei: ${free_usdc_start:.2f}, Positionen: ${pos_value:.2f})")
-            if detected == 0:
-                _log(live_state, "Keine bestehenden Positionen erkannt — warte auf Signale")
-        except Exception as e:
-            _log(live_state, f"⚠ Portfolio-Startup-Check fehlgeschlagen: {e}")
+        balances = {}
+        for _attempt in range(3):
+            try:
+                balances = await trader.get_balances()
+                break
+            except Exception as _e_bal:
+                if _attempt < 2:
+                    _log(live_state, f"⚠ Balance-Abruf Versuch {_attempt+1}/3: {_e_bal} — retry in 3s")
+                    await asyncio.sleep(3)
+                else:
+                    _log(live_state, f"⚠ Balance-Abruf nach 3 Versuchen fehlgeschlagen: {_e_bal}")
+        detected = 0
+        for asset, amt in balances.items():
+            if asset in ("USDC", "USDT", "BUSD", "FDUSD") or float(amt) <= 0:
+                continue
+            sym = f"{asset}USDC"
+            try:
+                sym_exists = await trader.symbol_exists(sym)
+            except Exception:
+                sym_exists = False
+            if not sym_exists:
+                continue
+            try:
+                cur_price = await trader.get_price(sym)
+            except Exception:
+                cur_price = 0.0
+            value = float(amt) * cur_price
+            if value < PORTFOLIO_MIN_ORDER_USDC:
+                _log(live_state, f"↷ {asset}: ${value:.2f} unter Minimum ${PORTFOLIO_MIN_ORDER_USDC} — übersprungen")
+                continue
+            if sym in live_state["portfolio_positions"]:
+                continue
+            live_state["portfolio_positions"][sym] = {
+                "symbol": sym, "position_qty": float(amt),
+                "buy_price": cur_price, "current_price": cur_price,
+                "entry_ts": int(time.time() * 1000),
+                "sl_pct": None, "tp_pct": None,
+                "sl_price": None, "tp_price": None,
+                "allocated_usdc": value,
+                "order_id": "startup_detected",
+                "last_signal": "", "last_confidence": 0,
+            }
+            _add_synthetic_buy_if_needed(live_state, username, sym, cur_price, float(amt))
+            detected += 1
+            _log(live_state, f"✓ Erkannt: {float(amt):.6f} {asset} (~${value:.2f}) — als Position übernommen")
+        _persist_trade_history(username, live_state)
+        free_usdc_start = balances.get("USDC", 0.0)
+        live_state["portfolio_free_usdc"] = free_usdc_start
+        pos_value = sum(
+            float(s.get("position_qty", 0)) * float(s.get("current_price") or s.get("buy_price") or 0)
+            for s in live_state["portfolio_positions"].values()
+        )
+        real_start = round(free_usdc_start + pos_value, 2)
+        if real_start > 0:
+            live_state["trade_amount"] = real_start
+        _log(live_state, f"💰 Startkapital: ${real_start:.2f} USDC (frei: ${free_usdc_start:.2f}, Positionen: ${pos_value:.2f})")
+        if detected == 0:
+            _log(live_state, "Keine bestehenden Positionen erkannt — warte auf Signale")
 
         first_run = True
         while _still_active():
@@ -3042,6 +3121,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                         cur_price = 0.0
                     value = float(amt) * cur_price
                     if value < PORTFOLIO_MIN_ORDER_USDC:
+                        _log(live_state, f"↷ {asset}: ${value:.2f} unter Minimum — übersprungen")
                         continue
                     live_state["portfolio_positions"][sym] = {
                         "symbol": sym, "position_qty": float(amt),

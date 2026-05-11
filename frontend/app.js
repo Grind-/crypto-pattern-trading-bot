@@ -561,7 +561,8 @@ async function fullReset() {
     const r = await fetch('/api/live/full-reset', {method: 'POST'});
     const d = await r.json();
     if (d.ok) {
-      res.textContent = `✓ Zurückgesetzt — $${d.capital.toFixed(2)} USDC, ${d.positions} Position(en)`;
+      const extra = d.restarted ? ' — Bot gestartet' : '';
+      res.textContent = `✓ Zurückgesetzt — $${d.capital.toFixed(2)} USDC, ${d.positions} Position(en)${extra}`;
       res.style.color = 'var(--green)';
     } else {
       res.textContent = '✗ ' + (d.detail || 'Fehler');
