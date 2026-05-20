@@ -58,6 +58,10 @@ _AVAILABLE_PAIRS = [
 ]
 _KNOWN_PAIRS = _AVAILABLE_PAIRS  # backward-compat alias
 
+_MIN_GAINER_QUOTE_VOLUME = 500_000.0
+_MIN_GAINER_PCT = 5.0
+_MAX_DYNAMIC_PAIRS = 10
+
 _last_run: float = 0.0
 
 
@@ -156,6 +160,93 @@ async def _fetch_coingecko_trending() -> list[str]:
         return []
 
 
+# ── Binance dynamic pair helpers ─────────────────────────────────────────────
+
+async def _fetch_binance_top_gainers(limit: int = 10) -> list[str]:
+    """
+    Fetch Binance 24h top gainers on USDC pairs.
+    Filters: symbol ends with 'USDC', quoteVolume >= _MIN_GAINER_QUOTE_VOLUME,
+    priceChangePercent >= _MIN_GAINER_PCT. Sorted descending by priceChangePercent.
+    Returns top `limit` symbols. Returns [] on any exception.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+            r = await client.get("https://api.binance.com/api/v3/ticker/24hr")
+            r.raise_for_status()
+        data = r.json()
+        filtered = []
+        for d in data:
+            try:
+                if not d["symbol"].endswith("USDC"):
+                    continue
+                if float(d["quoteVolume"]) < _MIN_GAINER_QUOTE_VOLUME:
+                    continue
+                if float(d["priceChangePercent"]) < _MIN_GAINER_PCT:
+                    continue
+                filtered.append(d)
+            except (KeyError, ValueError, TypeError):
+                continue
+        filtered.sort(key=lambda d: float(d["priceChangePercent"]), reverse=True)
+        return [d["symbol"] for d in filtered[:limit]]
+    except Exception:
+        return []
+
+
+def _parse_coingecko_symbol(formatted: str) -> str | None:
+    """
+    Extract ticker symbol from CoinGecko formatted string like "Name (SYM)".
+    Uses rightmost '(' extraction. Returns uppercase symbol or None.
+    """
+    parts = formatted.rsplit("(", 1)
+    if len(parts) < 2:
+        return None
+    sym = parts[1].rstrip(")").strip().upper()
+    if not sym:
+        return None
+    return sym
+
+
+async def _fetch_binance_usdc_symbol_set() -> set[str]:
+    """
+    Fetch all Binance symbols and return the set of those ending with 'USDC'.
+    Returns set() on any exception.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
+            r = await client.get("https://api.binance.com/api/v3/ticker/price")
+            r.raise_for_status()
+        data = r.json()
+        return {d["symbol"] for d in data if d["symbol"].endswith("USDC")}
+    except Exception:
+        return set()
+
+
+def _resolve_trending_usdc_pairs(
+    trending_names: list[str], usdc_symbols: set[str]
+) -> list[str]:
+    """
+    Convert CoinGecko trending names to Binance USDC pairs, verified against
+    the live Binance symbol set. Filters out pairs already in _AVAILABLE_PAIRS.
+    Deduplicates while preserving order.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in trending_names:
+        sym = _parse_coingecko_symbol(name)
+        if sym is None:
+            continue
+        pair = f"{sym}USDC"
+        if pair not in usdc_symbols:
+            continue
+        if pair in _AVAILABLE_PAIRS:
+            continue
+        if pair in seen:
+            continue
+        seen.add(pair)
+        result.append(pair)
+    return result
+
+
 # ── Intelligence file I/O ─────────────────────────────────────────────────────
 
 def _save_intelligence(data: dict) -> None:
@@ -239,16 +330,40 @@ async def run_news_cycle() -> dict:
         from .news_fetcher import _fetch_fear_greed, _all_headlines, fetch_whale_headlines
 
         # Phase 1: fast structured data
-        fng, headlines, trending, whale = await asyncio.gather(
+        fng, headlines, trending, whale, gainers, usdc_symbols = await asyncio.gather(
             _fetch_fear_greed(),
             _all_headlines(),
             _fetch_coingecko_trending(),
             fetch_whale_headlines(),
+            _fetch_binance_top_gainers(),
+            _fetch_binance_usdc_symbol_set(),
             return_exceptions=True,
         )
 
         # Phase 2: internet research (uses trending coin names for targeted searches)
         trending_names = trending if isinstance(trending, list) else []
+
+        # Resolve dynamic pairs: gainers + trending, capped at _MAX_DYNAMIC_PAIRS
+        gainers_list = gainers if isinstance(gainers, list) else []
+        usdc_syms = usdc_symbols if isinstance(usdc_symbols, set) else set()
+        trending_resolved = _resolve_trending_usdc_pairs(trending_names, usdc_syms)
+
+        # Build dynamic_pairs: gainers first (already filtered), then trending not yet included
+        dynamic_pairs: list[str] = []
+        seen_dynamic: set[str] = set()
+        for p in gainers_list:
+            if p not in _AVAILABLE_PAIRS and p not in seen_dynamic:
+                dynamic_pairs.append(p)
+                seen_dynamic.add(p)
+        for p in trending_resolved:
+            if p not in seen_dynamic:
+                dynamic_pairs.append(p)
+                seen_dynamic.add(p)
+
+        pairs_list_local = list(_AVAILABLE_PAIRS) + [
+            p for p in dynamic_pairs if p not in _AVAILABLE_PAIRS
+        ][:_MAX_DYNAMIC_PAIRS]
+
         research = await _run_web_research(trending_names)
 
         # Format sections
@@ -274,7 +389,7 @@ async def run_news_cycle() -> dict:
         )
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        pairs_list = ", ".join(_KNOWN_PAIRS)
+        pairs_list = ", ".join(pairs_list_local)
 
         prompt = f"""Analyze the current crypto market using the research below and select which pairs to trade RIGHT NOW.
 
@@ -361,6 +476,7 @@ Respond with ONLY raw JSON:
         result["timestamp"] = datetime.now(timezone.utc).isoformat()
         result["trending_coins"] = trending_names
         result["sources_used"] = list(research.keys())
+        result["dynamic_pairs_added"] = [p for p in pairs_list_local if p not in _AVAILABLE_PAIRS]
         _save_intelligence(result)
         _last_run = time.time()
         return result
