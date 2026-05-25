@@ -2103,6 +2103,12 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 "price": buy_price, "timestamp": int(time.time() * 1000),
                 "order_id": str(order.get("orderId", "")), "pnl_pct": None,
             })
+            # Annotate voting context BEFORE persisting so calibration survives restarts
+            for t in reversed(live_state["trade_history"]):
+                if t["type"] == "BUY" and t.get("voting_score") is None:
+                    t["voting_score"]  = live_state.get("_last_buy_voting_score")
+                    t["voting_regime"] = live_state.get("_last_buy_voting_regime")
+                    break
             _persist_trade_history(username, live_state)
             append_trade_log(username, symbol, live_state["trade_history"][-1])
             save_live_state_snapshot(username, symbol, live_state)
@@ -2113,12 +2119,6 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                 "position_qty": bought_qty,
                 "trade_history": live_state.get("trade_history", []),
             })
-            # Annotate the BUY trade record with the voting context for calibration
-            for t in reversed(live_state["trade_history"]):
-                if t["type"] == "BUY" and t.get("voting_score") is None:
-                    t["voting_score"]  = live_state.get("_last_buy_voting_score")
-                    t["voting_regime"] = live_state.get("_last_buy_voting_regime")
-                    break
             _log(live_state, f"✅ KAUF {symbol} — {bought_qty:.6f} @ ${buy_price:,.4f} | Eingesetzt: ${actual_capital:.2f}")
             return True
         except Exception as e:
@@ -2730,6 +2730,26 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                             save_live_state(username, {"calibrated_thresholds": new_thresholds,
                                                        "trade_history": live_state.get("trade_history", [])})
                             _log(live_state, f"📐 Kalibrierung aktualisiert: {new_thresholds}")
+                        # Background: update knowledge base with live trade result
+                        _buy_sig = next((
+                            s for s in reversed(live_state.get("signals", []))
+                            if s.get("action") == "BUY" and s.get("symbol") == position_symbol
+                        ), {})
+                        _live_entry = {
+                            "profitable": _sell_pnl > 0,
+                            "total_return_pct": _sell_pnl,
+                            "win_rate": 100.0 if _sell_pnl > 0 else 0.0,
+                            "num_trades": 1,
+                            "max_drawdown": round(max(0.0, -_sell_pnl), 2),
+                            "patterns_found": [],
+                            "analysis": _buy_sig.get("reason", "")[:500],
+                            "id": f"live_{int(time.time())}",
+                        }
+                        asyncio.create_task(synthesize_learnings(
+                            position_symbol, req.interval, _live_entry,
+                            username=username, api_key=api_key, oauth_token=oauth_token,
+                        ))
+                        _log(live_state, f"🧠 Wissensbasis-Update gestartet ({'gewinn' if _sell_pnl > 0 else 'verlust'}: {_sell_pnl:+.2f}%)")
 
             elif action == "HOLD":
                 _log(live_state, f"→ HALTEN (Konfidenz: {confidence}%, Position: {live_state['position']})")
