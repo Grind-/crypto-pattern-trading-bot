@@ -4,7 +4,7 @@ from typing import Dict, List
 
 def calculate_risk_params(candles: List[Dict], capital: float,
                           regime: str, signals_count_green: int,
-                          sl_atr_mult: float = 1.5,
+                          sl_atr_mult: float = 1.0,
                           tp_atr_mult: float = 2.5,
                           max_sl_pct: float = 10.0) -> Dict:
     atr = candles[-1].get("atr") if candles else None

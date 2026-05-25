@@ -137,8 +137,11 @@ def _user_settings_path(username: str) -> str:
 _SETTINGS_DEFAULTS: dict = {
     "live_interval": "4h",
     "live_amount": 50,
-    "live_compounding_mode": "compound",
+    "live_compounding_mode": "fixed",
     "live_analysis_weight": 30,
+    "live_min_confidence": 70,
+    "live_sl_mult": 1.0,
+    "live_cooldown_candles": 2,
     "sim_symbol": "BTCUSDC",
     "sim_interval": "4h",
     "sim_days": 30,

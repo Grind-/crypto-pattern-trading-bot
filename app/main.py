@@ -489,17 +489,17 @@ class LiveRequest(BaseModel):
     symbol: str = ""          # empty = agent decides on startup
     interval: str = "4h"
     trade_amount_usdt: float = 50.0
-    compounding_mode: str = "compound"   # "fixed" | "compound" | "compound_wins"
+    compounding_mode: str = "fixed"      # "fixed" | "compound" | "compound_wins"
     analysis_weight: int = 70            # 0=pure KB, 100=pure market analysis
-    min_confidence: int = 55             # minimum Claude confidence % to act on BUY
+    min_confidence: int = 70             # minimum Claude confidence % to act on BUY
     min_confidence_sell: int = 40        # minimum Claude confidence % to act on SELL
-    sl_atr_mult: float = 1.5             # stop-loss = sl_atr_mult × ATR
+    sl_atr_mult: float = 1.0             # stop-loss = sl_atr_mult × ATR
     tp_atr_mult: float = 2.5             # take-profit = tp_atr_mult × ATR
     mode: str = "single"                 # "single" | "portfolio"
     max_per_position: float = 0.0        # 0 = no per-position cap
     trailing_stop: bool = False
     trailing_activate_pct: float = 1.0
-    cooldown_candles: int = 0
+    cooldown_candles: int = 2
     max_consecutive_losses: int = 0
     halt_candles: int = 4
     min_hold_candles: int = 0
@@ -866,26 +866,14 @@ async def news_refresh(request: Request):
 # ── Market scanner ─────────────────────────────────────────────────────────────
 
 # Fallback scan list used only when News Agent intelligence is unavailable
-_SCAN_FALLBACK_TOP = [
-    "BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "XRPUSDC",
-    "ADAUSDC", "AVAXUSDC", "DOGEUSDC", "LINKUSDC", "UNIUSDC",
-]
-_SCAN_FALLBACK_UNDERDOGS = [
-    "NEARUSDC", "INJUSDC", "APTUSDC", "SUIUSDC", "TIAUSDC",
-    "SEIUSDC", "JUPUSDC", "PYTHUSDC", "WIFUSDC", "ENAUSDC",
-]
+_SCAN_FALLBACK_TOP = ["BTCUSDC", "ETHUSDC", "SOLUSDC", "BNBUSDC", "XRPUSDC", "LINKUSDC", "AVAXUSDC", "ADAUSDC"]
+_SCAN_FALLBACK_UNDERDOGS = []
 # Keep SCAN_SYMBOLS as alias so existing references (e.g. log messages) still work
 SCAN_SYMBOLS = _SCAN_FALLBACK_TOP
 
 # Extended pool for second-round scan (pairs not in primary scan)
-_SCAN_EXTENDED_TOP = [
-    "DOTUSDC", "LTCUSDC", "MATICUSDC", "ARBUSDC", "OPUSDC",
-    "ATOMUSDC", "AAVEUSDC", "LDOUSDC", "ONDOUSDC", "FTMUSDC",
-]
-_SCAN_EXTENDED_UNDERDOGS = [
-    "EIGENUSDC", "JUPUSDC", "WUSDC", "TAOUSDC", "RENDERUSDC",
-    "FETUSDC", "AGIXUSDC", "OCEANUSDC", "AKASHUSDC", "IOTAUSDC",
-]
+_SCAN_EXTENDED_TOP = []
+_SCAN_EXTENDED_UNDERDOGS = []
 
 
 def _get_extended_scan_pairs(already_scanned: set, held: set) -> tuple[list[str], list[str]]:
@@ -979,7 +967,7 @@ def _register_sell_outcome(live_state, symbol, pnl_pct, was_sl, interval_seconds
                            log_fn=None):
     """Update cooldown and halt state after a sell. log_fn is optional callable(state, msg)."""
     now_ts = time.time()
-    if was_sl and req.cooldown_candles > 0:
+    if pnl_pct < 0 and req.cooldown_candles > 0:
         live_state.setdefault("cooldowns", {})[symbol] = (
             now_ts + req.cooldown_candles * interval_seconds
         )
@@ -2619,6 +2607,17 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     action = "HOLD"
                     _d_overrides.append("BUY blockiert: HIGH_VOLATILITY-Regime")
                     _log(live_state, "🚫 BUY blockiert: HIGH_VOLATILITY")
+                # BEAR_TREND hard veto
+                if regime_str == "BEAR_TREND" and action == "BUY":
+                    action = "HOLD"
+                    _d_overrides.append("BUY blockiert: BEAR_TREND-Regime")
+                    _log(live_state, "🚫 BUY blockiert: BEAR_TREND-Regime")
+                # Low volume hard veto
+                _vol_x = (enriched[-1].get("volume_ratio") or 1.0) if enriched else 1.0
+                if action == "BUY" and _vol_x < 0.5:
+                    action = "HOLD"
+                    _d_overrides.append(f"BUY blockiert: vol_x={_vol_x:.2f} < 0.5")
+                    _log(live_state, f"🚫 BUY blockiert: Volumen zu niedrig (vol_x={_vol_x:.2f})")
                 if news_veto and action == "BUY":
                     action = "HOLD"
                     _d_overrides.append("BUY blockiert: News-Veto")
@@ -3453,6 +3452,15 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             news_score = get_news_score_for_symbol(sym)
                             if regime.get("regime") == "HIGH_VOLATILITY":
                                 _log(live_state, f"⏭ {sym}: HIGH_VOLATILITY — übersprungen")
+                                continue
+                            # BEAR_TREND skip in portfolio scan
+                            if regime.get("regime") == "BEAR_TREND":
+                                _log(live_state, f"⏭ {sym}: BEAR_TREND — kein neuer Kauf")
+                                continue
+                            # Low volume skip in portfolio scan
+                            _vol_x_p = (enriched[-1].get("volume_ratio") or 1.0) if enriched else 1.0
+                            if _vol_x_p < 0.5:
+                                _log(live_state, f"⏭ {sym}: vol_x={_vol_x_p:.2f} — Volumen zu niedrig, kein Kauf")
                                 continue
                             if news_score.get("veto"):
                                 _log(live_state, f"⏭ {sym}: News-Veto — übersprungen")
