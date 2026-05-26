@@ -309,6 +309,7 @@ async def get_live_signal(
     news_score: Optional[Dict] = None,
     portfolio_context: Optional[str] = None,
     min_confidence: int = 55,
+    is_opportunistic: bool = False,
 ) -> Dict:
     analysis_weight = max(0, min(100, int(analysis_weight)))
 
@@ -433,10 +434,19 @@ async def get_live_signal(
     if portfolio_context:
         portfolio_rebalancing_block = f"PORTFOLIO REBALANCING:\n{portfolio_context}\n\n"
 
+    opportunistic_note = ""
+    if is_opportunistic:
+        opportunistic_note = (
+            f"⚠ OPPORTUNISTISCHES PAIR: {symbol} ist KEIN Core-Pair (nicht in den 8 Qualitätstiteln). "
+            f"Dies ist ein höher-riskanter Altcoin/Newcomer. "
+            f"Signalisiere BUY nur mit starker Multi-Indikator-Überzeugung — "
+            f"sei deutlich kritischer als bei einem Core-Pair.\n\n"
+        )
+
     prompt = f"""You are a live cryptocurrency trading AI. Respond with valid raw JSON only.
 
 Analyze {symbol} {interval} data and give ONE trading signal.
-{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}{trade_block}{portfolio_rebalancing_block}CURRENT PRICE: ${current_price:.2f}
+{opportunistic_note}{knowledge_block}{news_block}{strategy_block}{regime_block}{news_extra}{history_block}{trade_block}{portfolio_rebalancing_block}CURRENT PRICE: ${current_price:.2f}
 CURRENT POSITION: {current_position} (IN_POSITION = SELL, PARTIAL_SELL or HOLD; FLAT = only BUY or HOLD)
 
 RECENT DATA (last {len(candles)} candles):

@@ -424,7 +424,7 @@ Your task:
    - "top": 8 mainstream pairs that are most favored RIGHT NOW based on news, trends and momentum.
      Do NOT always pick the same large-caps — rotate based on what the market is actually talking about.
      If BTC/ETH have no catalyst today but SOL/XRP do, reflect that.
-   - "underdogs": exactly 2 lesser-known pairs with an emerging catalyst, starting trend, or surprising
+   - "underdogs": 2–4 lesser-known pairs with an emerging catalyst, starting trend, or surprising
      news mention. These should be coins that a typical trader would overlook today.
    Both lists must only contain pairs from AVAILABLE BINANCE USDC PAIRS.
 

@@ -866,13 +866,21 @@ async def news_refresh(request: Request):
 # ── Market scanner ─────────────────────────────────────────────────────────────
 
 # Fallback scan list used only when News Agent intelligence is unavailable
-_SCAN_FALLBACK_TOP = ["BTCUSDC", "ETHUSDC", "SOLUSDC", "BNBUSDC", "XRPUSDC", "LINKUSDC", "AVAXUSDC", "ADAUSDC"]
-_SCAN_FALLBACK_UNDERDOGS = []
+_CORE_PAIRS = {
+    "BTCUSDC", "ETHUSDC", "SOLUSDC", "BNBUSDC",
+    "XRPUSDC", "LINKUSDC", "AVAXUSDC", "ADAUSDC",
+}
+_SCAN_FALLBACK_TOP      = list(_CORE_PAIRS)
+_SCAN_FALLBACK_UNDERDOGS = [
+    "DOTUSDC", "ATOMUSDC", "INJUSDC", "SUIUSDC", "APTUSDC",
+    "NEARUSDC", "OPUSDC", "ARBUSDC", "LDOUSDC", "RENDERUSDC",
+    "FETUSDC", "TAOUSDC", "ONDOUSDC", "UNIUSDC", "AAVEUSDC",
+]
 # Keep SCAN_SYMBOLS as alias so existing references (e.g. log messages) still work
 SCAN_SYMBOLS = _SCAN_FALLBACK_TOP
 
 # Extended pool for second-round scan (pairs not in primary scan)
-_SCAN_EXTENDED_TOP = []
+_SCAN_EXTENDED_TOP       = []
 _SCAN_EXTENDED_UNDERDOGS = []
 
 
@@ -990,6 +998,26 @@ def _portfolio_allocation_pct(confidence: int) -> float:
     if confidence >= 70: return 0.30
     if confidence >= 55: return 0.20
     return 0.0  # below min_confidence threshold; should not happen in caller
+
+
+def _is_opportunistic(symbol: str) -> bool:
+    return symbol.upper() not in _CORE_PAIRS
+
+def _count_opportunistic_positions(live_state: dict) -> int:
+    slots = live_state.get("portfolio_positions") or {}
+    return sum(1 for sym in slots if _is_opportunistic(sym))
+
+def _check_opportunistic_gates(
+    sym: str, confidence: int, min_buy: int, vol_x: float, live_state: dict
+) -> tuple:
+    """Returns (allowed, reason). Only call for opportunistic symbols."""
+    if _count_opportunistic_positions(live_state) >= 1:
+        return False, f"bereits 1 opportunistische Position offen"
+    if vol_x < 0.8:
+        return False, f"vol_x={vol_x:.2f} < 0.8 (opportunistisches Minimum)"
+    if confidence < min_buy + 10:
+        return False, f"Konfidenz {confidence}% < {min_buy + 10}% (Opportunistic-Schwelle)"
+    return True, ""
 
 
 async def _fetch_scan_summaries(interval: str, symbols: list = None) -> list:
@@ -3492,6 +3520,16 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                 _log(live_state, f"🚫 {sym}: BUY blockiert: {_why}")
                                 continue
 
+                            # Opportunistic fast-fail (slot + volume) BEFORE Claude call
+                            if _is_opportunistic(sym):
+                                _opp_vol = (enriched[-1].get("volume_ratio") or 0.0) if enriched else 0.0
+                                if _count_opportunistic_positions(live_state) >= 1:
+                                    _log(live_state, f"⏭ {sym}: opportunistisch — bereits 1 Altcoin-Position offen")
+                                    continue
+                                if _opp_vol < 0.8:
+                                    _log(live_state, f"⏭ {sym}: opportunistisch — vol_x={_opp_vol:.2f} < 0.8")
+                                    continue
+
                             sym_history = [t for t in live_state.get("trade_history", [])
                                            if t.get("symbol") == sym or not t.get("symbol")]
                             signal = await get_live_signal(
@@ -3502,15 +3540,20 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                                 api_key=api_key, oauth_token=oauth_token,
                                 regime=regime, news_score=news_score,
                                 min_confidence=min_buy,
+                                is_opportunistic=_is_opportunistic(sym),
                             )
                             action     = signal.get("action", "HOLD")
                             confidence = signal.get("confidence", 0)
                             reason_str = signal.get("reason", "")[:100]
-                            if action != "BUY" or confidence < min_buy:
-                                if action != "BUY":
+                            _is_opp = _is_opportunistic(sym)
+                            _eff_min = (min_buy + 10) if _is_opp else min_buy
+                            if action != "BUY" or confidence < _eff_min:
+                                if action == "BUY" and _is_opp and confidence >= min_buy and confidence < _eff_min:
+                                    _log(live_state, f"⏭ {sym}: BUY {confidence}% < opportunistische Schwelle {_eff_min}%")
+                                elif action != "BUY":
                                     _log(live_state, f"⏭ {sym}: {action} ({confidence}%) — {reason_str}")
                                 else:
-                                    _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {min_buy}% — {reason_str}")
+                                    _log(live_state, f"⏭ {sym}: BUY {confidence}% unter Min {_eff_min}% — {reason_str}")
                                 continue
 
                             # Confidence-tier sizing
@@ -3518,6 +3561,10 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             sized = round(free_usdc * tier_pct, 2)
                             if req.max_per_position and req.max_per_position > 0:
                                 sized = min(sized, req.max_per_position)
+                            if _is_opportunistic(sym):
+                                sized = sized * 0.5
+                                _log(live_state, f"  → Opportunistisch: Positionsgröße halbiert → ${sized:.2f}")
+                            sized = round(sized, 2)
                             if sized < PORTFOLIO_MIN_ORDER_USDC:
                                 _log(live_state, f"⏭ {sym}: sized {sized:.2f} < ${PORTFOLIO_MIN_ORDER_USDC} — kein Kauf")
                                 continue
