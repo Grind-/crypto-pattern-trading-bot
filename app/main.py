@@ -2640,8 +2640,8 @@ async def _live_loop(req: LiveRequest, username: str, api_key: Optional[str],
                     action = "HOLD"
                     _d_overrides.append("BUY blockiert: BEAR_TREND-Regime")
                     _log(live_state, "🚫 BUY blockiert: BEAR_TREND-Regime")
-                # Low volume hard veto
-                _vol_x = (enriched[-1].get("volume_ratio") or 1.0) if enriched else 1.0
+                # Low volume hard veto — use last *completed* candle ([-2]), not current open candle
+                _vol_x = (enriched[-2].get("volume_ratio") if len(enriched) >= 2 else enriched[-1].get("volume_ratio") or 1.0) if enriched else 1.0
                 if action == "BUY" and _vol_x < 0.5:
                     action = "HOLD"
                     _d_overrides.append(f"BUY blockiert: vol_x={_vol_x:.2f} < 0.5")
@@ -3505,8 +3505,8 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
                             if regime.get("regime") == "BEAR_TREND":
                                 _log(live_state, f"⏭ {sym}: BEAR_TREND — kein neuer Kauf")
                                 continue
-                            # Low volume skip in portfolio scan
-                            _vol_x_p = (enriched[-1].get("volume_ratio") or 1.0) if enriched else 1.0
+                            # Low volume skip — use last *completed* candle ([-2]), not current open candle
+                            _vol_x_p = (enriched[-2].get("volume_ratio") if len(enriched) >= 2 else enriched[-1].get("volume_ratio") or 1.0) if enriched else 1.0
                             if _vol_x_p < 0.5:
                                 _log(live_state, f"⏭ {sym}: vol_x={_vol_x_p:.2f} — Volumen zu niedrig, kein Kauf")
                                 continue
@@ -3522,7 +3522,7 @@ async def _portfolio_loop(req: LiveRequest, username: str, api_key: Optional[str
 
                             # Opportunistic fast-fail (slot + volume) BEFORE Claude call
                             if _is_opportunistic(sym):
-                                _opp_vol = (enriched[-1].get("volume_ratio") or 0.0) if enriched else 0.0
+                                _opp_vol = (enriched[-2].get("volume_ratio") if len(enriched) >= 2 else enriched[-1].get("volume_ratio") or 0.0) if enriched else 0.0
                                 if _count_opportunistic_positions(live_state) >= 1:
                                     _log(live_state, f"⏭ {sym}: opportunistisch — bereits 1 Altcoin-Position offen")
                                     continue
